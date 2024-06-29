@@ -41,12 +41,13 @@ atomic_expression = { column | literal | variable | "(" ~ s* ~ expression ~ s* ~
 
 alias = @{ "<" ~ ident ~ ">" }
 target = @{ ident ~ alias? }
-
+inner_join = @{ "><" }
 left_join = @{ "<-" }
 right_join = @{ "->" }
 full_outer_join = @{ "<->" }
 cross_join = @{ "*" }
-join_type = { left_join | right_join | full_outer_join | cross_join }
+
+join_type = { inner_join | left_join | right_join | full_outer_join | cross_join }
 join_expr = { join_type ~ s* ~ target ~ s* ~ "," ~ s* ~ expression }
 from_expr = { target ~ s* ~ join_expr* }
 from_clause = { "from" ~ s* ~ "(" ~ s* ~ from_expr ~ s* ~ ")" }

@@ -24,6 +24,7 @@ pub struct FromExpr {
 
 #[derive(Debug)]
 pub enum JoinType {
+    Inner,
     Left,
     Right,
     FullOuter,

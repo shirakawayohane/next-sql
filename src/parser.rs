@@ -138,6 +138,7 @@ fn parse_target(pairs: pest::iterators::Pairs<Rule>) -> crate::ast::Target {
 fn parse_join_expr(pairs: pest::iterators::Pairs<Rule>) -> crate::ast::JoinExpr {
     let mut pairs = pairs.peekable();
     let join_type = match pairs.next().unwrap().as_rule() {
+        Rule::inner_join => crate::ast::JoinType::Inner,
         Rule::left_join => crate::ast::JoinType::Left,
         Rule::right_join => crate::ast::JoinType::Right,
         Rule::full_outer_join => crate::ast::JoinType::FullOuter,
