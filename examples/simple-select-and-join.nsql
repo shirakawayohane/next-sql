@@ -1,8 +1,8 @@
 query findUserById($id: uuid) {
   from(
        users<u>
-    <- profiles<p>, u.id = p.user_id
+    <- profiles<p>, u.id == p.user_id
   )
-  where(users.id = $id)
+  where(users.id == $id)
   select(*)
 }
