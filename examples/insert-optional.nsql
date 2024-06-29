@@ -1,0 +1,8 @@
+mutation insertUser($name: string, $email: String, $profile: String?) {
+  insert(users)
+  value({
+    name: $name,
+    email: $email,
+    profile: $profile
+  })
+}

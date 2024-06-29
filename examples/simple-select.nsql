@@ -1,0 +1,5 @@
+query findUserById($id: uuid) {
+  from(users)
+  where(users.id = $id)
+  select(users.*)
+}
