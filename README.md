@@ -17,7 +17,7 @@ Our goal is to create a secure, modern, and readable SQL-compatible language. Wi
 3. **Support Complex Queries**: Enable the creation of complex queries with ease, including joins, subqueries, and more, with expressiveness comparable to SQL, as much as possible.
 4. **Multi-language Support**: Ensure that nsql can be ported to various programming languages and databases, allowing developers to utilize nsql in different environments, to make the knowledge of nsql applicable everywhere.
 
-# Loadmap
+# Roadmap
 - parsing mutation
   - insert
   - update
