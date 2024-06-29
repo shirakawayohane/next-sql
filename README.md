@@ -1,4 +1,9 @@
-## Project Overview
+<div align="center">
+  <img src="https://github.com/shirakawayohane/next-sql/assets/7351910/4e6e7e61-8dc8-4e5f-b9c1-97b28de5a1e5" width="200" />
+</div>
+A TypeSafe, modern query language compatible with SQL, designed for building applications across various environments.
+
+# Project Overview
 
 Welcome to the nsql project! 🚀
 
