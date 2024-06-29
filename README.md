@@ -8,6 +8,7 @@ An altSQL offers a more sophisticated syntax with type safety and a modern persp
 2. **Enhance Readability**: Improve the readability and maintainability of SQL queries.
 3. **Support Complex Queries**: Enable the creation of complex queries with ease, including joins, subqueries, and more, with expressiveness comparable to SQL, as much as possible.
 4. **Multi-language Support**: Ensure that nsql can be ported to various programming languages and databases, allowing developers to utilize nsql in different environments, to make the knowledge of nsql applicable everywhere.
+5. **Design for IDE Autocompletion**: Prioritize design that facilitates autocompletion in IDEs.
 
 # Contributing
 We are still in the early stages, but we welcome contributions.
