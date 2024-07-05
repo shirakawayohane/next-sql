@@ -23,6 +23,7 @@ unequal = @{ "!=" }
 and = @{ "&&" }
 or = @{ "||" }
 not = @{ "!" }
+dot = _{ "." }
 
 number_seq = _{ ASCII_DIGIT+ }
 numeric_literal = @{ number_seq ~ ("." ~ number_seq+)? }
@@ -52,8 +53,8 @@ join_expr = { join_type ~ s* ~ target ~ s* ~ "," ~ s* ~ expression }
 from_expr = { target ~ s* ~ join_expr* }
 from_clause = { "from" ~ s* ~ "(" ~ s* ~ from_expr ~ s* ~ ")" }
 
-where_clause = { "where" ~ s* ~ expression }
-select_clause = { "select" ~ s* ~ "(" ~ s* ~ expression ~ (s* ~ "," ~ s* ~ expression)* ~ s* ~ ")" }
+where_clause = { dot ~ s* ~ "where" ~ s* ~ expression }
+select_clause = { dot ~ s* ~ "select" ~ s* ~ "(" ~ s* ~ expression ~ (s* ~ "," ~ s* ~ expression)* ~ s* ~ ")" }
 
 builtin_type = { "i16" | "i32" | "i64" | "f32" | "f64" | "timestamp" | "timestamptz" | "date" | "uuid" | "string" | "bool" }
 type = @{ builtin_type }

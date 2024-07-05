@@ -1,10 +1,10 @@
 with amountByProducts = {
   from(transaction<t>)
-  groupBy(t.product_id)
-  aggregate(
+  .groupBy(t.product_id)
+  .aggregate(
     total_amounts: SUM(t.amounts)
   )
-  select(t.product_id, total_amounts)
+  .select(t.product_id, total_amounts)
 }
 
 query aggregateResult {
@@ -12,6 +12,6 @@ query aggregateResult {
        orderByProducts<o>
     >< products<p>, o.product_id = p.id
   )
-  select(name, total_sales: p.price * o.total_amounts)
-  orderBy(total_sales)
+  .select(name, total_sales: p.price * o.total_amounts)
+  .orderBy(total_sales)
 }
