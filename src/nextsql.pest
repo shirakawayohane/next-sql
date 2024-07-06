@@ -1,5 +1,5 @@
-s = _{ " " | "\t" | "\n" | "\r" }
-
+WHITESPACE = _{ " " | "\t" | "\n" | "\r" }
+s = _{ WHITESPACE }
 COMMENT = _{ ("/*" ~ (!"*/" ~ ANY)* ~ "*/") | ("//" ~ (!("\r\n" | "\n") ~ ANY)*) }
 bool_true = @{ "true" }
 bool_false = @{ "false" }
@@ -32,13 +32,13 @@ boolean_literal = @{ bool_false | bool_true }
 literal = @{ numeric_literal | string_literal | boolean_literal }
 variable = @{ "$" ~ ident }
 expression = { logical_expression }
-logical_expression = { equality_expression ~ s* ~ ((and | or) ~ s* ~ equality_expression)* }
-equality_expression = { relational_expression ~ s* ~ ((equal | unequal) ~ s* ~ relational_expression)* }
-relational_expression = { additive_expression ~ s* ~ ((le | ge | lt | gt) ~ s* ~ additive_expression)* }
-additive_expression = { multiplicative_expression ~ s* ~ ((add | subtract) ~ s* ~ multiplicative_expression)* }
-multiplicative_expression = { unary_expression ~ s* ~ ((multiply | divide | rem) ~ s* ~ unary_expression)* }
-unary_expression = { (not ~ s* ~ atomic_expression) | atomic_expression }
-atomic_expression = { column | literal | variable | "(" ~ s* ~ expression ~ s* ~ ")" }
+logical_expression = { equality_expression ~ ((and | or) ~ equality_expression)* }
+equality_expression = { relational_expression ~ ((equal | unequal) ~ relational_expression)* }
+relational_expression = { additive_expression ~ ((le | ge | lt | gt) ~ additive_expression)* }
+additive_expression = { multiplicative_expression ~ ((add | subtract) ~ multiplicative_expression)* }
+multiplicative_expression = { unary_expression ~ ((multiply | divide | rem) ~ unary_expression)* }
+unary_expression = { (not ~ atomic_expression) | atomic_expression }
+atomic_expression = { column | literal | variable | "(" ~ expression ~ ")" }
 
 alias = @{ "<" ~ ident ~ ">" }
 target = @{ ident ~ alias? }
@@ -49,19 +49,19 @@ full_outer_join = @{ "<->" }
 cross_join = @{ "*" }
 
 join_type = { inner_join | left_join | right_join | full_outer_join | cross_join }
-join_expr = { join_type ~ s* ~ target ~ s* ~ "," ~ s* ~ expression }
-from_expr = { target ~ s* ~ join_expr* }
-from_clause = { "from" ~ s* ~ "(" ~ s* ~ from_expr ~ s* ~ ")" }
+join_expr = { join_type ~ target ~ "," ~ expression }
+from_expr = { target ~ join_expr* }
+from_clause = { "from" ~ "(" ~ from_expr ~ ")" }
 
-where_clause = { dot ~ s* ~ "where" ~ s* ~ expression }
-select_clause = { dot ~ s* ~ "select" ~ s* ~ "(" ~ s* ~ expression ~ (s* ~ "," ~ s* ~ expression)* ~ s* ~ ")" }
+where_clause = { dot ~ "where" ~ expression }
+select_clause = { dot ~ "select" ~ "(" ~ expression ~ (s* ~ "," ~ expression)* ~ ")" }
 
 builtin_type = { "i16" | "i32" | "i64" | "f32" | "f64" | "timestamp" | "timestamptz" | "date" | "uuid" | "string" | "bool" }
 type = @{ builtin_type }
-argument = { variable ~ s* ~ ":" ~ s* ~ type }
-argument_list = !{ "(" ~ s* ~ ")" | "(" ~ s* ~ argument ~ (s* ~ "," ~ s* ~ argument)* ~ s* ~ ")" }
-query_body = ${ "{" ~ s* ~ from_clause ~ s* ~ where_clause? ~ s* ~ select_clause ~ s* ~ "}" }
-query_decl = ${ "query" ~ s+ ~ ident ~ s* ~ argument_list? }
-query = { query_decl ~ s* ~ query_body }
+argument = { variable ~ ":" ~ type }
+argument_list = { "(" ~ ")" | "(" ~ argument ~ (s* ~ "," ~ argument)* ~ ")" }
+query_body = { "{" ~ from_clause ~ where_clause? ~ select_clause ~ "}" }
+query_decl = { "query" ~ ident ~ argument_list? }
+query = { query_decl ~ query_body }
 
-module = { SOI ~ (s* ~ query ~ s*)* ~ EOI }
+module = { SOI ~ query ~ EOI }
