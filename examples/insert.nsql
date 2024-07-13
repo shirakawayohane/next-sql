@@ -1,4 +1,4 @@
-mutation insertUser($name: string, $email: String) {
+mutation insertUser($name: string, $email: string) {
   insert(users)
   .value({
     name: $name,

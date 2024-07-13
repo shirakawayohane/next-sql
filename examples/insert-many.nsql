@@ -1,5 +1,5 @@
-mutation insertManyUser($news: [Insertable<User>]) {
+mutation insertManyUser {
   insert(users)
-  .values($news)
+  .values([{ name: "Ichiro" }, { name: "Otani" }])
   .returning(*)
 }

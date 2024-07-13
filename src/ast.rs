@@ -1,28 +1,29 @@
-#[derive(Debug)]
+use std::{collections::HashMap, fmt::Display};
+
+#[derive(Debug, PartialEq)]
+pub enum TopLevel {
+    Query(Query),
+    Mutation(Mutation),
+}
+
+#[derive(Debug, PartialEq)]
 pub struct Module {
-    pub queries: Vec<Query>,
+    pub toplevels: Vec<TopLevel>,
 }
 
-#[derive(Debug)]
-pub struct QueryBody {
-    pub from: FromExpr,
-    pub where_clause: Option<Expression>,
-    pub select: Vec<Expression>,
-}
-
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct Target {
     pub name: String,
     pub alias: Option<String>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct FromExpr {
     pub target: Target,
     pub joins: Vec<JoinExpr>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum JoinType {
     Inner,
     Left,
@@ -31,112 +32,90 @@ pub enum JoinType {
     Cross,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct JoinExpr {
     pub join_type: JoinType,
     pub target: Target,
     pub condition: Expression,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Expression {
-    Logical {
+    Binary {
         left: Box<Expression>,
-        op: LogicalOp,
-        right: Box<Expression>,
-    },
-    Equality {
-        left: Box<Expression>,
-        op: EqualityOp,
-        right: Box<Expression>,
-    },
-    Relational {
-        left: Box<Expression>,
-        op: RelationalOp,
-        right: Box<Expression>,
-    },
-    Additive {
-        left: Box<Expression>,
-        op: AdditiveOp,
-        right: Box<Expression>,
-    },
-    Multiplicative {
-        left: Box<Expression>,
-        op: MultiplicativeOp,
+        op: BinaryOp,
         right: Box<Expression>,
     },
     Unary {
         op: UnaryOp,
         expr: Box<Expression>,
     },
-    Primary(PrimaryExpression),
+    Atomic(AtomicExpression),
 }
 
-#[derive(Debug)]
-pub enum LogicalOp {
+#[derive(Debug, PartialEq)]
+pub enum BinaryOp {
+    // 論理演算子
     And,
     Or,
-}
-
-#[derive(Debug)]
-pub enum EqualityOp {
+    // 等価演算子
     Equal,
     Unequal,
-}
-
-#[derive(Debug)]
-pub enum RelationalOp {
+    // 関係演算子
     LessThan,
     LessThanOrEqual,
     GreaterThan,
     GreaterThanOrEqual,
-}
-
-#[derive(Debug)]
-pub enum AdditiveOp {
+    // 加算演算子
     Add,
     Subtract,
-}
-
-#[derive(Debug)]
-pub enum MultiplicativeOp {
+    // 乗算演算子
     Multiply,
     Divide,
     Remainder,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum UnaryOp {
     Not,
 }
 
-#[derive(Debug)]
-pub enum PrimaryExpression {
+#[derive(Debug, PartialEq)]
+pub enum AtomicExpression {
     Column(Column),
     Literal(Literal),
     Variable(Variable),
+    Array(ArrayExpression),
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Column {
-    Single(String, String),
+    ImplicitTarget(String),
+    ExplicitTarget(String, String),
     WildcardOf(String),
     Wildcard,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Literal {
     Numeric(f64),
     String(String),
     Boolean(bool),
+    Object(ObjectLiteralExpression),
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
+pub struct ArrayExpression(pub Vec<Expression>);
+
+#[derive(Debug, PartialEq)]
 pub struct Variable {
     pub name: String,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
+pub struct ObjectLiteralExpression(pub HashMap<String, Expression>);
+
+#[derive(Debug, PartialEq)]
 pub enum BuiltInType {
     I16,
     I32,
@@ -151,25 +130,105 @@ pub enum BuiltInType {
     Bool,
 }
 
-#[derive(Debug)]
-pub enum Type {
-    BuiltIn(BuiltInType),
+#[derive(Debug, PartialEq)]
+pub struct Insertable(pub Box<Type>);
+
+#[derive(Debug, PartialEq)]
+pub enum UtilityType {
+    Insertable(Insertable),
 }
 
-#[derive(Debug)]
+impl Display for BuiltInType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                BuiltInType::I16 => "i16",
+                BuiltInType::I32 => "i32",
+                BuiltInType::I64 => "i64",
+                BuiltInType::F32 => "f32",
+                BuiltInType::F64 => "f64",
+                BuiltInType::Timestamp => "timestamp",
+                BuiltInType::Timestamptz => "timestamptz",
+                BuiltInType::Date => "date",
+                BuiltInType::Uuid => "uuid",
+                BuiltInType::String => "string",
+                BuiltInType::Bool => "bool",
+            }
+        )
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub enum Type {
+    BuiltIn(BuiltInType),
+    Utility(UtilityType),
+    Optional(Box<Type>),
+    Array(Box<Type>),
+    UserDefined(String),
+}
+
+impl Display for Type {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                Type::BuiltIn(b) => b.to_string(),
+                Type::Optional(t) => format!("{}?", t),
+                Type::Utility(u) => {
+                    match u {
+                        UtilityType::Insertable(t) => format!("Insertable<{}>", t.0),
+                    }
+                }
+                Type::Array(inner) => format!("[{}]", inner),
+                Type::UserDefined(name) => name.to_string(),
+            }
+        )
+    }
+}
+
+#[derive(Debug, PartialEq)]
 pub struct Argument {
     pub name: String,
     pub typ: Type,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct QueryDecl {
     pub name: String,
     pub arguments: Vec<Argument>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
+pub struct QueryBody {
+    pub from: FromExpr,
+    pub where_clause: Option<Expression>,
+    pub select: Vec<Expression>,
+}
+
+#[derive(Debug, PartialEq)]
 pub struct Query {
     pub decl: QueryDecl,
     pub body: QueryBody,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct MutationDecl {
+    pub name: String,
+    pub arguments: Vec<Argument>,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct MutationBody {
+    pub insert: String,
+    pub values: Vec<Expression>,
+    pub returning: Option<Vec<Column>>,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct Mutation {
+    pub decl: MutationDecl,
+    pub body: MutationBody,
 }

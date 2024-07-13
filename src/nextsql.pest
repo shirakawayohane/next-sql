@@ -6,7 +6,7 @@ bool_false = @{ "false" }
 
 ident = ${ !ASCII_DIGIT ~ (ASCII_ALPHANUMERIC | "_")+ }
 wildcard = @{ "*" }
-column = { wildcard | ident ~ "." ~ (wildcard | ident) }
+column = { wildcard | ident ~ "." ~ (wildcard | ident) | ident }
 
 add = @{ "+" }
 subtract = @{ "-" }
@@ -26,19 +26,21 @@ not = @{ "!" }
 dot = _{ "." }
 
 number_seq = _{ ASCII_DIGIT+ }
-numeric_literal = @{ number_seq ~ ("." ~ number_seq+)? }
-string_literal = @{ "\"" ~ (!("\"") ~ ANY)* ~ "\"" }
-boolean_literal = @{ bool_false | bool_true }
-literal = @{ numeric_literal | string_literal | boolean_literal }
-variable = @{ "$" ~ ident }
+numeric_literal = { number_seq ~ ("." ~ number_seq+)? }
+string_literal = { "\"" ~ (!("\"") ~ ANY)* ~ "\"" }
+boolean_literal = { bool_false | bool_true }
+object_literal = { "{" ~ s* ~ (ident ~ ":" ~ expression ~ (s* ~ "," ~ ident ~ ":" ~ expression)*) ~ ","? ~ "}" }
+literal = { numeric_literal | string_literal | boolean_literal | object_literal }
+variable = { "$" ~ ident }
 expression = { logical_expression }
 logical_expression = { equality_expression ~ ((and | or) ~ equality_expression)* }
 equality_expression = { relational_expression ~ ((equal | unequal) ~ relational_expression)* }
 relational_expression = { additive_expression ~ ((le | ge | lt | gt) ~ additive_expression)* }
 additive_expression = { multiplicative_expression ~ ((add | subtract) ~ multiplicative_expression)* }
 multiplicative_expression = { unary_expression ~ ((multiply | divide | rem) ~ unary_expression)* }
+array_expression = { "[" ~ expression ~ (s* ~ "," ~ expression)* ~ "]" }
 unary_expression = { (not ~ atomic_expression) | atomic_expression }
-atomic_expression = { column | literal | variable | "(" ~ expression ~ ")" }
+atomic_expression = { column | literal | variable | array_expression | "(" ~ expression ~ ")" }
 
 alias = @{ "<" ~ ident ~ ">" }
 target = @{ ident ~ alias? }
@@ -53,15 +55,42 @@ join_expr = { join_type ~ target ~ "," ~ expression }
 from_expr = { target ~ join_expr* }
 from_clause = { "from" ~ "(" ~ from_expr ~ ")" }
 
+insert_clause = { "insert" ~ "(" ~ ident ~ ")" }
+value_clause = { dot ~ "value" ~ "(" ~ expression ~ ")" }
+values_clause = { dot ~ "values" ~ "(" ~ expression ~ (s* ~ "," ~ expression)* ~ ")" }
+returning_clause = { dot ~ "returning" ~ "(" ~ column ~ (s* ~ "," ~ column)* ~ ")" }
+
 where_clause = { dot ~ "where" ~ expression }
 select_clause = { dot ~ "select" ~ "(" ~ expression ~ (s* ~ "," ~ expression)* ~ ")" }
 
-builtin_type = { "i16" | "i32" | "i64" | "f32" | "f64" | "timestamp" | "timestamptz" | "date" | "uuid" | "string" | "bool" }
-type = @{ builtin_type }
+i16_type = @{ "i16" }
+i32_type = @{ "i32" }
+i64_type = @{ "i64" }
+f32_type = @{ "f32" }
+f64_type = @{ "f64" }
+timestamp_type = @{ "timestamp" }
+timestamptz_type = @{ "timestamptz" }
+date_type = @{ "date" }
+uuid_type = @{ "uuid" }
+string_type = @{ "string" }
+bool_type = @{ "bool" }
+
+question_mark = @{ "?" }
+builtin_type = { i16_type | i32_type | i64_type | f32_type | f64_type | timestamptz_type | timestamp_type | date_type | uuid_type | string_type | bool_type }
+user_defined_type = { ident }
+
+insertable = { "Insertable" ~ "<" ~ type ~ ">" }
+utility_type = { insertable }
+array_type = { "[" ~ type ~ "]" }
+type = { (array_type | builtin_type | utility_type | user_defined_type) ~ question_mark? }
 argument = { variable ~ ":" ~ type }
 argument_list = { "(" ~ ")" | "(" ~ argument ~ (s* ~ "," ~ argument)* ~ ")" }
 query_body = { "{" ~ from_clause ~ where_clause? ~ select_clause ~ "}" }
 query_decl = { "query" ~ ident ~ argument_list? }
 query = { query_decl ~ query_body }
 
-module = { SOI ~ query ~ EOI }
+mutation_decl = { "mutation" ~ ident ~ argument_list? }
+mutation_body = { "{" ~ insert_clause ~ (value_clause | values_clause) ~ returning_clause? ~ "}" }
+mutation = { mutation_decl ~ mutation_body }
+
+module = { SOI ~ (query | mutation)* ~ EOI }
