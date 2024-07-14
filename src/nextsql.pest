@@ -6,7 +6,7 @@ bool_false = @{ "false" }
 
 ident = ${ !ASCII_DIGIT ~ (ASCII_ALPHANUMERIC | "_")+ }
 wildcard = @{ "*" }
-column = { wildcard | ident ~ "." ~ (wildcard | ident) | ident }
+column = { wildcard | ident ~ "." ~ (wildcard | ident) | ident ~ !(("[" | "(")) }
 
 add = @{ "+" }
 subtract = @{ "-" }
@@ -30,7 +30,8 @@ numeric_literal = { number_seq ~ ("." ~ number_seq+)? }
 string_literal = { "\"" ~ (!("\"") ~ ANY)* ~ "\"" }
 boolean_literal = { bool_false | bool_true }
 object_literal = { "{" ~ s* ~ (ident ~ ":" ~ expression ~ (s* ~ "," ~ ident ~ ":" ~ expression)*) ~ ","? ~ "}" }
-literal = { numeric_literal | string_literal | boolean_literal | object_literal }
+array_literal = { "[" ~ expression ~ (s* ~ "," ~ expression)* ~ "]" }
+literal = { object_literal | array_literal | numeric_literal | string_literal | boolean_literal }
 variable = { "$" ~ ident }
 expression = { logical_expression }
 logical_expression = { equality_expression ~ ((and | or) ~ equality_expression)* }
@@ -38,9 +39,10 @@ equality_expression = { relational_expression ~ ((equal | unequal) ~ relational_
 relational_expression = { additive_expression ~ ((le | ge | lt | gt) ~ additive_expression)* }
 additive_expression = { multiplicative_expression ~ ((add | subtract) ~ multiplicative_expression)* }
 multiplicative_expression = { unary_expression ~ ((multiply | divide | rem) ~ unary_expression)* }
-array_expression = { "[" ~ expression ~ (s* ~ "," ~ expression)* ~ "]" }
 unary_expression = { (not ~ atomic_expression) | atomic_expression }
-atomic_expression = { column | literal | variable | array_expression | "(" ~ expression ~ ")" }
+call_expression = { ident ~ ("(" ~ ")" | "(" ~ expression ~ (s* ~ "," ~ expression)* ~ ")")}
+index_access = { (call_expression | literal | variable | "(" ~ expression ~ ")") ~ ("[" ~ expression ~ "]")+ }
+atomic_expression = { index_access | call_expression | column | literal | variable | "(" ~ expression ~ ")" }
 
 alias = @{ "<" ~ ident ~ ">" }
 target = @{ ident ~ alias? }
@@ -58,6 +60,10 @@ from_clause = { "from" ~ "(" ~ from_expr ~ ")" }
 insert_clause = { "insert" ~ "(" ~ ident ~ ")" }
 value_clause = { dot ~ "value" ~ "(" ~ expression ~ ")" }
 values_clause = { dot ~ "values" ~ "(" ~ expression ~ (s* ~ "," ~ expression)* ~ ")" }
+
+update_clause = { "update" ~ "(" ~ target ~ ")"}
+set_clause = { dot ~ "set" ~ "(" ~ "{" ~ ident ~ ":" ~ expression ~ (s* ~ "," ~ ident ~ ":" ~ expression)* ~ "}" ~ ")"}
+
 returning_clause = { dot ~ "returning" ~ "(" ~ column ~ (s* ~ "," ~ column)* ~ ")" }
 
 where_clause = { dot ~ "where" ~ expression }
@@ -90,7 +96,13 @@ query_decl = { "query" ~ ident ~ argument_list? }
 query = { query_decl ~ query_body }
 
 mutation_decl = { "mutation" ~ ident ~ argument_list? }
-mutation_body = { "{" ~ insert_clause ~ (value_clause | values_clause) ~ returning_clause? ~ "}" }
+
+mutation_body = { "{" ~ 
+  (
+      (insert_clause ~ (value_clause | values_clause) ~ returning_clause?)
+    | (update_clause ~ where_clause? ~ set_clause ~ returning_clause?)
+  )
+~ "}" }
 mutation = { mutation_decl ~ mutation_body }
 
 module = { SOI ~ (query | mutation)* ~ EOI }

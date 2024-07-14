@@ -19,8 +19,6 @@ Please refer to the following **Roadmap** when contributing.
 
 ## Roadmap
 - parsing mutation
-  - insert
-  - update
   - delete
 - migration
   - create

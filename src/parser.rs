@@ -329,8 +329,9 @@ fn test_parse_mutation_body() {
     let body = parse_mutation_body(pairs.peekable().next().unwrap().into_inner());
     dbg!(&body);
 }
-fn parse_mutation_body(pairs: pest::iterators::Pairs<Rule>) -> MutationBody {
+fn parse_insert(pairs: pest::iterators::Pairs<Rule>) -> Insert {
     let mut pairs = pairs.peekable();
+    dbg!(&pairs);
     let insert = match pairs.peek().unwrap().as_rule() {
         Rule::insert_clause => parse_insert_clause(pairs.next().unwrap().into_inner()),
         _ => unreachable!(),
@@ -347,10 +348,85 @@ fn parse_mutation_body(pairs: pest::iterators::Pairs<Rule>) -> MutationBody {
         }
         _ => None,
     };
-    MutationBody {
-        insert,
+    Insert {
+        into: insert,
         values,
         returning,
+    }
+}
+
+#[test]
+fn test_parse_update_clause() {
+    let input = "update(foo).set({ a: 1, b: \"abc\" }).where(a > 1).returning(a, b)";
+    let pairs = match NextSqlParser::parse(Rule::update_clause, &input) {
+        Ok(p) => p,
+        Err(e) => panic!("パースエラーが発生しました: {}", e),
+    };
+    let clause = parse_update_clause(pairs.peekable().next().unwrap().into_inner());
+    assert_eq!(clause, "foo");
+}
+fn parse_update_clause(pairs: pest::iterators::Pairs<Rule>) -> String {
+    let mut pairs = pairs.peekable();
+    pairs.next().unwrap().as_str().to_string()
+}
+
+fn parse_update(pairs: pest::iterators::Pairs<Rule>) -> Update {
+    dbg!(&pairs);
+    let mut pairs = pairs.peekable();
+    let target = match pairs.peek().unwrap().as_rule() {
+        Rule::update_clause => {
+            let mut pairs = pairs.next().unwrap().into_inner().peekable();
+            parse_target(pairs.next().unwrap().into_inner())
+        }
+        _ => unreachable!(),
+    };
+    dbg!(&target);
+    let set = match pairs.peek().unwrap().as_rule() {
+        Rule::set_clause => {
+            let mut pairs = pairs.next().unwrap().into_inner().peekable();
+            let mut set = Vec::new();
+            while pairs.peek().is_some() {
+                let column = pairs.next().unwrap().as_str().to_string();
+                let value = parse_expression(pairs.next().unwrap().into_inner());
+                set.push((column, value));
+            }
+            set
+        }
+        _ => unreachable!(),
+    };
+    dbg!(&set);
+    let where_clause = match pairs.peek().map(|p| p.as_rule()) {
+        Some(Rule::where_clause) => Some(parse_expression(
+            pairs
+                .next()
+                .unwrap()
+                .into_inner()
+                .next()
+                .unwrap()
+                .into_inner(),
+        )),
+        _ => None,
+    };
+    let returning = match pairs.peek().map(|p| p.as_rule()) {
+        Some(Rule::returning_clause) => {
+            Some(parse_returning_clause(pairs.next().unwrap().into_inner()))
+        }
+        _ => None,
+    };
+    Update {
+        target,
+        set,
+        where_clause,
+        returning,
+    }
+}
+
+fn parse_mutation_body(pairs: pest::iterators::Pairs<Rule>) -> MutationBody {
+    let rule = pairs.peek().unwrap().as_rule();
+    match rule {
+        Rule::insert_clause => MutationBody::Insert(parse_insert(pairs)),
+        Rule::update_clause => MutationBody::Update(parse_update(pairs)),
+        _ => unreachable!(),
     }
 }
 
@@ -366,23 +442,42 @@ fn test_parse_mutation() {
 }
 fn parse_mutation(pairs: pest::iterators::Pairs<Rule>) -> Mutation {
     let mut pairs = pairs.peekable();
+    dbg!(&pairs);
     let decl = parse_mutation_decl(pairs.next().unwrap().into_inner());
     let body = parse_mutation_body(pairs.next().unwrap().into_inner());
     Mutation { body, decl }
 }
 
 #[test]
-fn test_parse_query() {
-    let input = include_str!("../examples/simple-select.nsql");
-    let pairs = match NextSqlParser::parse(Rule::query, &input) {
+fn test_parse_target() {
+    let input = "foo";
+    let pairs = match NextSqlParser::parse(Rule::target, &input) {
         Ok(p) => p,
         Err(e) => panic!("パースエラーが発生しました: {}", e),
     };
-    dbg!(&pairs);
-    let query = parse_query(pairs.peekable().next().unwrap().into_inner());
-    dbg!(&query);
-}
+    let target = parse_target(pairs.peekable().next().unwrap().into_inner());
+    assert_eq!(
+        target,
+        Target {
+            name: "foo".to_string(),
+            alias: None
+        }
+    );
 
+    let input = "foo<f>";
+    let pairs = match NextSqlParser::parse(Rule::target, &input) {
+        Ok(p) => p,
+        Err(e) => panic!("パースエラーが発生しました: {}", e),
+    };
+    let target = parse_target(pairs.peekable().next().unwrap().into_inner());
+    assert_eq!(
+        target,
+        Target {
+            name: "foo".to_string(),
+            alias: Some("f".to_string())
+        }
+    );
+}
 fn parse_target(pairs: pest::iterators::Pairs<Rule>) -> Target {
     let mut pairs = pairs.peekable();
     let name = pairs.next().unwrap().as_str().to_string();
@@ -449,23 +544,6 @@ fn parse_query_body(pairs: pest::iterators::Pairs<Rule>) -> QueryBody {
     }
 }
 
-fn parse_expression(pairs: pest::iterators::Pairs<Rule>) -> Expression {
-    let pair = pairs.peek().unwrap();
-    match pair.as_rule() {
-        Rule::logical_expression => parse_logical_expression(pair.into_inner()),
-        Rule::equality_expression => parse_equality_expression(pair.into_inner()),
-        Rule::relational_expression => parse_relational_expression(pair.into_inner()),
-        Rule::additive_expression => parse_additive_expression(pair.into_inner()),
-        Rule::multiplicative_expression => parse_multiplicative_expression(pair.into_inner()),
-        Rule::unary_expression => parse_unary_expression(pair.into_inner()),
-        Rule::atomic_expression => parse_atomic_expression(pair.into_inner()),
-        _ => {
-            dbg!(&pair);
-            unreachable!()
-        }
-    }
-}
-
 #[test]
 fn test_parse_expression() {
     let input = { "{ name: \"alice\" }" };
@@ -524,13 +602,82 @@ fn test_parse_expression() {
     };
     let expr = parse_expression(pairs.peekable().next().unwrap().into_inner());
     assert_eq!(
-        Expression::Atomic(AtomicExpression::Array(ArrayExpression(vec![
-            Expression::Atomic(AtomicExpression::Literal(Literal::Numeric(1.0))),
-            Expression::Atomic(AtomicExpression::Literal(Literal::Numeric(2.0))),
-            Expression::Atomic(AtomicExpression::Literal(Literal::Numeric(3.0))),
-        ]))),
+        Expression::Atomic(AtomicExpression::Literal(Literal::Array(ArrayExpression(
+            vec![
+                Expression::Atomic(AtomicExpression::Literal(Literal::Numeric(1.0))),
+                Expression::Atomic(AtomicExpression::Literal(Literal::Numeric(2.0))),
+                Expression::Atomic(AtomicExpression::Literal(Literal::Numeric(3.0)))
+            ]
+        )))),
         expr
     );
+    let input = "\",\"";
+    let pairs = NextSqlParser::parse(Rule::expression, &input).expect("パースエラー");
+    let expr = parse_expression(pairs.peekable().next().unwrap().into_inner());
+    assert_eq!(
+        Expression::Atomic(AtomicExpression::Literal(Literal::String(",".to_string()))),
+        expr
+    );
+
+    let input = "split(\"a,b,c\", \",\")";
+    let pairs = match NextSqlParser::parse(Rule::expression, &input) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("パースエラー: {}", e);
+            panic!();
+        }
+    };
+    let expr = parse_expression(pairs.peekable().next().unwrap().into_inner());
+    assert_eq!(
+        Expression::Atomic(AtomicExpression::Call(CallExpression {
+            callee: "split".to_string(),
+            args: vec![
+                Expression::Atomic(AtomicExpression::Literal(Literal::String(
+                    "a,b,c".to_string()
+                ))),
+                Expression::Atomic(AtomicExpression::Literal(Literal::String(",".to_string())))
+            ]
+        })),
+        expr
+    );
+    let input = "call()[0]";
+    let pairs = match NextSqlParser::parse(Rule::expression, &input) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("パースエラー: {}", e);
+            panic!();
+        }
+    };
+    println!("{}", &pairs);
+    let expr = parse_expression(pairs.peekable().next().unwrap().into_inner());
+    assert_eq!(
+        Expression::Atomic(AtomicExpression::IndexAccess(IndexAccess {
+            target: Box::new(Expression::Atomic(AtomicExpression::Call(CallExpression {
+                callee: "call".to_string(),
+                args: vec![]
+            }))),
+            index: Box::new(Expression::Atomic(AtomicExpression::Literal(
+                Literal::Numeric(0.0)
+            )))
+        })),
+        expr
+    );
+}
+fn parse_expression(pairs: pest::iterators::Pairs<Rule>) -> Expression {
+    let pair = pairs.peek().unwrap();
+    match pair.as_rule() {
+        Rule::logical_expression => parse_logical_expression(pair.into_inner()),
+        Rule::equality_expression => parse_equality_expression(pair.into_inner()),
+        Rule::relational_expression => parse_relational_expression(pair.into_inner()),
+        Rule::additive_expression => parse_additive_expression(pair.into_inner()),
+        Rule::multiplicative_expression => parse_multiplicative_expression(pair.into_inner()),
+        Rule::unary_expression => parse_unary_expression(pair.into_inner()),
+        Rule::atomic_expression => parse_atomic_expression(pair.into_inner()),
+        _ => {
+            dbg!(&pair);
+            unreachable!()
+        }
+    }
 }
 
 fn parse_logical_expression(pairs: pest::iterators::Pairs<Rule>) -> Expression {
@@ -646,6 +793,43 @@ fn parse_unary_expression(pairs: pest::iterators::Pairs<Rule>) -> Expression {
     }
 }
 
+#[test]
+fn test_parse_column() {
+    let input = "*";
+    let pairs = match NextSqlParser::parse(Rule::column, &input) {
+        Ok(p) => p,
+        Err(e) => panic!("パースエラーが発生しました: {}", e),
+    };
+    let column = parse_column(pairs.peekable().next().unwrap().into_inner());
+    assert_eq!(Column::Wildcard, column);
+
+    let input = "foo_bar";
+    let pairs = match NextSqlParser::parse(Rule::column, &input) {
+        Ok(p) => p,
+        Err(e) => panic!("パースエラーが発生しました: {}", e),
+    };
+    let column = parse_column(pairs.peekable().next().unwrap().into_inner());
+    assert_eq!(Column::ImplicitTarget("foo_bar".to_string()), column);
+
+    let input = "foo.bar";
+    let pairs = match NextSqlParser::parse(Rule::column, &input) {
+        Ok(p) => p,
+        Err(e) => panic!("パースエラーが発生しました: {}", e),
+    };
+    let column = parse_column(pairs.peekable().next().unwrap().into_inner());
+    assert_eq!(
+        Column::ExplicitTarget("foo".to_string(), "bar".to_string()),
+        column
+    );
+
+    let input = "foo.*";
+    let pairs = match NextSqlParser::parse(Rule::column, &input) {
+        Ok(p) => p,
+        Err(e) => panic!("パースエラーが発生しました: {}", e),
+    };
+    let column = parse_column(pairs.peekable().next().unwrap().into_inner());
+    assert_eq!(Column::WildcardOf("foo".to_string()), column);
+}
 fn parse_column(pairs: pest::iterators::Pairs<Rule>) -> Column {
     let mut pairs = pairs.peekable();
     match pairs.peek().unwrap().as_rule() {
@@ -666,38 +850,59 @@ fn parse_column(pairs: pest::iterators::Pairs<Rule>) -> Column {
     }
 }
 
-fn parse_atomic_expression(pairs: pest::iterators::Pairs<Rule>) -> Expression {
-    fn parse_literal_expression(pairs: pest::iterators::Pairs<Rule>) -> Expression {
-        let pair = pairs.peek().unwrap();
-        Expression::Atomic(match pair.as_rule() {
-            Rule::numeric_literal => {
-                dbg!(pair.as_str());
-                let num = pair.as_str().trim().parse::<f64>().unwrap();
-                AtomicExpression::Literal(Literal::Numeric(num))
+fn parse_literal_expression(pairs: pest::iterators::Pairs<Rule>) -> Expression {
+    let pair = pairs.peek().unwrap();
+    Expression::Atomic(match pair.as_rule() {
+        Rule::numeric_literal => {
+            let num = pair.as_str().trim().parse::<f64>().unwrap();
+            AtomicExpression::Literal(Literal::Numeric(num))
+        }
+        Rule::string_literal => {
+            let s = pair.as_str();
+            AtomicExpression::Literal(Literal::String(s[1..s.len() - 1].to_string()))
+        }
+        Rule::boolean_literal => {
+            let b = pair.as_str() == "true";
+            AtomicExpression::Literal(Literal::Boolean(b))
+        }
+        Rule::object_literal => {
+            let mut pairs = pair.into_inner();
+            let mut map: HashMap<String, Expression> = HashMap::new();
+            while pairs.peek().is_some() {
+                let key = pairs.next().unwrap().as_str().to_string();
+                let value = parse_expression(pairs.next().unwrap().into_inner());
+                map.insert(key, value);
             }
-            Rule::string_literal => {
-                let s = pair.as_str();
-                AtomicExpression::Literal(Literal::String(s[1..s.len() - 1].to_string()))
-            }
-            Rule::boolean_literal => {
-                let b = pair.as_str() == "true";
-                AtomicExpression::Literal(Literal::Boolean(b))
-            }
-            Rule::object_literal => {
-                let mut pairs = pair.into_inner();
-                let mut map: HashMap<String, Expression> = HashMap::new();
-                while pairs.peek().is_some() {
-                    let key = pairs.next().unwrap().as_str().to_string();
-                    let value = parse_expression(pairs.next().unwrap().into_inner());
-                    map.insert(key, value);
-                }
-                AtomicExpression::Literal(Literal::Object(ObjectLiteralExpression(map)))
-            }
-            _ => unreachable!(),
-        })
+            AtomicExpression::Literal(Literal::Object(ObjectLiteralExpression(map)))
+        }
+        Rule::array_literal => {
+            let pairs = pair.into_inner().peekable();
+            let elements = pairs
+                .flat_map(|p| match p.as_rule() {
+                    Rule::expression => Some(parse_expression(p.into_inner())),
+                    _ => None,
+                })
+                .collect();
+            AtomicExpression::Literal(Literal::Array(ArrayExpression(elements)))
+        }
+        _ => unreachable!(),
+    })
+}
+
+fn parse_call_expression(pairs: pest::iterators::Pairs<Rule>) -> Expression {
+    let mut pairs = pairs.peekable();
+    let callee = pairs.next().unwrap().as_str().to_string();
+    let mut args = Vec::new();
+    while pairs.peek().is_some() {
+        args.push(parse_expression(pairs.next().unwrap().into_inner()));
     }
+    Expression::Atomic(AtomicExpression::Call(CallExpression { callee, args }))
+}
+
+fn parse_atomic_expression(pairs: pest::iterators::Pairs<Rule>) -> Expression {
     let pair = pairs.peek().unwrap();
     match pair.as_rule() {
+        Rule::call_expression => parse_call_expression(pair.into_inner()),
         Rule::column => {
             Expression::Atomic(AtomicExpression::Column(parse_column(pair.into_inner())))
         }
@@ -706,18 +911,30 @@ fn parse_atomic_expression(pairs: pest::iterators::Pairs<Rule>) -> Expression {
             let name = pair.as_str().to_string();
             Expression::Atomic(AtomicExpression::Variable(Variable { name }))
         }
-        Rule::array_expression => {
-            let pairs = pair.into_inner().peekable();
-            let elements = pairs
-                .flat_map(|p| match p.as_rule() {
-                    Rule::expression => Some(parse_expression(p.into_inner())),
-                    _ => None,
-                })
-                .collect();
-            Expression::Atomic(AtomicExpression::Array(ArrayExpression(elements)))
+        Rule::index_access => {
+            let mut pairs = pair.into_inner().peekable();
+            // 左再帰を避けるため、index_accessだけ違う構造になっている
+            let target = match pairs.peek().unwrap().as_rule() {
+                Rule::call_expression => parse_call_expression(pairs.next().unwrap().into_inner()),
+                Rule::literal => parse_literal_expression(pairs.next().unwrap().into_inner()),
+                Rule::variable => {
+                    let name = pairs.next().unwrap().as_str().to_string();
+                    Expression::Atomic(AtomicExpression::Variable(Variable { name }))
+                }
+                _ => parse_expression(pairs.next().unwrap().into_inner()),
+            };
+            dbg!(&pairs.peek().unwrap());
+            let index = parse_expression(pairs.next().unwrap().into_inner());
+            Expression::Atomic(AtomicExpression::IndexAccess(IndexAccess {
+                target: Box::new(target),
+                index: Box::new(index),
+            }))
         }
         Rule::expression => parse_expression(pair.into_inner()),
-        _ => unreachable!(),
+        _ => {
+            dbg!(&pair);
+            unreachable!()
+        }
     }
 }
 
@@ -726,38 +943,44 @@ mod tests {
     use super::*;
 
     #[test]
-    fn simple_select() {
+    fn simple_select_test() {
         let input = include_str!("../examples/simple-select.nsql");
         parse_module(&input).unwrap();
     }
 
     #[test]
-    fn simple_select_and_join() {
+    fn simple_select_and_join_test() {
         let input = include_str!("../examples/simple-select-and-join.nsql");
         dbg!("{:?}", parse_module(&input).unwrap());
     }
 
     #[test]
-    fn insert() {
+    fn insert_test() {
         let input = include_str!("../examples/insert.nsql");
         dbg!("{:?}", parse_module(&input).unwrap());
     }
 
     #[test]
-    fn insert_optional() {
+    fn insert_optional_test() {
         let input = include_str!("../examples/insert-optional.nsql");
-        dbg!("{:?}", parse_module(&input).unwrap());
+        parse_module(&input).unwrap();
     }
 
     #[test]
-    fn insert_many() {
+    fn insert_many_test() {
         let input = include_str!("../examples/insert-many.nsql");
         dbg!("{:?}", parse_module(&input).unwrap());
     }
 
     #[test]
-    fn insert_many_with_variable() {
+    fn insert_many_with_variable_test() {
         let input = include_str!("../examples/insert-many-with-variable.nsql");
+        dbg!("{:?}", parse_module(&input).unwrap());
+    }
+
+    #[test]
+    fn update_test() {
+        let input = include_str!("../examples/update.nsql");
         dbg!("{:?}", parse_module(&input).unwrap());
     }
 }

@@ -1,5 +1,38 @@
 use std::{collections::HashMap, fmt::Display};
 
+pub enum ASTNode {
+    Module(Module),
+    TopLevel(TopLevel),
+    Query(Query),
+    Mutation(Mutation),
+    Target(Target),
+    FromExpr(FromExpr),
+    JoinExpr(JoinExpr),
+    JoinType(JoinType),
+    Expression(Expression),
+    BinaryOp(BinaryOp),
+    UnaryOp(UnaryOp),
+    AtomicExpression(AtomicExpression),
+    Column(Column),
+    Literal(Literal),
+    CallExpression(CallExpression),
+    IndexAccess(IndexAccess),
+    ArrayExpression(ArrayExpression),
+    Variable(Variable),
+    ObjectLiteralExpression(ObjectLiteralExpression),
+    BuiltInType(BuiltInType),
+    Insertable(Insertable),
+    UtilityType(UtilityType),
+    Type(Type),
+    Argument(Argument),
+    QueryDecl(QueryDecl),
+    QueryBody(QueryBody),
+    MutationDecl(MutationDecl),
+    Insert(Insert),
+    Update(Update),
+    MutationBody(MutationBody),
+}
+
 #[derive(Debug, PartialEq)]
 pub enum TopLevel {
     Query(Query),
@@ -85,7 +118,8 @@ pub enum AtomicExpression {
     Column(Column),
     Literal(Literal),
     Variable(Variable),
-    Array(ArrayExpression),
+    Call(CallExpression),
+    IndexAccess(IndexAccess),
 }
 
 #[derive(Debug, PartialEq)]
@@ -102,6 +136,19 @@ pub enum Literal {
     String(String),
     Boolean(bool),
     Object(ObjectLiteralExpression),
+    Array(ArrayExpression),
+}
+
+#[derive(Debug, PartialEq)]
+pub struct CallExpression {
+    pub callee: String,
+    pub args: Vec<Expression>,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct IndexAccess {
+    pub target: Box<Expression>,
+    pub index: Box<Expression>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -221,10 +268,24 @@ pub struct MutationDecl {
 }
 
 #[derive(Debug, PartialEq)]
-pub struct MutationBody {
-    pub insert: String,
+pub struct Insert {
+    pub into: String,
     pub values: Vec<Expression>,
     pub returning: Option<Vec<Column>>,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct Update {
+    pub target: Target,
+    pub where_clause: Option<Expression>,
+    pub set: Vec<(String, Expression)>,
+    pub returning: Option<Vec<Column>>,
+}
+
+#[derive(Debug, PartialEq)]
+pub enum MutationBody {
+    Insert(Insert),
+    Update(Update),
 }
 
 #[derive(Debug, PartialEq)]
