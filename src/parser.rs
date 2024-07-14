@@ -45,6 +45,12 @@ pub fn parse_module(input: &str) -> Result<Module, Error<Rule>> {
     Ok(Module { toplevels })
 }
 
+fn parse_variable(pairs: pest::iterators::Pairs<Rule>) -> Variable {
+    let mut pairs = pairs.peekable();
+    let name = pairs.next().unwrap().as_str()[1..].to_string();
+    Variable { name }
+}
+
 #[test]
 fn test_parse_type() {
     let builtin_types = vec![
@@ -384,10 +390,36 @@ fn parse_update_clause(pairs: pest::iterators::Pairs<Rule>) -> String {
     pairs.next().unwrap().as_str().to_string()
 }
 
+#[test]
+fn test_parse_where_clause() {
+    let input = ".where(u.id == $id)";
+    let pairs = match NextSqlParser::parse(Rule::where_clause, &input) {
+        Ok(p) => p,
+        Err(e) => panic!("パースエラーが発生しました: {}", e),
+    };
+    dbg!(&pairs);
+    let clause = parse_where_clause(pairs.peekable().next().unwrap().into_inner());
+    dbg!(&clause);
+    assert_eq!(
+        Expression::Binary {
+            left: Box::new(Expression::Atomic(AtomicExpression::Column(
+                Column::ExplicitTarget("u".to_string(), "id".to_string())
+            ))),
+            op: BinaryOp::Equal,
+            right: Box::new(Expression::Atomic(AtomicExpression::Variable(Variable {
+                name: "id".to_string()
+            })))
+        },
+        clause
+    );
+}
 fn parse_where_clause(pairs: pest::iterators::Pairs<Rule>) -> Expression {
     let mut pairs = pairs.peekable();
     match pairs.peek().unwrap().as_rule() {
-        Rule::expression => parse_expression(pairs.next().unwrap().into_inner()),
+        Rule::expression => {
+            // println!("414: {}", pairs.peek().unwrap());
+            parse_expression(pairs.next().unwrap().into_inner())
+        }
         _ => unreachable!(),
     }
 }
@@ -585,6 +617,28 @@ fn parse_select_statement(pairs: pest::iterators::Pairs<Rule>) -> SelectStatemen
 
 #[test]
 fn test_parse_expression() {
+    let input = "a == b";
+    let pairs = match NextSqlParser::parse(Rule::expression, &input) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("パースエラー: {}", e);
+            return;
+        }
+    };
+    let expr = parse_expression(pairs.peekable().next().unwrap().into_inner());
+    assert_eq!(
+        Expression::Binary {
+            left: Box::new(Expression::Atomic(AtomicExpression::Column(
+                Column::ImplicitTarget("a".to_string())
+            ))),
+            op: BinaryOp::Equal,
+            right: Box::new(Expression::Atomic(AtomicExpression::Column(
+                Column::ImplicitTarget("b".to_string())
+            )))
+        },
+        expr
+    );
+
     let input = { "{ name: \"alice\" }" };
     let pairs = match NextSqlParser::parse(Rule::expression, &input) {
         Ok(p) => p,
@@ -721,7 +775,7 @@ fn parse_expression(pairs: pest::iterators::Pairs<Rule>) -> Expression {
 
 fn parse_logical_expression(pairs: pest::iterators::Pairs<Rule>) -> Expression {
     let mut pairs = pairs.peekable();
-    let left = parse_expression(pairs.next().unwrap().into_inner());
+    let left = parse_equality_expression(pairs.next().unwrap().into_inner());
     if pairs.peek().is_none() {
         return left;
     }
@@ -730,7 +784,7 @@ fn parse_logical_expression(pairs: pest::iterators::Pairs<Rule>) -> Expression {
         Rule::or => BinaryOp::Or,
         _ => unreachable!(),
     };
-    let right = parse_expression(pairs.next().unwrap().into_inner());
+    let right = parse_equality_expression(pairs.next().unwrap().into_inner());
     Expression::Binary {
         left: Box::new(left),
         op,
@@ -946,23 +1000,18 @@ fn parse_atomic_expression(pairs: pest::iterators::Pairs<Rule>) -> Expression {
             Expression::Atomic(AtomicExpression::Column(parse_column(pair.into_inner())))
         }
         Rule::literal => parse_literal_expression(pair.into_inner()),
-        Rule::variable => {
-            let name = pair.as_str().to_string();
-            Expression::Atomic(AtomicExpression::Variable(Variable { name }))
-        }
+        Rule::variable => Expression::Atomic(AtomicExpression::Variable(parse_variable(pairs))),
         Rule::index_access => {
             let mut pairs = pair.into_inner().peekable();
             // 左再帰を避けるため、index_accessだけ違う構造になっている
             let target = match pairs.peek().unwrap().as_rule() {
                 Rule::call_expression => parse_call_expression(pairs.next().unwrap().into_inner()),
                 Rule::literal => parse_literal_expression(pairs.next().unwrap().into_inner()),
-                Rule::variable => {
-                    let name = pairs.next().unwrap().as_str().to_string();
-                    Expression::Atomic(AtomicExpression::Variable(Variable { name }))
-                }
+                Rule::variable => Expression::Atomic(AtomicExpression::Variable(parse_variable(
+                    pairs.next().unwrap().into_inner(),
+                ))),
                 _ => parse_expression(pairs.next().unwrap().into_inner()),
             };
-            dbg!(&pairs.peek().unwrap());
             let index = parse_expression(pairs.next().unwrap().into_inner());
             Expression::Atomic(AtomicExpression::IndexAccess(IndexAccess {
                 target: Box::new(target),
