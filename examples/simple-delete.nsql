@@ -1,0 +1,4 @@
+mutation deleteUserById($id: uuid) {
+  delete(user<u>)
+  .where(u.id == $id)
+}

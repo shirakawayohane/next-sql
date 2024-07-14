@@ -370,6 +370,14 @@ fn parse_update_clause(pairs: pest::iterators::Pairs<Rule>) -> String {
     pairs.next().unwrap().as_str().to_string()
 }
 
+fn parse_where_clause(pairs: pest::iterators::Pairs<Rule>) -> Expression {
+    let mut pairs = pairs.peekable();
+    match pairs.peek().unwrap().as_rule() {
+        Rule::expression => parse_expression(pairs.next().unwrap().into_inner()),
+        _ => unreachable!(),
+    }
+}
+
 fn parse_update(pairs: pest::iterators::Pairs<Rule>) -> Update {
     dbg!(&pairs);
     let mut pairs = pairs.peekable();
@@ -380,7 +388,6 @@ fn parse_update(pairs: pest::iterators::Pairs<Rule>) -> Update {
         }
         _ => unreachable!(),
     };
-    dbg!(&target);
     let set = match pairs.peek().unwrap().as_rule() {
         Rule::set_clause => {
             let mut pairs = pairs.next().unwrap().into_inner().peekable();
@@ -394,17 +401,8 @@ fn parse_update(pairs: pest::iterators::Pairs<Rule>) -> Update {
         }
         _ => unreachable!(),
     };
-    dbg!(&set);
     let where_clause = match pairs.peek().map(|p| p.as_rule()) {
-        Some(Rule::where_clause) => Some(parse_expression(
-            pairs
-                .next()
-                .unwrap()
-                .into_inner()
-                .next()
-                .unwrap()
-                .into_inner(),
-        )),
+        Some(Rule::where_clause) => Some(parse_where_clause(pairs.next().unwrap().into_inner())),
         _ => None,
     };
     let returning = match pairs.peek().map(|p| p.as_rule()) {
@@ -426,7 +424,34 @@ fn parse_mutation_body(pairs: pest::iterators::Pairs<Rule>) -> MutationBody {
     match rule {
         Rule::insert_clause => MutationBody::Insert(parse_insert(pairs)),
         Rule::update_clause => MutationBody::Update(parse_update(pairs)),
+        Rule::delete_clause => MutationBody::Delete(parse_delete(pairs)),
         _ => unreachable!(),
+    }
+}
+
+fn parse_delete(pairs: pest::iterators::Pairs<Rule>) -> Delete {
+    let mut pairs = pairs.peekable();
+    let target = match pairs.peek().unwrap().as_rule() {
+        Rule::delete_clause => {
+            let mut pairs = pairs.next().unwrap().into_inner().peekable();
+            parse_target(pairs.next().unwrap().into_inner())
+        }
+        _ => unreachable!(),
+    };
+    let where_clause = match pairs.peek().map(|p| p.as_rule()) {
+        Some(Rule::where_clause) => Some(parse_where_clause(pairs.next().unwrap().into_inner())),
+        _ => None,
+    };
+    let returning = match pairs.peek().map(|p| p.as_rule()) {
+        Some(Rule::returning_clause) => {
+            Some(parse_returning_clause(pairs.next().unwrap().into_inner()))
+        }
+        _ => None,
+    };
+    Delete {
+        target,
+        where_clause,
+        returning,
     }
 }
 
@@ -981,6 +1006,12 @@ mod tests {
     #[test]
     fn update_test() {
         let input = include_str!("../examples/update.nsql");
+        dbg!("{:?}", parse_module(&input).unwrap());
+    }
+
+    #[test]
+    fn simple_delete_test() {
+        let input = include_str!("../examples/simple-delete.nsql");
         dbg!("{:?}", parse_module(&input).unwrap());
     }
 }

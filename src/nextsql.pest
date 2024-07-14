@@ -66,7 +66,7 @@ set_clause = { dot ~ "set" ~ "(" ~ "{" ~ ident ~ ":" ~ expression ~ (s* ~ "," ~ 
 
 returning_clause = { dot ~ "returning" ~ "(" ~ column ~ (s* ~ "," ~ column)* ~ ")" }
 
-where_clause = { dot ~ "where" ~ expression }
+where_clause = { dot ~ "where" ~ "(" ~ expression ~ ")" }
 select_clause = { dot ~ "select" ~ "(" ~ expression ~ (s* ~ "," ~ expression)* ~ ")" }
 
 i16_type = @{ "i16" }
@@ -95,12 +95,15 @@ query_body = { "{" ~ from_clause ~ where_clause? ~ select_clause ~ "}" }
 query_decl = { "query" ~ ident ~ argument_list? }
 query = { query_decl ~ query_body }
 
+delete_clause = { "delete" ~ "(" ~ target ~ ")" }
+
 mutation_decl = { "mutation" ~ ident ~ argument_list? }
 
 mutation_body = { "{" ~ 
   (
       (insert_clause ~ (value_clause | values_clause) ~ returning_clause?)
     | (update_clause ~ where_clause? ~ set_clause ~ returning_clause?)
+    | (delete_clause ~ where_clause? ~ returning_clause?)
   )
 ~ "}" }
 mutation = { mutation_decl ~ mutation_body }

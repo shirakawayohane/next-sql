@@ -283,9 +283,17 @@ pub struct Update {
 }
 
 #[derive(Debug, PartialEq)]
+pub struct Delete {
+    pub target: Target,
+    pub where_clause: Option<Expression>,
+    pub returning: Option<Vec<Column>>,
+}
+
+#[derive(Debug, PartialEq)]
 pub enum MutationBody {
     Insert(Insert),
     Update(Update),
+    Delete(Delete),
 }
 
 #[derive(Debug, PartialEq)]
