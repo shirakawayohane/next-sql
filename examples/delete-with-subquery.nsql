@@ -1,0 +1,12 @@
+mutation deleteUser($id: uuid) {
+  delete(users<u>)
+  .where(exists(
+    $(
+      from(user_action_logs<log>)
+      .where(
+        logs.user_id == u.id && logs.deleted == true
+      )
+      .select(*)
+    )
+  ))
+}

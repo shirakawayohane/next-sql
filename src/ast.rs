@@ -26,7 +26,7 @@ pub enum ASTNode {
     Type(Type),
     Argument(Argument),
     QueryDecl(QueryDecl),
-    QueryBody(QueryBody),
+    QueryBody(SelectStatement),
     MutationDecl(MutationDecl),
     Insert(Insert),
     Update(Update),
@@ -120,6 +120,7 @@ pub enum AtomicExpression {
     Variable(Variable),
     Call(CallExpression),
     IndexAccess(IndexAccess),
+    SubQuery(Box<SelectStatement>),
 }
 
 #[derive(Debug, PartialEq)]
@@ -249,11 +250,14 @@ pub struct QueryDecl {
 }
 
 #[derive(Debug, PartialEq)]
-pub struct QueryBody {
+pub struct SelectStatement {
     pub from: FromExpr,
     pub where_clause: Option<Expression>,
     pub select: Vec<Expression>,
 }
+
+#[derive(Debug, PartialEq)]
+pub struct QueryBody(pub SelectStatement);
 
 #[derive(Debug, PartialEq)]
 pub struct Query {

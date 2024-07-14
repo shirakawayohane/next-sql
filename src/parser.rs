@@ -196,8 +196,22 @@ fn parse_query(pairs: pest::iterators::Pairs<Rule>) -> Query {
         Rule::query_decl => parse_query_decl(pairs.next().unwrap().into_inner()),
         _ => unreachable!(),
     };
-    let body = match pairs.peek().unwrap().as_rule() {
-        Rule::query_body => parse_query_body(pairs.next().unwrap().into_inner()),
+
+    let next = pairs.next().unwrap();
+    let body = match dbg!(next.as_rule()) {
+        Rule::query_body => {
+            let mut pairs = next.into_inner().peekable();
+            let next = pairs.next().unwrap();
+            match next.as_rule() {
+                Rule::select_statement => {
+                    let select = parse_select_statement(next.into_inner());
+                    QueryBody(select)
+                }
+                _ => {
+                    unreachable!()
+                }
+            }
+        }
         _ => unreachable!(),
     };
     Query { decl, body }
@@ -537,7 +551,7 @@ fn parse_from_expr(pairs: pest::iterators::Pairs<Rule>) -> FromExpr {
     FromExpr { target, joins }
 }
 
-fn parse_query_body(pairs: pest::iterators::Pairs<Rule>) -> QueryBody {
+fn parse_select_statement(pairs: pest::iterators::Pairs<Rule>) -> SelectStatement {
     let mut from = None;
     let mut where_clause = None;
     let mut select = Vec::new();
@@ -562,7 +576,7 @@ fn parse_query_body(pairs: pest::iterators::Pairs<Rule>) -> QueryBody {
         }
     }
 
-    QueryBody {
+    SelectStatement {
         from: from.unwrap(),
         where_clause,
         select,
@@ -956,6 +970,11 @@ fn parse_atomic_expression(pairs: pest::iterators::Pairs<Rule>) -> Expression {
             }))
         }
         Rule::expression => parse_expression(pair.into_inner()),
+        Rule::subquery => {
+            let mut pairs = pair.into_inner().peekable();
+            let statement = parse_select_statement(pairs.next().unwrap().into_inner());
+            Expression::Atomic(AtomicExpression::SubQuery(Box::new(statement)))
+        }
         _ => {
             dbg!(&pair);
             unreachable!()
@@ -1012,6 +1031,12 @@ mod tests {
     #[test]
     fn simple_delete_test() {
         let input = include_str!("../examples/simple-delete.nsql");
+        dbg!("{:?}", parse_module(&input).unwrap());
+    }
+
+    #[test]
+    fn delete_with_subquery_test() {
+        let input = include_str!("../examples/delete-with-subquery.nsql");
         dbg!("{:?}", parse_module(&input).unwrap());
     }
 }

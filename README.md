@@ -18,8 +18,6 @@ Feel free to use Issues or PRs. There are no specific rules for now.
 Please refer to the following **Roadmap** when contributing.
 
 ## Roadmap
-- parsing mutation
-  - delete
 - migration
   - create
   - comment

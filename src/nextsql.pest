@@ -42,7 +42,8 @@ multiplicative_expression = { unary_expression ~ ((multiply | divide | rem) ~ un
 unary_expression = { (not ~ atomic_expression) | atomic_expression }
 call_expression = { ident ~ ("(" ~ ")" | "(" ~ expression ~ (s* ~ "," ~ expression)* ~ ")")}
 index_access = { (call_expression | literal | variable | "(" ~ expression ~ ")") ~ ("[" ~ expression ~ "]")+ }
-atomic_expression = { index_access | call_expression | column | literal | variable | "(" ~ expression ~ ")" }
+subquery = { "$(" ~ select_statement ~ ")" }
+atomic_expression = { index_access | call_expression | subquery | column | literal | variable | "(" ~ expression ~ ")" }
 
 alias = @{ "<" ~ ident ~ ">" }
 target = @{ ident ~ alias? }
@@ -91,7 +92,10 @@ array_type = { "[" ~ type ~ "]" }
 type = { (array_type | builtin_type | utility_type | user_defined_type) ~ question_mark? }
 argument = { variable ~ ":" ~ type }
 argument_list = { "(" ~ ")" | "(" ~ argument ~ (s* ~ "," ~ argument)* ~ ")" }
-query_body = { "{" ~ from_clause ~ where_clause? ~ select_clause ~ "}" }
+
+select_statement = { from_clause ~ where_clause? ~ select_clause }
+
+query_body = { "{" ~ select_statement ~ "}" }
 query_decl = { "query" ~ ident ~ argument_list? }
 query = { query_decl ~ query_body }
 
