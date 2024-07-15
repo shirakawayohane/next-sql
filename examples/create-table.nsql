@@ -1,0 +1,18 @@
+migration createUser {
+  up {
+    createTable(users, {
+      id: uuid, pk,
+      name: string<16>,
+      age: i32
+    })
+
+    createTable(profiles, {
+      user_id: uuid, fk(users.id),
+      content: string
+    })
+  }
+
+  down {
+    dropTable(users)
+  }
+}

@@ -112,4 +112,26 @@ mutation_body = { "{" ~
 ~ "}" }
 mutation = { mutation_decl ~ mutation_body }
 
+migration_decl = { "migration" ~ ident }
+create_table_statement = { "createTable" ~ "(" ~ ident ~ "," ~ "{" ~ column_def ~ (s* ~ "," ~ column_def)* ~ "}" ~ ")" }
+
+
+pk_constarint = @{ "pk" }
+ondelete_mode = { "cascade" | "set null" | "restrict" }
+onupdate_mode = { "cascade" | "set null" | "restrict" }
+fk_option = { "onDelete" ~ ":" ~ ondelete_mode | "onUpdate" ~ ":" ~ onupdate_mode }
+fk_options = { "{" ~ fk_option+ ~ "}" }
+fk_constraint = { "fk" ~ "(" ~ column ~ "," ~ fk_options? ~ ")" }
+constraint = { pk_constarint | fk_constraint }
+column_def = { ident ~ ":" ~ type ~ ("," ~ constraint)? }
+
+drop_table_statement = { "dropTable" ~ "(" ~ ident ~ ")" }
+
+migration_statement = { create_table_statement | drop_table_statement }
+
+up_block = { "up" ~ "{" ~ migration_statement* ~ "}" }
+down_block = { "down" ~ "{" ~ migration_statement* ~ "}" }
+migration_body = { "{" ~ up_block ~ down_block ~ "}" }
+migration = { migration_decl ~ migration_body }
+
 module = { SOI ~ (query | mutation)* ~ EOI }
