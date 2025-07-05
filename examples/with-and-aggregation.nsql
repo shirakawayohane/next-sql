@@ -9,8 +9,8 @@ with amountByProducts = {
 
 query aggregateResult {
   from(
-       orderByProducts<o>
-    >< products<p>, o.product_id = p.id
+       amountByProducts<o>
+    >< products<p>, o.product_id == p.id
   )
   .select(name, total_sales: p.price * o.total_amounts)
   .orderBy(total_sales)

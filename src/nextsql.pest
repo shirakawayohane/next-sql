@@ -53,7 +53,9 @@ when_expression = { "when" ~ "(" ~ expression ~ "," ~ expression ~ ")" }
 switch_case = { "case" ~ expression ~ ":" ~ expression }
 switch_default = { "default" ~ ":" ~ expression }
 switch_expression = { "switch" ~ "(" ~ expression ~ ")" ~ "{" ~ switch_case* ~ switch_default? ~ "}" }
-atomic_expression = { member_expression | when_expression | switch_expression | subquery | "(" ~ expression ~ ")" }
+exists_expression = { "exists" ~ "(" ~ subquery ~ ")" }
+aggregate_function = { ("SUM" | "COUNT" | "AVG" | "MIN" | "MAX") ~ "(" ~ expression ~ ")" }
+atomic_expression = { member_expression | when_expression | switch_expression | exists_expression | aggregate_function | subquery | "(" ~ expression ~ ")" }
 
 alias = @{ "<" ~ ident ~ ">" }
 target = @{ ident ~ alias? }
@@ -78,11 +80,15 @@ set_clause = { dot ~ "set" ~ "(" ~ "{" ~ ident ~ ":" ~ expression ~ (s* ~ "," ~ 
 returning_clause = { dot ~ "returning" ~ "(" ~ column ~ (s* ~ "," ~ column)* ~ ")" }
 
 where_clause = { dot ~ "where" ~ "(" ~ expression ~ ")" }
-select_clause = { dot ~ "select" ~ "(" ~ expression ~ (s* ~ "," ~ expression)* ~ ")" }
+select_expression = { ident ~ ":" ~ expression | expression }
+select_clause = { dot ~ "select" ~ "(" ~ select_expression ~ (s* ~ "," ~ select_expression)* ~ ")" }
 when_clause = { dot ~ "when" ~ "(" ~ expression ~ "," ~ call_expression ~ ")" }
 join_clause = { "join" ~ "(" ~ target ~ "," ~ expression ~ ")" }
-limit_clause = { "limit" ~ "(" ~ expression ~ ")" }
-order_by_clause = { "orderBy" ~ "(" ~ expression ~ ")" }
+limit_clause = { dot ~ "limit" ~ "(" ~ expression ~ ")" }
+order_by_clause = { dot ~ "orderBy" ~ "(" ~ expression ~ ")" }
+group_by_clause = { dot ~ "groupBy" ~ "(" ~ expression ~ (s* ~ "," ~ expression)* ~ ")" }
+aggregate_expr = { ident ~ ":" ~ expression }
+aggregate_clause = { dot ~ "aggregate" ~ "(" ~ aggregate_expr ~ (s* ~ "," ~ aggregate_expr)* ~ ")" }
 
 i16_type = @{ "i16" }
 i32_type = @{ "i32" }
@@ -107,7 +113,7 @@ type = { (array_type | builtin_type | utility_type | user_defined_type) ~ questi
 argument = { variable ~ ":" ~ type }
 argument_list = { "(" ~ ")" | "(" ~ argument ~ (s* ~ "," ~ argument)* ~ ")" }
 
-select_statement = { from_clause ~ (when_clause | where_clause | limit_clause | order_by_clause)* ~ select_clause }
+select_statement = { from_clause ~ (when_clause | where_clause | group_by_clause | aggregate_clause)* ~ select_clause ~ (limit_clause | order_by_clause)* }
 
 query_body = { "{" ~ select_statement ~ "}" }
 query_decl = { "query" ~ ident ~ argument_list? }
@@ -148,4 +154,5 @@ down_block = { "down" ~ "{" ~ migration_statement* ~ "}" }
 migration_body = { "{" ~ up_block ~ down_block ~ "}" }
 migration = { migration_decl ~ migration_body }
 
-module = { SOI ~ (query | mutation)* ~ EOI }
+with_statement = { "with" ~ ident ~ "=" ~ "{" ~ select_statement ~ "}" }
+module = { SOI ~ (with_statement | query | mutation)* ~ EOI }

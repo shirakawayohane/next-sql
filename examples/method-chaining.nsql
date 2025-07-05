@@ -1,0 +1,36 @@
+// Example demonstrating method chaining and property access
+query demonstrateMethodChaining($searchTerm: string, $tags: [string]) {
+  from(posts)
+  .where(
+    // Property access on variables
+    $searchTerm.length > 0 &&
+    
+    // Method chaining on columns
+    posts.title.toLowerCase().trim() == $searchTerm.toLowerCase() &&
+    
+    // Method calls with arguments
+    posts.tags.contains($tags[0]) &&
+    
+    // Multiple method calls in chain
+    posts.content.substring(0, 100).toLowerCase().includes($searchTerm)
+  )
+  .select(
+    posts.id,
+    posts.title,
+    preview: posts.content.substring(0, 200),
+    posts.tags
+  )
+}
+
+// Example with complex expressions
+query searchWithFilters($keyword: string, $categoryIds: [uuid]) {
+  from(articles<a>)
+  .where(
+    // Method call on expression result
+    a.title.toLowerCase().includes($keyword) &&
+    
+    // Method on column with argument
+    a.category_id.in($categoryIds)
+  )
+  .select(a.*)
+}

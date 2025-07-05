@@ -4,6 +4,7 @@ use std::{collections::HashMap, fmt::Display};
 pub enum TopLevel {
     Query(Query),
     Mutation(Mutation),
+    With(WithStatement),
 }
 
 #[derive(Debug, PartialEq)]
@@ -81,6 +82,21 @@ pub enum UnaryOp {
 }
 
 #[derive(Debug, PartialEq, Clone)]
+pub enum AggregateFunctionType {
+    Sum,
+    Count,
+    Avg,
+    Min,
+    Max,
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct AggregateFunction {
+    pub function_type: AggregateFunctionType,
+    pub expr: Box<Expression>,
+}
+
+#[derive(Debug, PartialEq, Clone)]
 pub enum AtomicExpression {
     Column(Column),
     Literal(Literal),
@@ -92,6 +108,8 @@ pub enum AtomicExpression {
     SubQuery(Box<SelectStatement>),
     When(WhenExpression),
     Switch(SwitchExpression),
+    Aggregate(AggregateFunction),
+    Exists(Box<SelectStatement>),
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -254,13 +272,33 @@ pub struct SwitchExpression {
 }
 
 #[derive(Debug, PartialEq, Clone)]
+pub struct SelectExpression {
+    pub expr: Expression,
+    pub alias: Option<String>,
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct AggregateExpression {
+    pub alias: String,
+    pub expr: Expression,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct WithStatement {
+    pub name: String,
+    pub query: SelectStatement,
+}
+
+#[derive(Debug, PartialEq, Clone)]
 pub enum QueryClause {
     Where(Expression),
-    Select(Vec<Expression>),
+    Select(Vec<SelectExpression>),
     When(WhenClause),
     Limit(Expression),
     OrderBy(Expression),
     Join(JoinExpr),
+    GroupBy(Vec<Expression>),
+    Aggregate(Vec<AggregateExpression>),
 }
 
 #[derive(Debug, PartialEq, Clone)]

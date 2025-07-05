@@ -311,6 +311,9 @@ fn handle_parse_command(file: PathBuf) -> Result<(), Box<dyn std::error::Error>>
                     ast::TopLevel::Mutation(mutation) => {
                         println!("  {}: Mutation '{}'", i + 1, mutation.decl.name);
                     }
+                    ast::TopLevel::With(with_statement) => {
+                        println!("  {}: With '{}'", i + 1, with_statement.name);
+                    }
                 }
             }
         }
