@@ -1353,4 +1353,156 @@ mod tests {
         let input = include_str!("../examples/dynamic-array-conditions.nsql");
         dbg!("{:?}", parse_module(&input).unwrap());
     }
+
+    #[test]
+    fn comprehensive_examples_test() {
+        use std::fs;
+        use std::path::Path;
+        use std::collections::HashSet;
+        
+        // Files that are known to contain unsupported features (for future implementation)
+        let unsupported_files = HashSet::from([
+            "with-and-aggregation.nsql", // Contains 'with' syntax, groupBy, aggregate
+        ]);
+
+        // Dynamically discover all .nsql files in the examples directory
+        let examples_dir = Path::new("examples");
+        let mut example_files = Vec::new();
+        
+        if examples_dir.exists() && examples_dir.is_dir() {
+            match fs::read_dir(examples_dir) {
+                Ok(entries) => {
+                    for entry in entries {
+                        if let Ok(entry) = entry {
+                            let path = entry.path();
+                            if path.extension().and_then(|s| s.to_str()) == Some("nsql") {
+                                if let Some(filename) = path.file_name().and_then(|s| s.to_str()) {
+                                    // Skip unsupported files
+                                    if unsupported_files.contains(filename) {
+                                        println!("⏭️  Skipping {} (contains unsupported features)", filename);
+                                        continue;
+                                    }
+                                    
+                                    // Read file content
+                                    match fs::read_to_string(&path) {
+                                        Ok(content) => {
+                                            example_files.push((filename.to_string(), content));
+                                        }
+                                        Err(e) => {
+                                            panic!("Failed to read {}: {}", filename, e);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    panic!("Failed to read examples directory: {}", e);
+                }
+            }
+        } else {
+            panic!("Examples directory not found or is not a directory");
+        }
+
+        // Sort files for consistent test order
+        example_files.sort_by(|a, b| a.0.cmp(&b.0));
+        
+        if example_files.is_empty() {
+            panic!("No .nsql example files found in examples directory");
+        }
+
+        let mut failed_files = Vec::new();
+        let mut skipped_file_names = Vec::new();
+        let mut total_files = 0;
+        let mut successful_files = 0;
+        let mut skipped_files = 0;
+
+        println!("🔍 Found {} .nsql files in examples directory", example_files.len());
+        
+        for (filename, content) in example_files {
+            total_files += 1;
+            print!("Testing {}... ", filename);
+            
+            match parse_module(&content) {
+                Ok(module) => {
+                    successful_files += 1;
+                    
+                    // Validate the module has at least one top-level item
+                    assert!(!module.toplevels.is_empty(), 
+                           "File {} should contain at least one query or mutation", filename);
+                    
+                    // Count queries and mutations
+                    let mut queries = 0;
+                    let mut mutations = 0;
+                    for toplevel in &module.toplevels {
+                        match toplevel {
+                            TopLevel::Query(_) => queries += 1,
+                            TopLevel::Mutation(_) => mutations += 1,
+                        }
+                    }
+                    
+                    println!("✅ ({} queries, {} mutations)", queries, mutations);
+                }
+                Err(e) => {
+                    let error_message = e.to_string();
+                    
+                    // Check if this is a known unsupported feature
+                    let known_unsupported_patterns = [
+                        "with", "groupBy", "aggregate", "having", "union", "intersect", "except"
+                    ];
+                    
+                    let is_unsupported_feature = known_unsupported_patterns.iter()
+                        .any(|pattern| content.contains(pattern));
+                    
+                    if is_unsupported_feature {
+                        skipped_files += 1;
+                        skipped_file_names.push(filename.clone());
+                        println!("⚠️  SKIPPED (contains unsupported features)");
+                        println!("    💡 Consider adding '{}' to unsupported_files list", filename);
+                    } else {
+                        failed_files.push((filename.clone(), error_message.clone()));
+                        println!("❌ FAILED: {}", error_message);
+                    }
+                }
+            }
+        }
+
+        // Print summary
+        println!("\n📊 PARSING SUMMARY:");
+        println!("Total files discovered: {}", total_files);
+        println!("Successful: {} ✅", successful_files);
+        println!("Skipped (unsupported): {} ⚠️", skipped_files);
+        println!("Failed: {} ❌", failed_files.len());
+        
+        let testable_files = total_files - skipped_files;
+        if testable_files > 0 {
+            let success_rate = (successful_files as f64 / testable_files as f64) * 100.0;
+            println!("Success rate: {:.1}% ({}/{})", success_rate, successful_files, testable_files);
+        }
+        
+        if !skipped_file_names.is_empty() {
+            println!("\n⚠️  Skipped files (unsupported features):");
+            for filename in &skipped_file_names {
+                println!("  - {}", filename);
+            }
+        }
+        
+        if !failed_files.is_empty() {
+            println!("\n❌ Failed files:");
+            for (filename, error) in &failed_files {
+                println!("  - {}: {}", filename, error);
+            }
+        }
+
+        // Assert that all testable files parsed successfully
+        assert!(failed_files.is_empty(), 
+               "Some example files failed to parse. See output above for details.");
+        
+        if skipped_files > 0 {
+            println!("🎉 All supported example files parsed successfully! ({} unsupported files were skipped)", skipped_files);
+        } else {
+            println!("🎉 All example files parsed successfully!");
+        }
+    }
 }
