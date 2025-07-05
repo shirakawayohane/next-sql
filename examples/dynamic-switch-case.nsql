@@ -1,0 +1,10 @@
+query searchUsers($searchType: string, $searchValue: string) {
+  from(users)
+  .where(
+    when($searchType == "email", users.email == $searchValue)
+    || when($searchType == "name", users.name.contains($searchValue))
+    || when($searchType == "phone", users.phone == $searchValue)
+    || true
+  )
+  .select(users.*)
+}

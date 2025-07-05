@@ -1,0 +1,7 @@
+query filterUsers($statuses: [string], $departments: [string]?) {
+  from(users)
+  .when($statuses.length > 0, where(users.status.in($statuses)))
+  .when($departments != null && $departments.length > 0, 
+        where(users.department.in($departments)))
+  .select(users.*)
+}

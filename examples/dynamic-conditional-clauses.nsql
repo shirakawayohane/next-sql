@@ -1,0 +1,8 @@
+query findUsers($name: string?, $age: i32?, $sortBy: string?) {
+  from(users)
+  .when($name != null, where(users.name == $name))
+  .when($age != null, where(users.age >= $age))
+  .when($sortBy == "name", orderBy(users.name))
+  .when($sortBy == "age", orderBy(users.age))
+  .select(users.*)
+}

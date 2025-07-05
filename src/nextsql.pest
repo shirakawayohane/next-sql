@@ -3,6 +3,7 @@ s = _{ WHITESPACE }
 COMMENT = _{ ("/*" ~ (!"*/" ~ ANY)* ~ "*/") | ("//" ~ (!("\r\n" | "\n") ~ ANY)*) }
 bool_true = @{ "true" }
 bool_false = @{ "false" }
+null = @{ "null" }
 
 ident = ${ !ASCII_DIGIT ~ (ASCII_ALPHANUMERIC | "_")+ }
 wildcard = @{ "*" }
@@ -29,9 +30,10 @@ number_seq = _{ ASCII_DIGIT+ }
 numeric_literal = { number_seq ~ ("." ~ number_seq+)? }
 string_literal = { "\"" ~ (!("\"") ~ ANY)* ~ "\"" }
 boolean_literal = { bool_false | bool_true }
+null_literal = { null }
 object_literal = { "{" ~ s* ~ (ident ~ ":" ~ expression ~ (s* ~ "," ~ ident ~ ":" ~ expression)*) ~ ","? ~ "}" }
 array_literal = { "[" ~ expression ~ (s* ~ "," ~ expression)* ~ "]" }
-literal = { object_literal | array_literal | numeric_literal | string_literal | boolean_literal }
+literal = { object_literal | array_literal | numeric_literal | string_literal | boolean_literal | null_literal }
 variable = { "$" ~ ident }
 expression = { logical_expression }
 logical_expression = { equality_expression ~ ((and | or) ~ equality_expression)* }
@@ -40,10 +42,18 @@ relational_expression = { additive_expression ~ ((le | ge | lt | gt) ~ additive_
 additive_expression = { multiplicative_expression ~ ((add | subtract) ~ multiplicative_expression)* }
 multiplicative_expression = { unary_expression ~ ((multiply | divide | rem) ~ unary_expression)* }
 unary_expression = { (not ~ atomic_expression) | atomic_expression }
+basic_expression = { call_expression | literal | variable | column | "(" ~ expression ~ ")" }
+property_access = { basic_expression ~ ("." ~ ident)+ }
+method_call = { (basic_expression | property_access) ~ ("." ~ ident ~ "(" ~ (expression ~ (s* ~ "," ~ expression)*)? ~ ")")+ }
+index_access = { (basic_expression | property_access | method_call) ~ ("[" ~ expression ~ "]")+ }
 call_expression = { ident ~ ("(" ~ ")" | "(" ~ expression ~ (s* ~ "," ~ expression)* ~ ")")}
-index_access = { (call_expression | literal | variable | "(" ~ expression ~ ")") ~ ("[" ~ expression ~ "]")+ }
+member_expression = { index_access | method_call | property_access | basic_expression }
 subquery = { "$(" ~ select_statement ~ ")" }
-atomic_expression = { index_access | call_expression | subquery | column | literal | variable | "(" ~ expression ~ ")" }
+when_expression = { "when" ~ "(" ~ expression ~ "," ~ expression ~ ")" }
+switch_case = { "case" ~ expression ~ ":" ~ expression }
+switch_default = { "default" ~ ":" ~ expression }
+switch_expression = { "switch" ~ "(" ~ expression ~ ")" ~ "{" ~ switch_case* ~ switch_default? ~ "}" }
+atomic_expression = { member_expression | when_expression | switch_expression | subquery | "(" ~ expression ~ ")" }
 
 alias = @{ "<" ~ ident ~ ">" }
 target = @{ ident ~ alias? }
@@ -69,6 +79,10 @@ returning_clause = { dot ~ "returning" ~ "(" ~ column ~ (s* ~ "," ~ column)* ~ "
 
 where_clause = { dot ~ "where" ~ "(" ~ expression ~ ")" }
 select_clause = { dot ~ "select" ~ "(" ~ expression ~ (s* ~ "," ~ expression)* ~ ")" }
+when_clause = { dot ~ "when" ~ "(" ~ expression ~ "," ~ call_expression ~ ")" }
+join_clause = { "join" ~ "(" ~ target ~ "," ~ expression ~ ")" }
+limit_clause = { "limit" ~ "(" ~ expression ~ ")" }
+order_by_clause = { "orderBy" ~ "(" ~ expression ~ ")" }
 
 i16_type = @{ "i16" }
 i32_type = @{ "i32" }
@@ -93,7 +107,7 @@ type = { (array_type | builtin_type | utility_type | user_defined_type) ~ questi
 argument = { variable ~ ":" ~ type }
 argument_list = { "(" ~ ")" | "(" ~ argument ~ (s* ~ "," ~ argument)* ~ ")" }
 
-select_statement = { from_clause ~ where_clause? ~ select_clause }
+select_statement = { from_clause ~ (when_clause | where_clause | limit_clause | order_by_clause)* ~ select_clause }
 
 query_body = { "{" ~ select_statement ~ "}" }
 query_decl = { "query" ~ ident ~ argument_list? }

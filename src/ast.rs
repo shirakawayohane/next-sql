@@ -1,38 +1,5 @@
 use std::{collections::HashMap, fmt::Display};
 
-pub enum ASTNode {
-    Module(Module),
-    TopLevel(TopLevel),
-    Query(Query),
-    Mutation(Mutation),
-    Target(Target),
-    FromExpr(FromExpr),
-    JoinExpr(JoinExpr),
-    JoinType(JoinType),
-    Expression(Expression),
-    BinaryOp(BinaryOp),
-    UnaryOp(UnaryOp),
-    AtomicExpression(AtomicExpression),
-    Column(Column),
-    Literal(Literal),
-    CallExpression(CallExpression),
-    IndexAccess(IndexAccess),
-    ArrayExpression(ArrayExpression),
-    Variable(Variable),
-    ObjectLiteralExpression(ObjectLiteralExpression),
-    BuiltInType(BuiltInType),
-    Insertable(Insertable),
-    UtilityType(UtilityType),
-    Type(Type),
-    Argument(Argument),
-    QueryDecl(QueryDecl),
-    QueryBody(SelectStatement),
-    MutationDecl(MutationDecl),
-    Insert(Insert),
-    Update(Update),
-    MutationBody(MutationBody),
-}
-
 #[derive(Debug, PartialEq)]
 pub enum TopLevel {
     Query(Query),
@@ -44,19 +11,19 @@ pub struct Module {
     pub toplevels: Vec<TopLevel>,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct Target {
     pub name: String,
     pub alias: Option<String>,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct FromExpr {
     pub target: Target,
     pub joins: Vec<JoinExpr>,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum JoinType {
     Inner,
     Left,
@@ -65,14 +32,14 @@ pub enum JoinType {
     Cross,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct JoinExpr {
     pub join_type: JoinType,
     pub target: Target,
     pub condition: Expression,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Expression {
     Binary {
         left: Box<Expression>,
@@ -86,7 +53,7 @@ pub enum Expression {
     Atomic(AtomicExpression),
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum BinaryOp {
     // 論理演算子
     And,
@@ -108,22 +75,26 @@ pub enum BinaryOp {
     Remainder,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum UnaryOp {
     Not,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum AtomicExpression {
     Column(Column),
     Literal(Literal),
     Variable(Variable),
     Call(CallExpression),
     IndexAccess(IndexAccess),
+    PropertyAccess(PropertyAccess),
+    MethodCall(MethodCall),
     SubQuery(Box<SelectStatement>),
+    When(WhenExpression),
+    Switch(SwitchExpression),
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Column {
     ImplicitTarget(String),
     ExplicitTarget(String, String),
@@ -131,36 +102,50 @@ pub enum Column {
     Wildcard,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Literal {
     Numeric(f64),
     String(String),
     Boolean(bool),
+    Null,
     Object(ObjectLiteralExpression),
     Array(ArrayExpression),
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct CallExpression {
     pub callee: String,
     pub args: Vec<Expression>,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct IndexAccess {
     pub target: Box<Expression>,
     pub index: Box<Expression>,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
+pub struct PropertyAccess {
+    pub target: Box<Expression>,
+    pub property: String,
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct MethodCall {
+    pub target: Box<Expression>,
+    pub method: String,
+    pub args: Vec<Expression>,
+}
+
+#[derive(Debug, PartialEq, Clone)]
 pub struct ArrayExpression(pub Vec<Expression>);
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct Variable {
     pub name: String,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct ObjectLiteralExpression(pub HashMap<String, Expression>);
 
 #[derive(Debug, PartialEq)]
@@ -249,11 +234,45 @@ pub struct QueryDecl {
     pub arguments: Vec<Argument>,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
+pub struct WhenExpression {
+    pub condition: Box<Expression>,
+    pub then_expr: Box<Expression>,
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct SwitchCase {
+    pub condition: Box<Expression>,
+    pub result: Box<Expression>,
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct SwitchExpression {
+    pub expr: Box<Expression>,
+    pub cases: Vec<SwitchCase>,
+    pub default: Option<Box<Expression>>,
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum QueryClause {
+    Where(Expression),
+    Select(Vec<Expression>),
+    When(WhenClause),
+    Limit(Expression),
+    OrderBy(Expression),
+    Join(JoinExpr),
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct WhenClause {
+    pub condition: Box<Expression>,
+    pub clause: Box<QueryClause>,
+}
+
+#[derive(Debug, PartialEq, Clone)]
 pub struct SelectStatement {
     pub from: FromExpr,
-    pub where_clause: Option<Expression>,
-    pub select: Vec<Expression>,
+    pub clauses: Vec<QueryClause>,
 }
 
 #[derive(Debug, PartialEq)]

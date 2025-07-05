@@ -1,0 +1,10 @@
+query getUser($id: uuid, $includeEmail: bool, $includePhone: bool) {
+  from(users)
+  .where(users.id == $id)
+  .select(
+    users.id,
+    users.name,
+    when($includeEmail, users.email),
+    when($includePhone, users.phone)
+  )
+}

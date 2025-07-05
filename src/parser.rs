@@ -335,7 +335,7 @@ fn test_parse_returning_clause() {
     assert_eq!(1, clause.len());
 }
 fn parse_returning_clause(pairs: pest::iterators::Pairs<Rule>) -> Vec<Column> {
-    let mut pairs = pairs.peekable();
+    let pairs = pairs.peekable();
     pairs.map(|p| parse_column(p.into_inner())).collect()
 }
 
@@ -585,22 +585,78 @@ fn parse_from_expr(pairs: pest::iterators::Pairs<Rule>) -> FromExpr {
 
 fn parse_select_statement(pairs: pest::iterators::Pairs<Rule>) -> SelectStatement {
     let mut from = None;
-    let mut where_clause = None;
-    let mut select = Vec::new();
+    let mut clauses = Vec::new();
 
     for pair in pairs {
         match pair.as_rule() {
             Rule::from_clause => from = Some(parse_from_expr(pair.into_inner())),
             Rule::where_clause => {
-                where_clause = Some(parse_expression(
+                let expr = parse_expression(
                     pair.into_inner().next().unwrap().into_inner(),
-                ));
+                );
+                clauses.push(QueryClause::Where(expr));
             }
             Rule::select_clause => {
-                select = pair
+                let select_exprs: Vec<Expression> = pair
                     .into_inner()
                     .map(|p| parse_expression(p.into_inner()))
                     .collect();
+                clauses.push(QueryClause::Select(select_exprs));
+            }
+            Rule::when_clause => {
+                let mut clause_pairs = pair.into_inner();
+                let condition = parse_expression(clause_pairs.next().unwrap().into_inner());
+                let call_expr = parse_call_expression(clause_pairs.next().unwrap().into_inner());
+                
+                // Convert call expression to appropriate clause type
+                let clause_body = match call_expr {
+                    Expression::Atomic(AtomicExpression::Call(call)) => {
+                        match call.callee.as_str() {
+                            "where" => QueryClause::Where(call.args[0].clone()),
+                            "select" => QueryClause::Select(call.args.clone()),
+                            "orderBy" => QueryClause::OrderBy(call.args[0].clone()),
+                            "limit" => QueryClause::Limit(call.args[0].clone()),
+                            "join" => {
+                                // For join, parse the first argument as target and second as condition
+                                if call.args.len() != 2 {
+                                    unreachable!("Join requires exactly 2 arguments");
+                                }
+                                
+                                // Extract target from the first argument (assumed to be a column reference)
+                                let target = match &call.args[0] {
+                                    Expression::Atomic(AtomicExpression::Column(Column::ImplicitTarget(name))) => {
+                                        Target { name: name.clone(), alias: None }
+                                    }
+                                    Expression::Atomic(AtomicExpression::Column(Column::ExplicitTarget(name, alias))) => {
+                                        Target { name: name.clone(), alias: Some(alias.clone()) }
+                                    }
+                                    _ => unreachable!("Join first argument should be a table reference"),
+                                };
+                                
+                                QueryClause::Join(JoinExpr {
+                                    join_type: JoinType::Inner,
+                                    target,
+                                    condition: call.args[1].clone(),
+                                })
+                            }
+                            _ => unreachable!("Unsupported clause type: {}", call.callee),
+                        }
+                    }
+                    _ => unreachable!("Expected call expression"),
+                };
+                
+                clauses.push(QueryClause::When(WhenClause {
+                    condition: Box::new(condition),
+                    clause: Box::new(clause_body),
+                }));
+            }
+            Rule::limit_clause => {
+                let expr = parse_expression(pair.into_inner().next().unwrap().into_inner());
+                clauses.push(QueryClause::Limit(expr));
+            }
+            Rule::order_by_clause => {
+                let expr = parse_expression(pair.into_inner().next().unwrap().into_inner());
+                clauses.push(QueryClause::OrderBy(expr));
             }
             _ => {
                 unreachable!()
@@ -610,8 +666,28 @@ fn parse_select_statement(pairs: pest::iterators::Pairs<Rule>) -> SelectStatemen
 
     SelectStatement {
         from: from.unwrap(),
-        where_clause,
-        select,
+        clauses,
+    }
+}
+
+
+#[test]
+fn test_when_expression() {
+    let input = "when($includeEmail, users.email)";
+    let pairs = match NextSqlParser::parse(Rule::expression, &input) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("パースエラー: {}", e);
+            return;
+        }
+    };
+    let expr = parse_expression(pairs.peekable().next().unwrap().into_inner());
+    match expr {
+        Expression::Atomic(AtomicExpression::Call(call)) => {
+            assert_eq!(call.callee, "when");
+            assert_eq!(call.args.len(), 2);
+        },
+        _ => panic!("Expected when call expression, got: {:?}", expr),
     }
 }
 
@@ -766,6 +842,47 @@ fn parse_expression(pairs: pest::iterators::Pairs<Rule>) -> Expression {
         Rule::multiplicative_expression => parse_multiplicative_expression(pair.into_inner()),
         Rule::unary_expression => parse_unary_expression(pair.into_inner()),
         Rule::atomic_expression => parse_atomic_expression(pair.into_inner()),
+        Rule::when_expression => {
+            let mut pairs = pair.into_inner().peekable();
+            let condition = parse_expression(pairs.next().unwrap().into_inner());
+            let then_expr = parse_expression(pairs.next().unwrap().into_inner());
+            Expression::Atomic(AtomicExpression::When(WhenExpression {
+                condition: Box::new(condition),
+                then_expr: Box::new(then_expr),
+            }))
+        }
+        Rule::switch_expression => {
+            let mut pairs = pair.into_inner().peekable();
+            let expr = parse_expression(pairs.next().unwrap().into_inner());
+            let mut cases = Vec::new();
+            let mut default = None;
+            
+            for case_pair in pairs {
+                match case_pair.as_rule() {
+                    Rule::switch_case => {
+                        let mut case_pairs = case_pair.into_inner();
+                        let condition = parse_expression(case_pairs.next().unwrap().into_inner());
+                        let result = parse_expression(case_pairs.next().unwrap().into_inner());
+                        cases.push(SwitchCase {
+                            condition: Box::new(condition),
+                            result: Box::new(result),
+                        });
+                    }
+                    Rule::switch_default => {
+                        let mut default_pairs = case_pair.into_inner();
+                        let result = parse_expression(default_pairs.next().unwrap().into_inner());
+                        default = Some(Box::new(result));
+                    }
+                    _ => unreachable!(),
+                }
+            }
+            
+            Expression::Atomic(AtomicExpression::Switch(SwitchExpression {
+                expr: Box::new(expr),
+                cases,
+                default,
+            }))
+        }
         _ => {
             dbg!(&pair);
             unreachable!()
@@ -958,6 +1075,9 @@ fn parse_literal_expression(pairs: pest::iterators::Pairs<Rule>) -> Expression {
             let b = pair.as_str() == "true";
             AtomicExpression::Literal(Literal::Boolean(b))
         }
+        Rule::null_literal => {
+            AtomicExpression::Literal(Literal::Null)
+        }
         Rule::object_literal => {
             let mut pairs = pair.into_inner();
             let mut map: HashMap<String, Expression> = HashMap::new();
@@ -1024,11 +1144,126 @@ fn parse_atomic_expression(pairs: pest::iterators::Pairs<Rule>) -> Expression {
             let statement = parse_select_statement(pairs.next().unwrap().into_inner());
             Expression::Atomic(AtomicExpression::SubQuery(Box::new(statement)))
         }
+        Rule::when_expression => {
+            let mut pairs = pair.into_inner().peekable();
+            let condition = parse_expression(pairs.next().unwrap().into_inner());
+            let then_expr = parse_expression(pairs.next().unwrap().into_inner());
+            Expression::Atomic(AtomicExpression::When(WhenExpression {
+                condition: Box::new(condition),
+                then_expr: Box::new(then_expr),
+            }))
+        }
+        Rule::switch_expression => {
+            let mut pairs = pair.into_inner().peekable();
+            let expr = parse_expression(pairs.next().unwrap().into_inner());
+            let mut cases = Vec::new();
+            let mut default = None;
+            
+            for case_pair in pairs {
+                match case_pair.as_rule() {
+                    Rule::switch_case => {
+                        let mut case_pairs = case_pair.into_inner();
+                        let condition = parse_expression(case_pairs.next().unwrap().into_inner());
+                        let result = parse_expression(case_pairs.next().unwrap().into_inner());
+                        cases.push(SwitchCase {
+                            condition: Box::new(condition),
+                            result: Box::new(result),
+                        });
+                    }
+                    Rule::switch_default => {
+                        let mut default_pairs = case_pair.into_inner();
+                        let result = parse_expression(default_pairs.next().unwrap().into_inner());
+                        default = Some(Box::new(result));
+                    }
+                    _ => unreachable!(),
+                }
+            }
+            
+            Expression::Atomic(AtomicExpression::Switch(SwitchExpression {
+                expr: Box::new(expr),
+                cases,
+                default,
+            }))
+        }
+        Rule::member_expression => parse_member_expression(pair.into_inner()),
+        Rule::property_access => parse_property_access(pair.into_inner()),
+        Rule::method_call => parse_method_call(pair.into_inner()),
+        Rule::basic_expression => parse_basic_expression(pair.into_inner()),
         _ => {
             dbg!(&pair);
             unreachable!()
         }
     }
+}
+
+fn parse_member_expression(pairs: pest::iterators::Pairs<Rule>) -> Expression {
+    let pair = pairs.peek().unwrap();
+    match pair.as_rule() {
+        Rule::index_access => parse_index_access(pair.into_inner()),
+        Rule::method_call => parse_method_call(pair.into_inner()),
+        Rule::property_access => parse_property_access(pair.into_inner()),
+        Rule::basic_expression => parse_basic_expression(pair.into_inner()),
+        _ => unreachable!(),
+    }
+}
+
+fn parse_basic_expression(pairs: pest::iterators::Pairs<Rule>) -> Expression {
+    let pair = pairs.peek().unwrap();
+    match pair.as_rule() {
+        Rule::call_expression => parse_call_expression(pair.into_inner()),
+        Rule::literal => parse_literal_expression(pair.into_inner()),
+        Rule::variable => Expression::Atomic(AtomicExpression::Variable(parse_variable(pairs))),
+        Rule::column => Expression::Atomic(AtomicExpression::Column(parse_column(pair.into_inner()))),
+        Rule::expression => parse_expression(pair.into_inner()),
+        _ => unreachable!(),
+    }
+}
+
+fn parse_property_access(pairs: pest::iterators::Pairs<Rule>) -> Expression {
+    let mut pairs = pairs.peekable();
+    let target_pair = pairs.next().unwrap();
+    let target = parse_basic_expression(target_pair.into_inner());
+    let property = pairs.next().unwrap().as_str().to_string();
+    Expression::Atomic(AtomicExpression::PropertyAccess(PropertyAccess {
+        target: Box::new(target),
+        property,
+    }))
+}
+
+fn parse_method_call(pairs: pest::iterators::Pairs<Rule>) -> Expression {
+    let mut pairs = pairs.peekable();
+    let target_pair = pairs.next().unwrap();
+    let target = match target_pair.as_rule() {
+        Rule::basic_expression => parse_basic_expression(target_pair.into_inner()),
+        Rule::property_access => parse_property_access(target_pair.into_inner()),
+        _ => unreachable!(),
+    };
+    let method = pairs.next().unwrap().as_str().to_string();
+    let mut args = Vec::new();
+    for arg_pair in pairs {
+        args.push(parse_expression(arg_pair.into_inner()));
+    }
+    Expression::Atomic(AtomicExpression::MethodCall(MethodCall {
+        target: Box::new(target),
+        method,
+        args,
+    }))
+}
+
+fn parse_index_access(pairs: pest::iterators::Pairs<Rule>) -> Expression {
+    let mut pairs = pairs.peekable();
+    let target_pair = pairs.next().unwrap();
+    let target = match target_pair.as_rule() {
+        Rule::basic_expression => parse_basic_expression(target_pair.into_inner()),
+        Rule::property_access => parse_property_access(target_pair.into_inner()),
+        Rule::method_call => parse_method_call(target_pair.into_inner()),
+        _ => unreachable!(),
+    };
+    let index = parse_expression(pairs.next().unwrap().into_inner());
+    Expression::Atomic(AtomicExpression::IndexAccess(IndexAccess {
+        target: Box::new(target),
+        index: Box::new(index),
+    }))
 }
 
 #[cfg(test)]
@@ -1086,6 +1321,36 @@ mod tests {
     #[test]
     fn delete_with_subquery_test() {
         let input = include_str!("../examples/delete-with-subquery.nsql");
+        dbg!("{:?}", parse_module(&input).unwrap());
+    }
+
+    #[test]
+    fn dynamic_conditional_clauses_test() {
+        let input = include_str!("../examples/dynamic-conditional-clauses.nsql");
+        dbg!("{:?}", parse_module(&input).unwrap());
+    }
+
+    #[test]
+    fn dynamic_field_selection_test() {
+        let input = include_str!("../examples/dynamic-field-selection.nsql");
+        dbg!("{:?}", parse_module(&input).unwrap());
+    }
+
+    #[test]
+    fn dynamic_joins_test() {
+        let input = include_str!("../examples/dynamic-joins.nsql");
+        dbg!("{:?}", parse_module(&input).unwrap());
+    }
+
+    #[test]
+    fn dynamic_switch_case_test() {
+        let input = include_str!("../examples/dynamic-switch-case.nsql");
+        dbg!("{:?}", parse_module(&input).unwrap());
+    }
+
+    #[test]
+    fn dynamic_array_conditions_test() {
+        let input = include_str!("../examples/dynamic-array-conditions.nsql");
         dbg!("{:?}", parse_module(&input).unwrap());
     }
 }

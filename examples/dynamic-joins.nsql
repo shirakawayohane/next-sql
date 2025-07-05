@@ -1,0 +1,9 @@
+query getUserData($id: uuid, $withOrders: bool, $withProfile: bool) {
+  from(users<u>)
+  .where(u.id == $id)
+  .select(
+    u.*,
+    when($withOrders, u.name),
+    when($withProfile, u.email)
+  )
+}
