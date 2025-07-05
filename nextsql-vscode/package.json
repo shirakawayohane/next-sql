@@ -1,0 +1,46 @@
+{
+  "name": "nextsql-syntax",
+  "displayName": "NextSQL Language Support",
+  "description": "Syntax highlighting for NextSQL language",
+  "version": "0.1.0",
+  "publisher": "nextsql",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "keywords": [
+    "nextsql",
+    "sql",
+    "database",
+    "query",
+    "syntax"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "nextsql",
+        "aliases": ["NextSQL", "nextsql"],
+        "extensions": [".nsql"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "nextsql",
+        "scopeName": "source.nextsql",
+        "path": "./syntaxes/nextsql.tmLanguage.json"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.80.0",
+    "typescript": "^5.0.0"
+  }
+}

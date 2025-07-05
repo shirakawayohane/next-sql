@@ -1,11 +1,7 @@
-extern crate pest;
-#[macro_use]
-extern crate pest_derive;
-
-mod ast;
-mod parser;
 mod migration;
 mod db;
+
+use nextsql_core::*;
 
 use clap::{Parser, Subcommand};
 use migration::{MigrationManager, MigrationDirection};

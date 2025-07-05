@@ -6,7 +6,9 @@
       "Bash(docker-compose:*)",
       "Bash(rustc:*)",
       "Bash(grep:*)",
-      "Bash(RUST_BACKTRACE=full cargo test test_member_expressions -- --nocapture 2 >& 1)"
+      "Bash(RUST_BACKTRACE=full cargo test test_member_expressions -- --nocapture 2 >& 1)",
+      "mcp__o3__o3-search",
+      "Bash(mv:*)"
     ],
     "deny": []
   }

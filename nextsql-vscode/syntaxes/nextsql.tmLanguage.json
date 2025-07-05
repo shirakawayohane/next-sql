@@ -1,0 +1,172 @@
+{
+  "name": "NextSQL",
+  "scopeName": "source.nextsql",
+  "fileTypes": ["nsql"],
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#when-keyword" },
+    { "include": "#keywords" },
+    { "include": "#strings" },
+    { "include": "#numbers" },
+    { "include": "#variables" },
+    { "include": "#operators" },
+    { "include": "#types" },
+    { "include": "#functions" },
+    { "include": "#punctuation" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.block.nextsql",
+          "begin": "/\\*",
+          "end": "\\*/",
+          "patterns": [
+            {
+              "name": "invalid.illegal.nested-comment.nextsql",
+              "match": "/\\*"
+            }
+          ]
+        },
+        {
+          "name": "comment.line.double-slash.nextsql",
+          "match": "//.*$"
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "storage.type.nextsql",
+          "match": "\\b(query|mutation)\\b"
+        },
+        {
+          "name": "keyword.control.nextsql",
+          "match": "\\b(value|values|from|where|select|insert|update|delete|join|inner|left|right|outer|on|group|by|having|order|limit|offset|as|in|not|and|or|if|else|for|while|return|with|case|then|else|end|union|intersect|except|exists|all|any|some|distinct|returning|set|into|drop|create|alter|table|index|constraint|primary|foreign|key|references|unique|check|default|null|true|false)\\b"
+        }
+      ]
+    },
+    "when-keyword": {
+      "patterns": [
+        {
+          "name": "keyword.control.when.nextsql",
+          "match": "\\bwhen\\b"
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.nextsql",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [
+            {
+              "name": "constant.character.escape.nextsql",
+              "match": "\\\\."
+            }
+          ]
+        },
+        {
+          "name": "string.quoted.single.nextsql",
+          "begin": "'",
+          "end": "'",
+          "patterns": [
+            {
+              "name": "constant.character.escape.nextsql",
+              "match": "\\\\."
+            }
+          ]
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.float.nextsql",
+          "match": "\\b\\d+\\.\\d+\\b"
+        },
+        {
+          "name": "constant.numeric.integer.nextsql",
+          "match": "\\b\\d+\\b"
+        }
+      ]
+    },
+    "variables": {
+      "patterns": [
+        {
+          "name": "variable.parameter.nextsql",
+          "match": "\\$[a-zA-Z_][a-zA-Z0-9_]*"
+        }
+      ]
+    },
+    "operators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.comparison.nextsql",
+          "match": "(==|!=|<=|>=|<|>)"
+        },
+        {
+          "name": "keyword.operator.logical.nextsql",
+          "match": "(&&|\\|\\||!)"
+        },
+        {
+          "name": "keyword.operator.arithmetic.nextsql",
+          "match": "(\\+|\\-|\\*|/|%|\\^)"
+        },
+        {
+          "name": "keyword.operator.assignment.nextsql",
+          "match": "="
+        }
+      ]
+    },
+    "types": {
+      "patterns": [
+        {
+          "name": "entity.name.type.nextsql",
+          "match": "\\b(i16|i32|i64|f32|f64|string|bool|uuid|timestamp|date)\\b"
+        },
+        {
+          "name": "entity.name.type.utility.nextsql",
+          "match": "\\b(Insertable)\\b"
+        },
+        {
+          "name": "entity.name.type.optional.nextsql",
+          "match": "\\?"
+        }
+      ]
+    },
+    "functions": {
+      "patterns": [
+        {
+          "name": "entity.name.function.nextsql",
+          "match": "\\b[a-zA-Z_][a-zA-Z0-9_]*(?=\\()"
+        }
+      ]
+    },
+    "punctuation": {
+      "patterns": [
+        {
+          "name": "punctuation.definition.block.nextsql",
+          "match": "[{}]"
+        },
+        {
+          "name": "punctuation.definition.parameters.nextsql",
+          "match": "[()]"
+        },
+        {
+          "name": "punctuation.definition.array.nextsql",
+          "match": "[\\[\\]]"
+        },
+        {
+          "name": "punctuation.separator.nextsql",
+          "match": "[,;]"
+        },
+        {
+          "name": "punctuation.accessor.nextsql",
+          "match": "\\."
+        }
+      ]
+    }
+  }
+}

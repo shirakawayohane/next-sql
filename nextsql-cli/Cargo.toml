@@ -1,0 +1,22 @@
+[package]
+name = "nextsql-cli"
+version = "0.1.0"
+edition = "2021"
+description = "Command line interface for NextSQL"
+
+[[bin]]
+name = "nextsql"
+path = "src/main.rs"
+
+[dependencies]
+nextsql-core = { path = "../nextsql-core" }
+chrono = { version = "0.4", features = ["serde"] }
+clap = { version = "4.0", features = ["derive"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1.0", features = ["full"] }
+sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "postgres", "chrono", "uuid"] }
+uuid = { version = "1.0", features = ["v4", "serde"] }
+
+[dev-dependencies]
+tempfile = "3.0"

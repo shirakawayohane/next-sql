@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 
 use pest::{error::Error, Parser};
+use pest_derive::Parser;
 
 use crate::ast::*;
 
@@ -1374,85 +1375,85 @@ mod tests {
 
     #[test]
     fn simple_select_test() {
-        let input = include_str!("../examples/simple-select.nsql");
+        let input = include_str!("../../examples/simple-select.nsql");
         parse_module(&input).unwrap();
     }
 
     #[test]
     fn simple_select_and_join_test() {
-        let input = include_str!("../examples/simple-select-and-join.nsql");
+        let input = include_str!("../../examples/simple-select-and-join.nsql");
         dbg!("{:?}", parse_module(&input).unwrap());
     }
 
     #[test]
     fn insert_test() {
-        let input = include_str!("../examples/insert.nsql");
+        let input = include_str!("../../examples/insert.nsql");
         dbg!("{:?}", parse_module(&input).unwrap());
     }
 
     #[test]
     fn insert_optional_test() {
-        let input = include_str!("../examples/insert-optional.nsql");
+        let input = include_str!("../../examples/insert-optional.nsql");
         parse_module(&input).unwrap();
     }
 
     #[test]
     fn insert_many_test() {
-        let input = include_str!("../examples/insert-many.nsql");
+        let input = include_str!("../../examples/insert-many.nsql");
         dbg!("{:?}", parse_module(&input).unwrap());
     }
 
     #[test]
     fn insert_many_with_variable_test() {
-        let input = include_str!("../examples/insert-many-with-variable.nsql");
+        let input = include_str!("../../examples/insert-many-with-variable.nsql");
         dbg!("{:?}", parse_module(&input).unwrap());
     }
 
     #[test]
     fn update_test() {
-        let input = include_str!("../examples/update.nsql");
+        let input = include_str!("../../examples/update.nsql");
         dbg!("{:?}", parse_module(&input).unwrap());
     }
 
     #[test]
     fn simple_delete_test() {
-        let input = include_str!("../examples/simple-delete.nsql");
+        let input = include_str!("../../examples/simple-delete.nsql");
         dbg!("{:?}", parse_module(&input).unwrap());
     }
 
     #[test]
     fn delete_with_subquery_test() {
-        let input = include_str!("../examples/delete-with-subquery.nsql");
+        let input = include_str!("../../examples/delete-with-subquery.nsql");
         dbg!("{:?}", parse_module(&input).unwrap());
     }
 
     #[test]
     fn dynamic_conditional_clauses_test() {
-        let input = include_str!("../examples/dynamic-conditional-clauses.nsql");
+        let input = include_str!("../../examples/dynamic-conditional-clauses.nsql");
         dbg!("{:?}", parse_module(&input).unwrap());
     }
 
     #[test]
     fn dynamic_field_selection_test() {
-        let input = include_str!("../examples/dynamic-field-selection.nsql");
+        let input = include_str!("../../examples/dynamic-field-selection.nsql");
         dbg!("{:?}", parse_module(&input).unwrap());
     }
 
     #[test]
     fn dynamic_joins_test() {
-        let input = include_str!("../examples/dynamic-joins.nsql");
+        let input = include_str!("../../examples/dynamic-joins.nsql");
         dbg!("{:?}", parse_module(&input).unwrap());
     }
 
     #[test]
     fn dynamic_switch_case_test() {
-        let input = include_str!("../examples/dynamic-switch-case.nsql");
+        let input = include_str!("../../examples/dynamic-switch-case.nsql");
         dbg!("{:?}", parse_module(&input).unwrap());
     }
 
     #[test]
     fn dynamic_array_conditions_test() {
-        let input = include_str!("../examples/dynamic-array-conditions.nsql");
+        let input = include_str!("../../examples/dynamic-array-conditions.nsql");
         dbg!("{:?}", parse_module(&input).unwrap());
     }
 
