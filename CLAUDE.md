@@ -11,7 +11,27 @@ NextSQL is a modern SQL-compatible language with type safety, designed to provid
 ### Build and Test
 - `cargo build` - Build the project
 - `cargo test` - Run all tests
-- `cargo run` - Run the main binary (currently empty)
+- `cargo run` - Run the CLI tool
+
+### Migration Commands (File-based)
+- `cargo run -- migration init` - Initialize migrations directory
+- `cargo run -- migration generate <name> --description "<desc>"` - Generate new migration
+- `cargo run -- migration list` - List all migrations
+- `cargo run -- migration up [timestamp]` - Run migration(s) up (display only)
+- `cargo run -- migration down <timestamp>` - Run migration down (display only)
+
+### Database Migration Commands
+- `cargo run -- migration db-up [timestamp]` - Execute migration(s) against database
+- `cargo run -- migration db-down <timestamp>` - Rollback migration against database
+- `cargo run -- migration db-status` - Show database migration execution status
+
+#### Database Connection Options
+All database commands support these options (defaults match compose.yml):
+- `--host localhost` - Database host
+- `--port 5438` - Database port
+- `--database nextsql` - Database name
+- `--username nextsql` - Database username
+- `--password password` - Database password
 
 ### Individual Test Commands
 - `cargo test simple_select_test` - Test simple SELECT parsing
@@ -39,6 +59,18 @@ NextSQL is a modern SQL-compatible language with type safety, designed to provid
    - Extensive test coverage for all parsing scenarios
    - Function pattern: `parse_*` functions for each AST node type
 
+4. **Migration System (`src/migration.rs`)**
+   - Database migration management with timestamp-based naming
+   - Creates `YYYYMMDDHHmmss_<migration_name>` directories
+   - Generates `up.sql` and `down.sql` files for each migration
+   - CLI commands for init, generate, list, up/down operations
+
+5. **Database Integration (`src/db.rs`)**
+   - PostgreSQL connection and transaction management
+   - Automatic creation of `nextsql_migrations` tracking table
+   - Safe migration execution with rollback on errors
+   - Migration status tracking with timestamps and error logging
+
 ### Language Features
 
 - **Type System**: Built-in types (i16, i32, i64, f32, f64, string, bool, uuid, timestamp, date), utility types (Insertable<T>), optional types (T?), arrays ([T]), user-defined types
@@ -50,11 +82,15 @@ NextSQL is a modern SQL-compatible language with type safety, designed to provid
 
 ### File Structure
 
-- `src/main.rs` - Entry point (currently minimal)
+- `src/main.rs` - CLI entry point with command parsing
 - `src/parser.rs` - Main parser logic with comprehensive tests
 - `src/ast.rs` - AST node definitions
+- `src/migration.rs` - File-based migration management system
+- `src/db.rs` - Database connection and migration execution
 - `src/nextsql.pest` - Grammar specification
 - `examples/` - Example NextSQL files demonstrating language features
+- `migrations/` - Database migration files (created by CLI)
+- `compose.yml` - PostgreSQL development environment
 
 ### Testing Strategy
 
