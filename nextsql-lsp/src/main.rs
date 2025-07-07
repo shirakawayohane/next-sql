@@ -82,6 +82,11 @@ impl LanguageServer for NextSqlLanguageServer {
             drop(document_map);
             
             if params.text_document.uri.path().ends_with("next-sql.toml") {
+                // Invalidate schema cache when next-sql.toml changes
+                let file_path = std::path::Path::new(params.text_document.uri.path());
+                if let Some(project_root) = self.schema_cache.find_project_root(file_path) {
+                    self.schema_cache.invalidate_cache(&project_root).await;
+                }
                 self.validate_toml_document(&params.text_document.uri, &change.text)
                     .await;
             } else {
@@ -94,6 +99,11 @@ impl LanguageServer for NextSqlLanguageServer {
     async fn did_save(&self, params: DidSaveTextDocumentParams) {
         if let Some(text) = params.text {
             if params.text_document.uri.path().ends_with("next-sql.toml") {
+                // Invalidate schema cache when next-sql.toml is saved
+                let file_path = std::path::Path::new(params.text_document.uri.path());
+                if let Some(project_root) = self.schema_cache.find_project_root(file_path) {
+                    self.schema_cache.invalidate_cache(&project_root).await;
+                }
                 self.validate_toml_document(&params.text_document.uri, &text)
                     .await;
             } else {

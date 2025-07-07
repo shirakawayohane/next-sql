@@ -1600,6 +1600,14 @@ mod tests {
             total_files += 1;
             print!("Testing {}... ", filename);
 
+            // Skip files that are intentionally incomplete for LSP completion testing
+            if filename == "test-alias-completion.nsql" {
+                skipped_files += 1;
+                skipped_file_names.push(filename);
+                println!("⚠️  SKIPPED (intentionally incomplete for LSP testing)");
+                continue;
+            }
+
             match parse_module(&content) {
                 Ok(module) => {
                     successful_files += 1;

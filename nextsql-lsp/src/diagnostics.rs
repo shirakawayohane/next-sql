@@ -38,10 +38,10 @@ impl<'a> DiagnosticsProvider<'a> {
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| parse_module(self.text)));
 
         match parse_result {
-            Ok(Ok(module)) => {
+            Ok(Ok(_module)) => {
                 eprintln!("DiagnosticsProvider: Parse successful");
                 // パースが成功した場合、型検証を行う（スキーマがある場合のみ）
-                if let Some(schema_cache) = &self.schema_cache {
+                if let Some(_schema_cache) = &self.schema_cache {
                     if let Some(file_uri) = &self.file_uri {
                         eprintln!(
                             "DiagnosticsProvider: Schema cache available, file_uri: {}",
@@ -160,6 +160,7 @@ impl<'a> DiagnosticsProvider<'a> {
         }
     }
 
+    #[allow(dead_code)]
     async fn validate_types(
         &self,
         module: &Module,
@@ -198,6 +199,7 @@ impl<'a> DiagnosticsProvider<'a> {
         diagnostics
     }
 
+    #[allow(dead_code)]
     fn create_diagnostic_from_validation_error(&self, error: ValidationError) -> Diagnostic {
         // For now, we don't have exact positions, so we'll highlight the whole line
         // In a real implementation, we'd track positions during parsing
