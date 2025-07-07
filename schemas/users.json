@@ -1,0 +1,104 @@
+{
+  "tables": {
+    "users": {
+      "name": "users",
+      "columns": [
+        {
+          "name": "id",
+          "column_type": {
+            "BuiltIn": "Uuid"
+          },
+          "nullable": false,
+          "primary_key": true,
+          "has_default": true,
+          "default_value": "gen_random_uuid()"
+        },
+        {
+          "name": "email",
+          "column_type": {
+            "BuiltIn": "String"
+          },
+          "nullable": false,
+          "primary_key": false,
+          "has_default": false,
+          "default_value": null
+        },
+        {
+          "name": "name",
+          "column_type": {
+            "BuiltIn": "String"
+          },
+          "nullable": true,
+          "primary_key": false,
+          "has_default": false,
+          "default_value": null
+        },
+        {
+          "name": "created_at",
+          "column_type": {
+            "BuiltIn": "Timestamp"
+          },
+          "nullable": false,
+          "primary_key": false,
+          "has_default": true,
+          "default_value": "CURRENT_TIMESTAMP"
+        }
+      ]
+    },
+    "posts": {
+      "name": "posts",
+      "columns": [
+        {
+          "name": "id",
+          "column_type": {
+            "BuiltIn": "Uuid"
+          },
+          "nullable": false,
+          "primary_key": true,
+          "has_default": true,
+          "default_value": "gen_random_uuid()"
+        },
+        {
+          "name": "title",
+          "column_type": {
+            "BuiltIn": "String"
+          },
+          "nullable": false,
+          "primary_key": false,
+          "has_default": false,
+          "default_value": null
+        },
+        {
+          "name": "content",
+          "column_type": {
+            "BuiltIn": "String"
+          },
+          "nullable": true,
+          "primary_key": false,
+          "has_default": false,
+          "default_value": null
+        },
+        {
+          "name": "author_id",
+          "column_type": {
+            "BuiltIn": "Uuid"
+          },
+          "nullable": false,
+          "primary_key": false,
+          "has_default": false,
+          "default_value": null
+        },
+        {
+          "name": "created_at",
+          "column_type": {
+            "BuiltIn": "Timestamp"
+          },
+          "nullable": false,
+          "primary_key": false,
+          "has_default": true,
+          "default_value": "CURRENT_TIMESTAMP"
+        }
+      ]
+    }
+  }
+}

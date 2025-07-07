@@ -1,8 +1,7 @@
 query findUserById($id: uuid) {
-  from(
-       users<u>
-    <- profiles<p>, u.id == p.user_id
-  )
-  .where(users.id == $id)
-  .select(*)
+  alias u = users
+  alias p = profiles
+  from(users.leftJoin(profiles, u.id == p.user_id))
+  .where(u.id == $id)
+  .select(u.*, p.*)
 }

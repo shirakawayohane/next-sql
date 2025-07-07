@@ -1,11 +1,13 @@
-mod migration;
+mod config;
 mod db;
+mod migration;
 
 use nextsql_core::*;
 
 use clap::{Parser, Subcommand};
-use migration::{MigrationManager, MigrationDirection};
-use db::{DatabaseMigrationManager, DatabaseConfig};
+use config::NextSqlConfig;
+use db::{DatabaseConfig, DatabaseMigrationManager};
+use migration::{MigrationDirection, MigrationManager};
 use std::path::PathBuf;
 
 #[derive(Parser)]
@@ -18,6 +20,11 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Initialize a new NextSQL project
+    Init {
+        /// Project directory path (default: current directory)
+        dir: Option<PathBuf>,
+    },
     /// Migration commands
     Migration {
         #[command(subcommand)]
@@ -27,6 +34,12 @@ enum Commands {
     Parse {
         /// Input file path
         file: PathBuf,
+    },
+    /// Validate NextSQL configuration file
+    ValidateConfig {
+        /// Config file path (default: next-sql.toml)
+        #[arg(default_value = "next-sql.toml")]
+        config: PathBuf,
     },
 }
 
@@ -142,6 +155,12 @@ async fn main() {
     let cli = Cli::parse();
 
     match cli.command {
+        Commands::Init { dir } => {
+            if let Err(e) = handle_init_command(dir) {
+                eprintln!("Error: {}", e);
+                std::process::exit(1);
+            }
+        }
         Commands::Migration { action } => {
             if let Err(e) = handle_migration_command(action).await {
                 eprintln!("Error: {}", e);
@@ -154,17 +173,49 @@ async fn main() {
                 std::process::exit(1);
             }
         }
+        Commands::ValidateConfig { config } => {
+            if let Err(e) = handle_validate_config_command(config) {
+                eprintln!("Error: {}", e);
+                std::process::exit(1);
+            }
+        }
     }
 }
 
-async fn handle_migration_command(action: MigrationCommands) -> Result<(), Box<dyn std::error::Error>> {
+fn handle_init_command(dir: Option<PathBuf>) -> Result<(), Box<dyn std::error::Error>> {
+    let target_dir = dir.unwrap_or_else(|| PathBuf::from("."));
+    NextSqlConfig::init_project(target_dir)
+}
+
+fn handle_validate_config_command(config_path: PathBuf) -> Result<(), Box<dyn std::error::Error>> {
+    println!("Validating configuration file: {}", config_path.display());
+    
+    match NextSqlConfig::load_from_file(&config_path) {
+        Ok(_) => {
+            println!("✓ Configuration is valid");
+            Ok(())
+        }
+        Err(e) => {
+            println!("✗ Configuration validation failed:");
+            Err(e)
+        }
+    }
+}
+
+async fn handle_migration_command(
+    action: MigrationCommands,
+) -> Result<(), Box<dyn std::error::Error>> {
     match action {
         MigrationCommands::Init { dir } => {
             let manager = MigrationManager::new(dir);
             manager.init()?;
             println!("Initialized migrations directory");
         }
-        MigrationCommands::Generate { name, description, migrations_dir } => {
+        MigrationCommands::Generate {
+            name,
+            description,
+            migrations_dir,
+        } => {
             let manager = MigrationManager::new(migrations_dir);
             let migration = manager.generate_migration(&name, description.as_deref())?;
             println!("Generated migration: {}", migration.timestamp);
@@ -172,7 +223,7 @@ async fn handle_migration_command(action: MigrationCommands) -> Result<(), Box<d
         MigrationCommands::List { dir } => {
             let manager = MigrationManager::new(dir);
             let migrations = manager.list_migrations()?;
-            
+
             if migrations.is_empty() {
                 println!("No migrations found");
             } else {
@@ -184,7 +235,7 @@ async fn handle_migration_command(action: MigrationCommands) -> Result<(), Box<d
         }
         MigrationCommands::Up { timestamp, dir } => {
             let manager = MigrationManager::new(dir);
-            
+
             if let Some(ts) = timestamp {
                 manager.run_migration(&ts, MigrationDirection::Up)?;
             } else {
@@ -200,20 +251,36 @@ async fn handle_migration_command(action: MigrationCommands) -> Result<(), Box<d
             let manager = MigrationManager::new(dir);
             manager.run_migration(&timestamp, MigrationDirection::Down)?;
         }
-        MigrationCommands::DbUp { timestamp, dir, host, port, database, username, password } => {
-            let config = DatabaseConfig { host, port, database, username, password };
+        MigrationCommands::DbUp {
+            timestamp,
+            dir,
+            host,
+            port,
+            database,
+            username,
+            password,
+        } => {
+            let config = DatabaseConfig {
+                host,
+                port,
+                database,
+                username,
+                password,
+            };
             let db_manager = DatabaseMigrationManager::new(&config).await?;
             let file_manager = MigrationManager::new(dir);
-            
+
             if let Some(ts) = timestamp {
                 // 特定のマイグレーションを実行
                 let migration_path = file_manager.get_migration_path(&ts);
                 let up_sql_path = migration_path.join("up.sql");
-                
+
                 if !up_sql_path.exists() {
-                    return Err(format!("Migration file not found: {}", up_sql_path.display()).into());
+                    return Err(
+                        format!("Migration file not found: {}", up_sql_path.display()).into(),
+                    );
                 }
-                
+
                 db_manager.execute_migration_up(&ts, &up_sql_path).await?;
             } else {
                 // 未実行のマイグレーションをすべて実行
@@ -223,61 +290,102 @@ async fn handle_migration_command(action: MigrationCommands) -> Result<(), Box<d
                     .into_iter()
                     .map(|m| m.migration_name)
                     .collect();
-                
+
                 let pending_migrations: Vec<_> = file_migrations
                     .into_iter()
                     .filter(|m| !executed_names.contains(&m.timestamp))
                     .collect();
-                
+
                 if pending_migrations.is_empty() {
                     println!("No pending migrations to execute");
                 } else {
-                    println!("Executing {} pending migrations...", pending_migrations.len());
+                    println!(
+                        "Executing {} pending migrations...",
+                        pending_migrations.len()
+                    );
                     for migration in pending_migrations {
                         let migration_path = file_manager.get_migration_path(&migration.timestamp);
                         let up_sql_path = migration_path.join("up.sql");
-                        
+
                         if up_sql_path.exists() {
-                            db_manager.execute_migration_up(&migration.timestamp, &up_sql_path).await?;
+                            db_manager
+                                .execute_migration_up(&migration.timestamp, &up_sql_path)
+                                .await?;
                         } else {
-                            eprintln!("Warning: up.sql not found for migration {}", migration.timestamp);
+                            eprintln!(
+                                "Warning: up.sql not found for migration {}",
+                                migration.timestamp
+                            );
                         }
                     }
                     println!("All pending migrations completed");
                 }
             }
         }
-        MigrationCommands::DbDown { timestamp, dir, host, port, database, username, password } => {
-            let config = DatabaseConfig { host, port, database, username, password };
+        MigrationCommands::DbDown {
+            timestamp,
+            dir,
+            host,
+            port,
+            database,
+            username,
+            password,
+        } => {
+            let config = DatabaseConfig {
+                host,
+                port,
+                database,
+                username,
+                password,
+            };
             let db_manager = DatabaseMigrationManager::new(&config).await?;
             let file_manager = MigrationManager::new(dir);
-            
+
             let migration_path = file_manager.get_migration_path(&timestamp);
             let down_sql_path = migration_path.join("down.sql");
-            
+
             if !down_sql_path.exists() {
-                return Err(format!("Migration file not found: {}", down_sql_path.display()).into());
+                return Err(
+                    format!("Migration file not found: {}", down_sql_path.display()).into(),
+                );
             }
-            
-            db_manager.execute_migration_down(&timestamp, &down_sql_path).await?;
+
+            db_manager
+                .execute_migration_down(&timestamp, &down_sql_path)
+                .await?;
         }
-        MigrationCommands::DbStatus { host, port, database, username, password } => {
-            let config = DatabaseConfig { host, port, database, username, password };
+        MigrationCommands::DbStatus {
+            host,
+            port,
+            database,
+            username,
+            password,
+        } => {
+            let config = DatabaseConfig {
+                host,
+                port,
+                database,
+                username,
+                password,
+            };
             let db_manager = DatabaseMigrationManager::new(&config).await?;
-            
+
             let migration_records = db_manager.get_migration_status().await?;
-            
+
             if migration_records.is_empty() {
                 println!("No migrations have been executed");
             } else {
                 println!("Migration Status:");
-                println!("{:<30} {:<20} {:<10} {}", "Migration", "Executed At", "Success", "Error");
+                println!(
+                    "{:<30} {:<20} {:<10} {}",
+                    "Migration", "Executed At", "Success", "Error"
+                );
                 println!("{:-<80}", "");
-                
+
                 for record in migration_records {
                     let error_msg = record.error_message.unwrap_or_else(|| "-".to_string());
                     println!(
-                        "{:<30} {:<20} {:<10} {}", 
+                        "{:<30} {:<20} {:<10} {}",
                         record.migration_name,
                         record.executed_at.format("%Y-%m-%d %H:%M:%S"),
                         record.success,
@@ -287,18 +395,18 @@ async fn handle_migration_command(action: MigrationCommands) -> Result<(), Box<d
             }
         }
     }
-    
+
     Ok(())
 }
 
 fn handle_parse_command(file: PathBuf) -> Result<(), Box<dyn std::error::Error>> {
     let content = std::fs::read_to_string(&file)?;
-    
+
     match parser::parse_module(&content) {
         Ok(module) => {
             println!("Parsing successful!");
             println!("Module contains {} top-level items", module.toplevels.len());
-            
+
             for (i, toplevel) in module.toplevels.iter().enumerate() {
                 match toplevel {
                     ast::TopLevel::Query(query) => {
@@ -318,6 +426,6 @@ fn handle_parse_command(file: PathBuf) -> Result<(), Box<dyn std::error::Error>>
             return Err(e.into());
         }
     }
-    
+
     Ok(())
 }

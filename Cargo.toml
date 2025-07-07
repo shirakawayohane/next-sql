@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "nextsql-core",
-    "nextsql-cli"
+    "nextsql-cli",
+    "nextsql-lsp"
 ]
 resolver = "2"

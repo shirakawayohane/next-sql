@@ -1,7 +1,7 @@
 {
   "name": "nextsql-syntax",
   "displayName": "NextSQL Language Support",
-  "description": "Syntax highlighting for NextSQL language",
+  "description": "Syntax highlighting and language server for NextSQL language",
   "version": "0.1.0",
   "publisher": "nextsql",
   "engines": {
@@ -24,6 +24,12 @@
         "aliases": ["NextSQL", "nextsql"],
         "extensions": [".nsql"],
         "configuration": "./language-configuration.json"
+      },
+      {
+        "id": "nextsql-toml",
+        "aliases": ["NextSQL Config", "nextsql-toml"],
+        "extensions": [],
+        "filenames": ["next-sql.toml"]
       }
     ],
     "grammars": [
@@ -34,13 +40,23 @@
       }
     ]
   },
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "onLanguage:nextsql",
+    "onLanguage:nextsql-toml",
+    "workspaceContains:**/next-sql.toml"
+  ],
   "scripts": {
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./"
   },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.0"
+  },
   "devDependencies": {
     "@types/vscode": "^1.80.0",
+    "@types/node": "^20.0.0",
     "typescript": "^5.0.0"
   }
 }

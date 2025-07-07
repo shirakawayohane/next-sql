@@ -1,0 +1,36 @@
+// Alias completion demo for NextSQL
+// When you type "alias <name> = ", the LSP will suggest table names
+
+query getUsersWithPosts($userId: uuid) {
+  // Type "alias u = " and see table name suggestions
+  alias u = users
+  alias p = posts
+  alias c = comments
+  
+  // Join operations are now part of the from clause
+  from(users.innerJoin(posts, u.id == p.user_id)
+            .leftJoin(comments, p.id == c.post_id))
+  .where(u.id == $userId)
+  .select({
+    userName: u.name,
+    userEmail: u.email,
+    postTitle: p.title,
+    commentCount: COUNT(c.id)
+  })
+  .groupBy(u.id, u.name, u.email, p.id, p.title)
+}
+
+// The 'alias' keyword should be highlighted in blue
+// Join method names (innerJoin, leftJoin, etc.) should also be highlighted
+
+mutation createUserWithProfile($email: string, $name: string, $bio: string?) {
+  alias u = users
+  alias p = profiles
+  
+  insert(users)
+  .value({
+    email: $email,
+    name: $name
+  })
+  .returning(u.*)
+}

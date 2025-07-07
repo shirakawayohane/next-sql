@@ -1,5 +1,6 @@
 mutation updateUser {
-  update(users<u>)
+  alias u = users
+  update(users)
   .set({
     first_name: split(u.name, " ")[0],
     last_name: split(u.name, " ")[1]

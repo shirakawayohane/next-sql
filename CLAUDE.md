@@ -78,7 +78,8 @@ All database commands support these options (defaults match compose.yml):
 - **Mutations**: INSERT, UPDATE, DELETE with optional RETURNING clauses
 - **Expressions**: Binary operations, function calls, literals, variables, index access
 - **Variables**: Prefixed with `$` (e.g., `$id`, `$name`)
-- **Aliases**: Table aliases using `<alias>` syntax (e.g., `users<u>`)
+- **Aliases**: Explicit alias statements (e.g., `alias u = users`)
+- **Joins**: Method-style join operations within from clause (`from(table.innerJoin())`, `.leftJoin()`, etc.)
 
 ### File Structure
 
@@ -104,6 +105,15 @@ query findUserById($id: uuid) {
   from(users)
   .where(users.id == $id)
   .select(users.*)
+}
+
+// Query with aliases and joins
+query findUserWithPosts($id: uuid) {
+  alias u = users
+  alias p = posts
+  from(users.innerJoin(posts, u.id == p.user_id))
+  .where(u.id == $id)
+  .select(u.name, p.title)
 }
 
 // Mutation example

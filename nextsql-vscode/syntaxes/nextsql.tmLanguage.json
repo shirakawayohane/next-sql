@@ -4,6 +4,7 @@
   "fileTypes": ["nsql"],
   "patterns": [
     { "include": "#comments" },
+    { "include": "#alias-keyword" },
     { "include": "#when-keyword" },
     { "include": "#keywords" },
     { "include": "#strings" },
@@ -51,6 +52,14 @@
         {
           "name": "keyword.control.when.nextsql",
           "match": "\\bwhen\\b"
+        }
+      ]
+    },
+    "alias-keyword": {
+      "patterns": [
+        {
+          "name": "storage.type.alias.nextsql",
+          "match": "\\balias\\b"
         }
       ]
     },
@@ -138,6 +147,10 @@
     },
     "functions": {
       "patterns": [
+        {
+          "name": "support.function.join.nextsql",
+          "match": "\\b(innerJoin|leftJoin|rightJoin|fullOuterJoin|crossJoin)(?=\\()"
+        },
         {
           "name": "entity.name.function.nextsql",
           "match": "\\b[a-zA-Z_][a-zA-Z0-9_]*(?=\\()"

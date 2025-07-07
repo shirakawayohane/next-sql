@@ -1,0 +1,42 @@
+query findUserById($id: uuid) {
+  from(users)
+  .where(users.id == $id)
+  .select(users.*)
+}
+
+query findUsersByName($name: string) {
+  from(users)
+  .where(users.name == $name)
+  .select(users.*)
+}
+
+mutation insertUserByNameAndEmail($name: string, $email: string) {
+  insert(users)
+  .value({
+    name: $name,
+    email: $email,
+  })
+  .returning(users.id)
+}
+
+mutation isnertUser($new: Insertable<User>) {
+  insert(users)
+  .value($new)
+  .returning(users.id)
+}
+
+mutation updateUser($id: uuid, $name: string, $email: string) {
+  update(users)
+  .set({
+    name: $name,
+    email: $email,
+  })
+  .where(users.id == $id)
+  .returning(users.*)
+}
+
+mutation deleteUser($id: uuid) {
+  delete(users)
+  .where(users.id == $id)
+  .returning(users.*)
+}

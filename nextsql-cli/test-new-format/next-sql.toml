@@ -1,0 +1,6 @@
+[files]
+includes = ["**"]
+
+[target]
+target_language = "rust"
+target_directory = "../generated"

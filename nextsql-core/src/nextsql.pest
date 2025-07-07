@@ -5,7 +5,7 @@ bool_true = @{ "true" }
 bool_false = @{ "false" }
 null = @{ "null" }
 
-ident = ${ !ASCII_DIGIT ~ (ASCII_ALPHANUMERIC | "_")+ }
+ident = @{ !ASCII_DIGIT ~ (ASCII_ALPHANUMERIC | "_")+ }
 wildcard = @{ "*" }
 column = { wildcard | ident ~ "." ~ (wildcard | ident) | ident ~ !(("[" | "(")) }
 
@@ -57,17 +57,14 @@ exists_expression = { "exists" ~ "(" ~ subquery ~ ")" }
 aggregate_function = { ("SUM" | "COUNT" | "AVG" | "MIN" | "MAX") ~ "(" ~ expression ~ ")" }
 atomic_expression = { member_expression | when_expression | switch_expression | exists_expression | aggregate_function | subquery | "(" ~ expression ~ ")" }
 
-alias = @{ "<" ~ ident ~ ">" }
-target = @{ ident ~ alias? }
-inner_join = @{ "><" }
-left_join = @{ "<-" }
-right_join = @{ "->" }
-full_outer_join = @{ "<->" }
-cross_join = @{ "*" }
+// Target is now just an identifier (no inline alias)
+target = @{ ident }
+// Join expressions as method calls
+join_method = { "innerJoin" | "leftJoin" | "rightJoin" | "fullOuterJoin" | "crossJoin" }
+join_expr = { dot ~ join_method ~ "(" ~ ident ~ "," ~ expression ~ ")" }
 
-join_type = { inner_join | left_join | right_join | full_outer_join | cross_join }
-join_expr = { join_type ~ target ~ "," ~ expression }
-from_expr = { target ~ join_expr* }
+// From clause now supports table.join(...) syntax
+from_expr = { ident ~ join_expr* }
 from_clause = { "from" ~ "(" ~ from_expr ~ ")" }
 
 insert_clause = { "insert" ~ "(" ~ ident ~ ")" }
@@ -113,9 +110,15 @@ type = { (array_type | builtin_type | utility_type | user_defined_type) ~ questi
 argument = { variable ~ ":" ~ type }
 argument_list = { "(" ~ ")" | "(" ~ argument ~ (s* ~ "," ~ argument)* ~ ")" }
 
-select_statement = { from_clause ~ (when_clause | where_clause | group_by_clause | aggregate_clause)* ~ select_clause ~ (limit_clause | order_by_clause)* }
+// Alias statement: alias u = users
+alias_keyword = @{ "alias" }
+alias_statement = { alias_keyword ~ ident ~ "=" ~ ident }
 
-query_body = { "{" ~ select_statement ~ "}" }
+// Query statements can include alias declarations
+select_statement = { from_clause ~ (when_clause | where_clause | group_by_clause | aggregate_clause)* ~ select_clause ~ (limit_clause | order_by_clause)* }
+query_statement = { alias_statement | select_statement }
+
+query_body = { "{" ~ query_statement+ ~ "}" }
 query_decl = { "query" ~ ident ~ argument_list? }
 query = { query_decl ~ query_body }
 
@@ -123,13 +126,15 @@ delete_clause = { "delete" ~ "(" ~ target ~ ")" }
 
 mutation_decl = { "mutation" ~ ident ~ argument_list? }
 
-mutation_body = { "{" ~ 
-  (
+// Mutation statements
+mutation_statement = { 
       (insert_clause ~ (value_clause | values_clause) ~ returning_clause?)
     | (update_clause ~ where_clause? ~ set_clause ~ returning_clause?)
     | (delete_clause ~ where_clause? ~ returning_clause?)
-  )
-~ "}" }
+}
+// Mutation body can include alias statements
+mutation_item = { alias_statement | mutation_statement }
+mutation_body = { "{" ~ mutation_item+ ~ "}" }
 mutation = { mutation_decl ~ mutation_body }
 
 migration_decl = { "migration" ~ ident }
@@ -154,5 +159,5 @@ down_block = { "down" ~ "{" ~ migration_statement* ~ "}" }
 migration_body = { "{" ~ up_block ~ down_block ~ "}" }
 migration = { migration_decl ~ migration_body }
 
-with_statement = { "with" ~ ident ~ "=" ~ "{" ~ select_statement ~ "}" }
+with_statement = { "with" ~ ident ~ "=" ~ "{" ~ query_statement+ ~ "}" }
 module = { SOI ~ (with_statement | query | mutation)* ~ EOI }

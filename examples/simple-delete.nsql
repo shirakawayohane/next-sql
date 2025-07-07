@@ -1,4 +1,6 @@
 mutation deleteUserById($id: uuid) {
-  delete(user<u>)
+  alias u = users
+  delete(users)
   .where(u.id == $id)
+  .returning(u.id)
 }

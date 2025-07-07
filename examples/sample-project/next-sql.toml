@@ -1,0 +1,8 @@
+database_url = "postgres://nextsql:password@localhost:5438/nextsql"
+
+[files]
+includes = ["src/**"]
+
+[target]
+target_language = "rust"
+target_directory = "../generated"

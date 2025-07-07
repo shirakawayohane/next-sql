@@ -1,0 +1,32 @@
+// Field completion demo for NextSQL LSP
+// When you type "." after a table name, the LSP will suggest available columns
+
+// Direct table field access
+query getUserEmail($id: uuid) {
+  from(users)
+  .where(users.id == $id)  // Type "users." to see email, name, etc.
+  .select(users.email)
+}
+
+// Using table aliases
+query getPostsWithAuthors($startDate: date) {
+  alias p = posts
+  alias u = users
+  from(posts.innerJoin(users, p.author_id == u.id))
+  .where(p.created_at > $startDate)  // Type "p." to see posts columns
+  .select({
+    title: p.title,           // Type "p." for posts columns
+    author: u.name,           // Type "u." for users columns
+    email: u.email
+  })
+}
+
+// Multiple table references
+mutation updateUserPost($userId: uuid, $postId: uuid, $title: string) {
+  update(posts)
+  .where(posts.id == $postId && posts.author_id == $userId)  // Type "posts." for columns
+  .set({
+    title: $title,
+    updated_at: now()
+  })
+}

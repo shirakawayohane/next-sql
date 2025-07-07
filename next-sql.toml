@@ -1,0 +1,16 @@
+# NextSQL Configuration File
+
+# Database connection URL for schema loading and type validation
+# This enables auto-completion of table names and type checking
+database_url = "postgresql://nextsql:password@localhost:5438/nextsql"
+
+[files]
+# Glob patterns for NextSQL files to include
+includes = ["**/*.nsql"]
+
+[target]
+# Target language for code generation
+target_language = "rust"
+
+# Output directory for generated code
+target_directory = "./generated"

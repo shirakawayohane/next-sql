@@ -1,5 +1,6 @@
 query getUserData($id: uuid, $withOrders: bool, $withProfile: bool) {
-  from(users<u>)
+  alias u = users
+  from(users)
   .where(u.id == $id)
   .select(
     u.*,

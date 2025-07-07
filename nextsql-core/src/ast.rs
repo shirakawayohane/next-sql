@@ -15,12 +15,11 @@ pub struct Module {
 #[derive(Debug, PartialEq, Clone)]
 pub struct Target {
     pub name: String,
-    pub alias: Option<String>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct FromExpr {
-    pub target: Target,
+    pub table: String,
     pub joins: Vec<JoinExpr>,
 }
 
@@ -36,7 +35,7 @@ pub enum JoinType {
 #[derive(Debug, PartialEq, Clone)]
 pub struct JoinExpr {
     pub join_type: JoinType,
-    pub target: Target,
+    pub table: String,
     pub condition: Expression,
 }
 
@@ -166,7 +165,7 @@ pub struct Variable {
 #[derive(Debug, PartialEq, Clone)]
 pub struct ObjectLiteralExpression(pub HashMap<String, Expression>);
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone, serde::Serialize, serde::Deserialize)]
 pub enum BuiltInType {
     I16,
     I32,
@@ -181,10 +180,10 @@ pub enum BuiltInType {
     Bool,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Insertable(pub Box<Type>);
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone, serde::Serialize, serde::Deserialize)]
 pub enum UtilityType {
     Insertable(Insertable),
 }
@@ -211,7 +210,7 @@ impl Display for BuiltInType {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone, serde::Serialize, serde::Deserialize)]
 pub enum Type {
     BuiltIn(BuiltInType),
     Utility(UtilityType),
@@ -286,7 +285,7 @@ pub struct AggregateExpression {
 #[derive(Debug, PartialEq)]
 pub struct WithStatement {
     pub name: String,
-    pub query: SelectStatement,
+    pub body: Vec<QueryStatement>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -308,13 +307,27 @@ pub struct WhenClause {
 }
 
 #[derive(Debug, PartialEq, Clone)]
+pub struct AliasStatement {
+    pub alias: String,
+    pub target: String,
+}
+
+#[derive(Debug, PartialEq, Clone)]
 pub struct SelectStatement {
     pub from: FromExpr,
     pub clauses: Vec<QueryClause>,
 }
 
+#[derive(Debug, PartialEq, Clone)]
+pub enum QueryStatement {
+    Alias(AliasStatement),
+    Select(SelectStatement),
+}
+
 #[derive(Debug, PartialEq)]
-pub struct QueryBody(pub SelectStatement);
+pub struct QueryBody {
+    pub statements: Vec<QueryStatement>,
+}
 
 #[derive(Debug, PartialEq)]
 pub struct Query {
@@ -351,10 +364,21 @@ pub struct Delete {
 }
 
 #[derive(Debug, PartialEq)]
-pub enum MutationBody {
+pub enum MutationStatement {
     Insert(Insert),
     Update(Update),
     Delete(Delete),
+}
+
+#[derive(Debug, PartialEq)]
+pub enum MutationBodyItem {
+    Alias(AliasStatement),
+    Mutation(MutationStatement),
+}
+
+#[derive(Debug, PartialEq)]
+pub struct MutationBody {
+    pub items: Vec<MutationBodyItem>,
 }
 
 #[derive(Debug, PartialEq)]

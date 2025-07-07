@@ -1,0 +1,18 @@
+with amountByProducts = {
+  alias t = transaction
+  from(transaction)
+  .groupBy(t.product_id)
+  .aggregate(
+    total_amounts: SUM(t.amounts)
+  )
+  .select(t.product_id, total_amounts)
+}
+
+query aggregateResult {
+  alias o = amountByProducts
+  alias p = products
+  from(o.innerJoin(p, o.product_id == p.id))
+  .select(p.name, total_sales: p.price * o.total_amounts)
+  .orderBy(total_sales)
+}
+u

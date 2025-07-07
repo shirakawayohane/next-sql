@@ -1,5 +1,5 @@
 mutation insertManyUser {
   insert(users)
-  .values([{ name: "Ichiro" }, { name: "Otani" }])
-  .returning(*)
+  .values([{name: "John"}, {name: "Jane"}])
+  .returning(users.id, users.name)
 }

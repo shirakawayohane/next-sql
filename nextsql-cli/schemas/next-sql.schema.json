@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nextsql.dev/next-sql.schema.json",
+  "title": "NextSQL Configuration",
+  "description": "Configuration schema for NextSQL projects",
+  "type": "object",
+  "properties": {
+    "database_url": {
+      "type": ["string", "null"],
+      "description": "Database connection URL",
+      "examples": [
+        "postgresql://username:password@localhost:5432/database",
+        "http://nextsql:password@localhost:5437/nextsql"
+      ]
+    },
+    "files": {
+      "type": "object",
+      "description": "File configuration",
+      "properties": {
+        "includes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Files to include in parsing (supports glob patterns)",
+          "default": ["**"],
+          "examples": [
+            ["**"],
+            ["src/**"],
+            ["src/**/*.nsql", "queries/**/*.nsql"]
+          ]
+        }
+      },
+      "required": ["includes"],
+      "additionalProperties": false
+    },
+    "target": {
+      "type": "object",
+      "description": "Target configuration for code generation",
+      "properties": {
+        "target_language": {
+          "type": "string",
+          "description": "Target language for code generation",
+          "enum": ["rust"],
+          "default": "rust"
+        },
+        "target_directory": {
+          "type": "string",
+          "description": "Output directory for generated code",
+          "default": "../generated",
+          "examples": ["../generated", "./generated", "../my-project-entities"]
+        }
+      },
+      "required": ["target_language", "target_directory"],
+      "additionalProperties": false
+    }
+  },
+  "required": ["files", "target"],
+  "additionalProperties": false
+}

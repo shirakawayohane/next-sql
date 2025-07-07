@@ -4,6 +4,10 @@ version = "0.1.0"
 edition = "2021"
 description = "Command line interface for NextSQL"
 
+[lib]
+name = "nextsql_cli"
+path = "src/lib.rs"
+
 [[bin]]
 name = "nextsql"
 path = "src/main.rs"
@@ -17,6 +21,8 @@ serde_json = "1.0"
 tokio = { version = "1.0", features = ["full"] }
 sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "postgres", "chrono", "uuid"] }
 uuid = { version = "1.0", features = ["v4", "serde"] }
+toml = "0.8"
+jsonschema = "0.18"
 
 [dev-dependencies]
 tempfile = "3.0"

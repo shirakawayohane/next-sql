@@ -1,0 +1,17 @@
+// Demo: Space insertion for alias completions
+// When you accept a table name completion right after '=', 
+// the LSP will automatically insert a space
+
+query demoAliasCompletion() {
+  // Type 'alias u =' and accept a completion
+  // Result: 'alias u = users' (with space)
+  alias u = users
+  
+  // If you've already typed something after '=', no space is added
+  // Type 'alias p = po' and accept 'posts'
+  // Result: 'alias p = posts' (no extra space)
+  alias p = posts
+  
+  from(users.innerJoin(posts, u.id == p.user_id))
+  .select(u.name, p.title)
+}
