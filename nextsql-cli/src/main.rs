@@ -35,6 +35,24 @@ enum Commands {
         /// Input file path
         file: PathBuf,
     },
+    /// Generate code from NextSQL files
+    Generate {
+        /// Source directory containing .nsql files
+        #[arg(short, long, default_value = ".")]
+        source: PathBuf,
+
+        /// Output directory for generated files
+        #[arg(short, long, default_value = "generated")]
+        output: PathBuf,
+
+        /// Target backend
+        #[arg(short, long, default_value = "rust")]
+        backend: String,
+
+        /// Path to a schema JSON file (uses empty schema if not provided)
+        #[arg(long)]
+        schema: Option<PathBuf>,
+    },
     /// Validate NextSQL configuration file
     ValidateConfig {
         /// Config file path (default: next-sql.toml)
@@ -169,6 +187,17 @@ async fn main() {
         }
         Commands::Parse { file } => {
             if let Err(e) = handle_parse_command(file) {
+                eprintln!("Error: {}", e);
+                std::process::exit(1);
+            }
+        }
+        Commands::Generate {
+            source,
+            output,
+            backend,
+            schema,
+        } => {
+            if let Err(e) = handle_generate_command(source, output, backend, schema) {
                 eprintln!("Error: {}", e);
                 std::process::exit(1);
             }
@@ -399,6 +428,49 @@ async fn handle_migration_command(
     Ok(())
 }
 
+fn handle_generate_command(
+    source: PathBuf,
+    output: PathBuf,
+    backend: String,
+    schema_path: Option<PathBuf>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use nextsql_core::schema::DatabaseSchema;
+
+    let db_schema = if let Some(path) = schema_path {
+        let content = std::fs::read_to_string(&path)
+            .map_err(|e| format!("Failed to read schema file: {}", e))?;
+        serde_json::from_str(&content)
+            .map_err(|e| format!("Failed to parse schema JSON: {}", e))?
+    } else {
+        DatabaseSchema::new()
+    };
+
+    let config = nextsql_codegen::CodegenConfig {
+        source_dir: source,
+        output_dir: output,
+        backend,
+    };
+
+    let result = nextsql_codegen::generate(&config, &db_schema);
+
+    for file in &result.generated_files {
+        println!("Generated: {}", file.display());
+    }
+
+    if !result.errors.is_empty() {
+        for err in &result.errors {
+            eprintln!("Error: {}", err);
+        }
+        return Err(format!("{} error(s) during code generation", result.errors.len()).into());
+    }
+
+    println!(
+        "Successfully generated {} files",
+        result.generated_files.len()
+    );
+    Ok(())
+}
+
 fn handle_parse_command(file: PathBuf) -> Result<(), Box<dyn std::error::Error>> {
     let content = std::fs::read_to_string(&file)?;
 
@@ -417,6 +489,12 @@ fn handle_parse_command(file: PathBuf) -> Result<(), Box<dyn std::error::Error>>
                     }
                     ast::TopLevel::With(with_statement) => {
                         println!("  {}: With '{}'", i + 1, with_statement.name);
+                    }
+                    ast::TopLevel::Relation(relation) => {
+                        println!("  {}: Relation '{}' for {}", i + 1, relation.decl.name, relation.decl.for_table);
+                    }
+                    ast::TopLevel::ValType(vt) => {
+                        println!("  {}: ValType '{}'", i + 1, vt.name);
                     }
                 }
             }
