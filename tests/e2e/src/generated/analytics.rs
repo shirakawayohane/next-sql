@@ -28,7 +28,7 @@ pub async fn count_orders_by_status(
 
 pub struct SalesByCategoryRow {
     pub category_id: CategoryId,
-    pub total_revenue: i64,
+    pub total_revenue: f64,
     pub total_items: i64,
 }
 
@@ -36,7 +36,7 @@ impl SalesByCategoryRow {
     fn from_row(row: &dyn nextsql_backend_rust_runtime::Row) -> Self {
         Self {
             category_id: CategoryId(row.get_uuid(0)),
-            total_revenue: row.get_i64(1),
+            total_revenue: row.get_f64(1),
             total_items: row.get_i64(2),
         }
     }
@@ -65,7 +65,7 @@ impl TopCustomersParams {
 pub struct TopCustomersRow {
     pub customer_id: CustomerId,
     pub order_count: i64,
-    pub total_spent: i64,
+    pub total_spent: f64,
 }
 
 impl TopCustomersRow {
@@ -73,7 +73,7 @@ impl TopCustomersRow {
         Self {
             customer_id: CustomerId(row.get_uuid(0)),
             order_count: row.get_i64(1),
-            total_spent: row.get_i64(2),
+            total_spent: row.get_f64(2),
         }
     }
 }
@@ -117,7 +117,7 @@ pub async fn average_rating_by_product(
 
 pub struct CustomerSpendingRow {
     pub customer_id: CustomerId,
-    pub total: i64,
+    pub total: f64,
     pub item_count: i64,
 }
 
@@ -125,7 +125,7 @@ impl CustomerSpendingRow {
     fn from_row(row: &dyn nextsql_backend_rust_runtime::Row) -> Self {
         Self {
             customer_id: CustomerId(row.get_uuid(0)),
-            total: row.get_i64(1),
+            total: row.get_f64(1),
             item_count: row.get_i64(2),
         }
     }
@@ -203,7 +203,7 @@ impl HighValueCustomersParams {
 
 pub struct HighValueCustomersRow {
     pub customer_id: CustomerId,
-    pub total_spent: i64,
+    pub total_spent: f64,
     pub order_count: i64,
 }
 
@@ -211,7 +211,7 @@ impl HighValueCustomersRow {
     fn from_row(row: &dyn nextsql_backend_rust_runtime::Row) -> Self {
         Self {
             customer_id: CustomerId(row.get_uuid(0)),
-            total_spent: row.get_i64(1),
+            total_spent: row.get_f64(1),
             order_count: row.get_i64(2),
         }
     }

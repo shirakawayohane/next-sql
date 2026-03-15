@@ -36,6 +36,10 @@ impl TypeSystem {
             // Generate Insertable<T> type
             let insertable_type = self.create_insertable_type(table_name, table);
             self.types.insert(format!("Insertable<{}>", table_name), insertable_type);
+
+            // Generate Updatable<T> type
+            let updatable_type = self.create_updatable_type(table_name, table);
+            self.types.insert(format!("Updatable<{}>", table_name), updatable_type);
         }
     }
 
@@ -77,6 +81,29 @@ impl TypeSystem {
         }
     }
 
+    fn create_updatable_type(&self, table_name: &str, table: &TableSchema) -> TypeDefinition {
+        let fields = table.columns.iter()
+            .filter_map(|col| {
+                // Skip primary keys - they identify the row, not updatable
+                if col.primary_key {
+                    return None;
+                }
+
+                Some(FieldDefinition {
+                    name: col.name.clone(),
+                    field_type: col.column_type.clone(),
+                    // All fields are optional in Updatable<T> (partial update)
+                    optional: true,
+                })
+            })
+            .collect();
+
+        TypeDefinition {
+            name: format!("Updatable<{}>", table_name),
+            fields,
+        }
+    }
+
     pub fn get_type(&self, name: &str) -> Option<&TypeDefinition> {
         self.types.get(name)
     }
@@ -85,6 +112,9 @@ impl TypeSystem {
         match utility_type {
             "Insertable" => {
                 self.types.get(&format!("Insertable<{}>", type_arg)).cloned()
+            }
+            "Updatable" => {
+                self.types.get(&format!("Updatable<{}>", type_arg)).cloned()
             }
             _ => None,
         }
@@ -98,6 +128,14 @@ impl TypeSystem {
                     if let Some(insertable_def) = self.resolve_utility_type("Insertable", &table_name) {
                         // Check if the Insertable type is assignable to the target
                         return self.check_object_assignability(&insertable_def, to);
+                    }
+                }
+                false
+            }
+            (Type::Utility(UtilityType::Updatable(updatable)), to) => {
+                if let Type::UserDefined(table_name) = &*updatable.0 {
+                    if let Some(updatable_def) = self.resolve_utility_type("Updatable", &table_name) {
+                        return self.check_object_assignability(&updatable_def, to);
                     }
                 }
                 false

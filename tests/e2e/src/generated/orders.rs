@@ -315,7 +315,7 @@ pub struct FindOrderItemsRow {
     pub quantity: i32,
     pub unit_price: f64,
     pub name: String,
-    pub price: String,
+    pub price: f64,
 }
 
 impl FindOrderItemsRow {
@@ -327,7 +327,7 @@ impl FindOrderItemsRow {
             quantity: row.get_i32(3),
             unit_price: row.get_f64(4),
             name: row.get_string(5),
-            price: row.get_string(6),
+            price: row.get_f64(6),
         }
     }
 }

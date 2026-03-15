@@ -55,7 +55,8 @@ switch_default = { "default" ~ ":" ~ expression }
 switch_expression = { "switch" ~ "(" ~ expression ~ ")" ~ "{" ~ switch_case* ~ switch_default? ~ "}" }
 exists_expression = { "exists" ~ "(" ~ subquery ~ ")" }
 aggregate_function = { ("SUM" | "COUNT" | "AVG" | "MIN" | "MAX") ~ "(" ~ expression ~ ")" }
-atomic_expression = { member_expression | when_expression | switch_expression | exists_expression | aggregate_function | subquery | "(" ~ expression ~ ")" }
+cast_expression = { "cast" ~ "(" ~ expression ~ "," ~ builtin_type ~ ")" }
+atomic_expression = { cast_expression | member_expression | when_expression | switch_expression | exists_expression | aggregate_function | subquery | "(" ~ expression ~ ")" }
 
 // Target is now just an identifier (no inline alias)
 target = @{ ident }
@@ -78,7 +79,7 @@ on_conflict_action = { do_update_clause | do_nothing_clause }
 on_conflict_clause = { dot ~ "onConflict" ~ "(" ~ on_conflict_columns ~ ")" ~ on_conflict_action }
 
 update_clause = { "update" ~ "(" ~ target ~ ")"}
-set_clause = { dot ~ "set" ~ "(" ~ "{" ~ ident ~ ":" ~ expression ~ (s* ~ "," ~ ident ~ ":" ~ expression)* ~ "}" ~ ")"}
+set_clause = { dot ~ "set" ~ "(" ~ (variable | "{" ~ ident ~ ":" ~ expression ~ (s* ~ "," ~ ident ~ ":" ~ expression)* ~ "}") ~ ")"}
 
 returning_clause = { dot ~ "returning" ~ "(" ~ column ~ (s* ~ "," ~ column)* ~ ")" }
 
@@ -114,7 +115,8 @@ builtin_type = { i16_type | i32_type | i64_type | f32_type | f64_type | timestam
 user_defined_type = { ident }
 
 insertable = { "Insertable" ~ "<" ~ type ~ ">" }
-utility_type = { insertable }
+updatable = { "Updatable" ~ "<" ~ type ~ ">" }
+utility_type = { insertable | updatable }
 array_type = { "[" ~ type ~ "]" }
 type = { (array_type | builtin_type | utility_type | user_defined_type) ~ question_mark? }
 argument = { variable ~ ":" ~ type }

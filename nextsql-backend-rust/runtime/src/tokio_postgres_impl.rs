@@ -1,4 +1,4 @@
-use crate::{Client, Row, ToSqlParam};
+use crate::{Client, Row, ToSqlParam, UpdateField};
 
 // ---- ToSqlParam implementations for primitive types ----
 
@@ -40,6 +40,15 @@ impl<T: ToSqlParam + 'static> ToSqlParam for Option<T> {
 impl<T: ToSqlParam + 'static> ToSqlParam for Vec<T> {
     fn as_any(&self) -> &(dyn std::any::Any + Send + Sync) {
         self
+    }
+}
+
+impl<T: ToSqlParam + 'static> ToSqlParam for UpdateField<T> {
+    fn as_any(&self) -> &(dyn std::any::Any + Send + Sync) {
+        match self {
+            UpdateField::Set(v) => v.as_any(),
+            UpdateField::Unchanged => panic!("Unchanged fields should not be passed as SQL params"),
+        }
     }
 }
 

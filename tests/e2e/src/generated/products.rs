@@ -112,9 +112,10 @@ pub async fn find_products_by_ids(
     client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
     params: &FindProductsByIdsParams,
 ) -> Result<Vec<Product>, Box<dyn std::error::Error + Send + Sync>> {
+    let __ids_inner: Vec<uuid::Uuid> = params.ids.iter().map(|v| v.0).collect();
     let rows = client.query(
         "SELECT products.* FROM products WHERE products.id = ANY($1)",
-        &params.to_params(),
+        &vec![&__ids_inner as &dyn nextsql_backend_rust_runtime::ToSqlParam],
     ).await?;
     Ok(rows.iter().map(|row| Product::from_row(row)).collect())
 }

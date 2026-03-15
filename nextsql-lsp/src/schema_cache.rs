@@ -131,16 +131,21 @@ impl SchemaCache {
     }
 
     async fn load_schema_from_database(&self, db_url: &str) -> Result<DatabaseSchema, Box<dyn std::error::Error + Send + Sync>> {
-        // Parse the connection string
-        let config = db_url.parse::<postgres::Config>()?;
-        
-        // Connect to database
-        let mut client = config.connect(postgres::NoTls)?;
-        
-        // Load schema
-        let schema = SchemaLoader::load_from_database(&mut client)?;
-        
-        Ok(schema)
+        let db_url = db_url.to_string();
+        tokio::task::spawn_blocking(move || {
+            // Parse the connection string
+            let config = db_url.parse::<postgres::Config>()?;
+
+            // Connect to database
+            let mut client = config.connect(postgres::NoTls)?;
+
+            // Load schema
+            let schema = SchemaLoader::load_from_database(&mut client)?;
+
+            Ok(schema)
+        })
+        .await
+        .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { Box::new(e) })?
     }
 
     async fn save_schema_cache(&self, path: &Path, schema: &DatabaseSchema) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -185,6 +190,11 @@ impl SchemaCache {
                 }
             };
         }
+    }
+
+    /// Provides write access to the internal schema map for direct insertion.
+    pub async fn schemas_write(&self) -> tokio::sync::RwLockWriteGuard<'_, HashMap<PathBuf, DatabaseSchema>> {
+        self.schemas.write().await
     }
 
     pub async fn invalidate_cache(&self, project_root: &Path) {

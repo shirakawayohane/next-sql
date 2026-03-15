@@ -114,6 +114,7 @@ pub trait MethodCompletionProvider {
                     self.create_method_completion("ilike", "ilike($1)", "Case-insensitive LIKE"),
                     self.create_method_completion("between", "between($1, $2)", "Range check (BETWEEN)"),
                     self.create_method_completion("eqAny", "eqAny($1)", "Check if value is in array"),
+                    self.create_method_completion("neAny", "neAny($1)", "Check if value is NOT in array"),
                     self.create_method_completion("in", "in($1)", "Check if value is in list"),
                     self.create_method_completion("asc", "asc()", "Sort ascending"),
                     self.create_method_completion("desc", "desc()", "Sort descending"),

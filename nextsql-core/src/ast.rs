@@ -133,6 +133,13 @@ pub enum AtomicExpression {
     Switch(SwitchExpression),
     Aggregate(AggregateFunction),
     Exists(Box<SelectStatement>),
+    Cast(CastExpression),
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct CastExpression {
+    pub expr: Box<Expression>,
+    pub target_type: BuiltInType,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -210,8 +217,12 @@ pub enum BuiltInType {
 pub struct Insertable(pub Box<Type>);
 
 #[derive(Debug, PartialEq, Clone, serde::Serialize, serde::Deserialize)]
+pub struct Updatable(pub Box<Type>);
+
+#[derive(Debug, PartialEq, Clone, serde::Serialize, serde::Deserialize)]
 pub enum UtilityType {
     Insertable(Insertable),
+    Updatable(Updatable),
 }
 
 impl Display for BuiltInType {
@@ -256,6 +267,7 @@ impl Display for Type {
                 Type::Utility(u) => {
                     match u {
                         UtilityType::Insertable(t) => format!("Insertable<{}>", t.0),
+                        UtilityType::Updatable(t) => format!("Updatable<{}>", t.0),
                     }
                 }
                 Type::Array(inner) => format!("[{}]", inner),
@@ -415,6 +427,8 @@ pub struct Update {
     pub target: Target,
     pub where_clause: Option<Expression>,
     pub set: Vec<(String, Expression)>,
+    /// When set($variable) is used instead of set({...}), this holds the variable name.
+    pub set_variable: Option<String>,
     pub returning: Option<Vec<Column>>,
 }
 

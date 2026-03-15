@@ -16,6 +16,7 @@ pub struct NextSqlLanguageServer {
     client: Client,
     document_map: tokio::sync::RwLock<HashMap<String, String>>,
     schema_cache: std::sync::Arc<SchemaCache>,
+    workspace_root: tokio::sync::RwLock<Option<std::path::PathBuf>>,
 }
 
 impl NextSqlLanguageServer {
@@ -24,13 +25,22 @@ impl NextSqlLanguageServer {
             client,
             document_map: tokio::sync::RwLock::new(HashMap::new()),
             schema_cache: std::sync::Arc::new(SchemaCache::new()),
+            workspace_root: tokio::sync::RwLock::new(None),
         }
     }
 }
 
 #[tower_lsp::async_trait]
 impl LanguageServer for NextSqlLanguageServer {
-    async fn initialize(&self, _: InitializeParams) -> Result<InitializeResult> {
+    async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
+        // Extract workspace root from root_uri or root_path
+        if let Some(root_uri) = params.root_uri {
+            if let Ok(path) = root_uri.to_file_path() {
+                let mut workspace_root = self.workspace_root.write().await;
+                *workspace_root = Some(path);
+            }
+        }
+
         Ok(InitializeResult {
             capabilities: ServerCapabilities {
                 text_document_sync: Some(TextDocumentSyncCapability::Kind(
@@ -53,6 +63,16 @@ impl LanguageServer for NextSqlLanguageServer {
         self.client
             .log_message(MessageType::INFO, "NextSQL Language Server initialized!")
             .await;
+
+        // Load schema from database in the background if next-sql.toml exists
+        let workspace_root = self.workspace_root.read().await.clone();
+        if let Some(root) = workspace_root {
+            let schema_cache = self.schema_cache.clone();
+            let client = self.client.clone();
+            tokio::spawn(async move {
+                Self::load_schema_on_init(root, schema_cache, client).await;
+            });
+        }
     }
 
     async fn shutdown(&self) -> Result<()> {
@@ -103,6 +123,13 @@ impl LanguageServer for NextSqlLanguageServer {
                 let file_path = std::path::Path::new(params.text_document.uri.path());
                 if let Some(project_root) = self.schema_cache.find_project_root(file_path) {
                     self.schema_cache.invalidate_cache(&project_root).await;
+                    // Reload schema from database in background
+                    let schema_cache = self.schema_cache.clone();
+                    let client = self.client.clone();
+                    let root = project_root.clone();
+                    tokio::spawn(async move {
+                        Self::load_schema_on_init(root, schema_cache, client).await;
+                    });
                 }
                 self.validate_toml_document(&params.text_document.uri, &text)
                     .await;
@@ -142,6 +169,117 @@ impl LanguageServer for NextSqlLanguageServer {
 }
 
 impl NextSqlLanguageServer {
+    async fn load_schema_on_init(
+        root: std::path::PathBuf,
+        schema_cache: std::sync::Arc<SchemaCache>,
+        client: Client,
+    ) {
+        let config_path = root.join("next-sql.toml");
+        if !config_path.exists() {
+            client
+                .log_message(
+                    MessageType::INFO,
+                    "No next-sql.toml found in workspace root, skipping schema loading",
+                )
+                .await;
+            return;
+        }
+
+        client
+            .log_message(MessageType::INFO, "Found next-sql.toml, loading database schema...")
+            .await;
+
+        let project_root = root.clone();
+        let cache = schema_cache.clone();
+        match tokio::task::spawn_blocking(move || {
+            // Read and parse config
+            let config_str = match std::fs::read_to_string(&config_path) {
+                Ok(s) => s,
+                Err(e) => return Err(format!("Failed to read next-sql.toml: {}", e)),
+            };
+
+            let config: nextsql_cli::config::NextSqlConfig = match toml::from_str(&config_str) {
+                Ok(c) => c,
+                Err(e) => return Err(format!("Failed to parse next-sql.toml: {}", e)),
+            };
+
+            let db_url = match config.database_url {
+                Some(url) => url,
+                None => return Err("No database_url in next-sql.toml".to_string()),
+            };
+
+            // Try to load from cached JSON file first
+            let schema_cache_path = project_root.join(".nextsql").join("schema.json");
+            if schema_cache_path.exists() {
+                if let Ok(contents) = std::fs::read_to_string(&schema_cache_path) {
+                    if let Ok(schema) = nextsql_core::SchemaLoader::load_from_json(&contents) {
+                        return Ok((schema, Some(db_url)));
+                    }
+                }
+            }
+
+            // Connect to database and load schema
+            let config = match db_url.parse::<postgres::Config>() {
+                Ok(c) => c,
+                Err(e) => return Err(format!("Invalid database_url: {}", e)),
+            };
+
+            let mut pg_client = match config.connect(postgres::NoTls) {
+                Ok(c) => c,
+                Err(e) => return Err(format!("Failed to connect to database: {}", e)),
+            };
+
+            match nextsql_core::SchemaLoader::load_from_database(&mut pg_client) {
+                Ok(schema) => {
+                    // Save schema cache to disk
+                    let cache_path = project_root.join(".nextsql").join("schema.json");
+                    if let Some(parent) = cache_path.parent() {
+                        let _ = std::fs::create_dir_all(parent);
+                    }
+                    if let Ok(json) = nextsql_core::SchemaLoader::save_to_json(&schema) {
+                        let _ = std::fs::write(&cache_path, json);
+                    }
+                    Ok((schema, None))
+                }
+                Err(e) => Err(format!("Failed to load schema from database: {}", e)),
+            }
+        })
+        .await
+        {
+            Ok(Ok((schema, _))) => {
+                let table_count = schema.tables.len();
+                let mut schemas = cache.schemas_write().await;
+                schemas.insert(root.clone(), schema);
+                drop(schemas);
+                client
+                    .log_message(
+                        MessageType::INFO,
+                        format!(
+                            "Database schema loaded successfully ({} tables)",
+                            table_count
+                        ),
+                    )
+                    .await;
+            }
+            Ok(Err(msg)) => {
+                client
+                    .log_message(
+                        MessageType::WARNING,
+                        format!("Schema loading skipped: {}", msg),
+                    )
+                    .await;
+            }
+            Err(e) => {
+                client
+                    .log_message(
+                        MessageType::WARNING,
+                        format!("Schema loading task failed: {}", e),
+                    )
+                    .await;
+            }
+        }
+    }
+
     async fn validate_document(&self, uri: &Url, text: &str) {
         eprintln!("LSP: validate_document called for: {}", uri);
         

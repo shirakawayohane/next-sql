@@ -171,6 +171,33 @@ fn test_parse_type() {
     let typ = parse_type(pairs.peekable().next().unwrap().into_inner());
     assert_eq!(input, typ.to_string());
 
+    // Test basic Updatable type
+    let input = "Updatable<User>";
+    let pairs = match NextSqlParser::parse(Rule::r#type, input) {
+        Ok(p) => p,
+        Err(e) => panic!("{}のパースでエラーが発生しました: {}", input, e),
+    };
+    let typ = parse_type(pairs.peekable().next().unwrap().into_inner());
+    assert_eq!(input, typ.to_string());
+
+    // Test Updatable with built-in type
+    let input = "Updatable<string>";
+    let pairs = match NextSqlParser::parse(Rule::r#type, input) {
+        Ok(p) => p,
+        Err(e) => panic!("{}のパースでエラーが発生しました: {}", input, e),
+    };
+    let typ = parse_type(pairs.peekable().next().unwrap().into_inner());
+    assert_eq!(input, typ.to_string());
+
+    // Test optional Updatable type
+    let input = "Updatable<User>?";
+    let pairs = match NextSqlParser::parse(Rule::r#type, input) {
+        Ok(p) => p,
+        Err(e) => panic!("{}のパースでエラーが発生しました: {}", input, e),
+    };
+    let typ = parse_type(pairs.peekable().next().unwrap().into_inner());
+    assert_eq!(input, typ.to_string());
+
     let input = "[i32]";
     let pairs = match NextSqlParser::parse(Rule::r#type, input) {
         Ok(p) => p,
@@ -220,10 +247,14 @@ fn parse_valtype_decl(pair: pest::iterators::Pair<Rule>) -> ValType {
 }
 
 fn parse_type(pairs: pest::iterators::Pairs<Rule>) -> Type {
-    fn parse_utility_type(pairs: pest::iterators::Pairs<Rule>) -> Type {
-        let mut pairs = pairs.peekable();
-        let inner = parse_type(pairs.next().unwrap().into_inner());
-        Type::Utility(UtilityType::Insertable(Insertable(Box::new(inner))))
+    fn parse_utility_type(pair: pest::iterators::Pair<Rule>) -> Type {
+        let rule = pair.as_rule();
+        let inner = parse_type(pair.into_inner().next().unwrap().into_inner());
+        match rule {
+            Rule::insertable => Type::Utility(UtilityType::Insertable(Insertable(Box::new(inner)))),
+            Rule::updatable => Type::Utility(UtilityType::Updatable(Updatable(Box::new(inner)))),
+            _ => unreachable!(),
+        }
     }
     let mut pairs = pairs.peekable();
     let typ = match pairs.peek().unwrap().as_rule() {
@@ -245,7 +276,7 @@ fn parse_type(pairs: pest::iterators::Pairs<Rule>) -> Type {
         },
         Rule::utility_type => {
             let mut inner_pairs = pairs.next().unwrap().into_inner();
-            parse_utility_type(inner_pairs.next().unwrap().into_inner())
+            parse_utility_type(inner_pairs.next().unwrap())
         }
         Rule::array_type => {
             let mut inner_pairs = pairs.next().unwrap().into_inner();
@@ -713,16 +744,23 @@ fn parse_update(pairs: pest::iterators::Pairs<Rule>) -> Update {
         Some(Rule::where_clause) => Some(parse_where_clause(pairs.next().unwrap().into_inner())),
         _ => None,
     };
-    let set = match pairs.peek().unwrap().as_rule() {
+    let (set, set_variable) = match pairs.peek().unwrap().as_rule() {
         Rule::set_clause => {
             let mut pairs = pairs.next().unwrap().into_inner().peekable();
-            let mut set = Vec::new();
-            while pairs.peek().is_some() {
-                let column = pairs.next().unwrap().as_str().to_string();
-                let value = parse_expression(pairs.next().unwrap().into_inner());
-                set.push((column, value));
+            // Check if the first inner element is a variable
+            if pairs.peek().map(|p| p.as_rule()) == Some(Rule::variable) {
+                let var_pair = pairs.next().unwrap();
+                let var_name = var_pair.into_inner().next().unwrap().as_str().to_string();
+                (Vec::new(), Some(var_name))
+            } else {
+                let mut set = Vec::new();
+                while pairs.peek().is_some() {
+                    let column = pairs.next().unwrap().as_str().to_string();
+                    let value = parse_expression(pairs.next().unwrap().into_inner());
+                    set.push((column, value));
+                }
+                (set, None)
             }
-            set
         }
         _ => unreachable!(),
     };
@@ -735,6 +773,7 @@ fn parse_update(pairs: pest::iterators::Pairs<Rule>) -> Update {
     Update {
         target,
         set,
+        set_variable,
         where_clause,
         returning,
     }
@@ -1600,6 +1639,15 @@ fn parse_atomic_expression(pairs: pest::iterators::Pairs<Rule>) -> Expression {
                 expr: Box::new(expr),
                 cases,
                 default,
+            }))
+        }
+        Rule::cast_expression => {
+            let mut pairs = pair.into_inner().peekable();
+            let expr = parse_expression(pairs.next().unwrap().into_inner());
+            let target_type = parse_builtin_type_from_pair(pairs.next().unwrap());
+            Expression::Atomic(AtomicExpression::Cast(CastExpression {
+                expr: Box::new(expr),
+                target_type,
             }))
         }
         Rule::member_expression => parse_member_expression(pair.into_inner()),
@@ -2680,4 +2728,69 @@ fn test_count_with_alias_parse() {
         }
         _ => panic!("expected call or aggregate expression, got {:?}", select_clause[0].expr),
     }
+}
+
+#[test]
+fn test_updatable_type() {
+    let input = r#"
+        mutation updateUser($id: uuid, $changes: Updatable<users>) {
+            update(users)
+            .where(users.id == $id)
+            .set({
+                name: $changes
+            })
+        }
+    "#;
+    let module = parse_module(input).unwrap();
+    let m = match &module.toplevels[0] {
+        TopLevel::Mutation(m) => m,
+        _ => panic!("expected mutation"),
+    };
+    assert_eq!(m.decl.name, "updateUser");
+    assert_eq!(m.decl.arguments.len(), 2);
+    assert_eq!(
+        m.decl.arguments[1].typ,
+        Type::Utility(UtilityType::Updatable(Updatable(Box::new(Type::UserDefined("users".to_string())))))
+    );
+}
+
+#[test]
+fn test_cast_expression_parse() {
+    let input = r#"
+        query findByCode($code: string) {
+            from(items)
+            .where(cast(items.origin, string) == $code)
+            .select(items.*)
+        }
+    "#;
+    let module = parse_module(input).unwrap();
+    let query = match &module.toplevels[0] {
+        TopLevel::Query(q) => q,
+        _ => panic!("expected query"),
+    };
+    assert_eq!(query.decl.name, "findByCode");
+}
+
+#[test]
+fn test_cast_expression_with_different_types() {
+    // Test cast with i32
+    let input = r#"
+        query castToInt {
+            from(items)
+            .where(cast(items.amount, i32) == 100)
+            .select(items.*)
+        }
+    "#;
+    let module = parse_module(input).unwrap();
+    assert_eq!(module.toplevels.len(), 1);
+
+    // Test cast with i64
+    let input = r#"
+        query castToI64 {
+            from(items)
+            .select(cast(items.val, i64))
+        }
+    "#;
+    let module = parse_module(input).unwrap();
+    assert_eq!(module.toplevels.len(), 1);
 }

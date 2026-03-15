@@ -1,6 +1,22 @@
 use std::collections::{HashMap, HashSet};
 use nextsql_core::ast::*;
 
+fn builtin_type_to_pg_type(typ: &BuiltInType) -> &'static str {
+    match typ {
+        BuiltInType::I16 => "SMALLINT",
+        BuiltInType::I32 => "INTEGER",
+        BuiltInType::I64 => "BIGINT",
+        BuiltInType::F32 => "REAL",
+        BuiltInType::F64 => "DOUBLE PRECISION",
+        BuiltInType::String => "TEXT",
+        BuiltInType::Bool => "BOOLEAN",
+        BuiltInType::Uuid => "UUID",
+        BuiltInType::Timestamp => "TIMESTAMP",
+        BuiltInType::Timestamptz => "TIMESTAMPTZ",
+        BuiltInType::Date => "DATE",
+    }
+}
+
 /// Result of SQL generation - contains the SQL string and parameter mapping
 #[derive(Debug)]
 pub struct GeneratedSql {
@@ -248,6 +264,9 @@ impl<'a> SqlGenContext<'a> {
             AtomicExpression::Exists(select) => {
                 self.collect_params_from_select(select);
             }
+            AtomicExpression::Cast(cast) => {
+                self.collect_params_from_expr(&cast.expr);
+            }
             AtomicExpression::Column(_) | AtomicExpression::Literal(_) => {}
         }
     }
@@ -352,8 +371,22 @@ impl<'a> SqlGenContext<'a> {
             AtomicExpression::Literal(lit) => self.gen_literal(lit),
             AtomicExpression::Variable(var) => self.add_param(&var.name),
             AtomicExpression::Call(call) => {
-                let args: Vec<String> = call.args.iter().map(|a| self.gen_expr(a)).collect();
-                format!("{}({})", call.callee, args.join(", "))
+                if call.callee == "excluded" && call.args.len() == 1 {
+                    // Special handling for EXCLUDED reference in ON CONFLICT DO UPDATE
+                    if let Expression::Atomic(AtomicExpression::Column(col)) = &call.args[0] {
+                        match col {
+                            Column::ImplicitTarget(name, _) => format!("EXCLUDED.{}", name),
+                            Column::ExplicitTarget(_, name, _) => format!("EXCLUDED.{}", name),
+                            _ => format!("EXCLUDED.*"),
+                        }
+                    } else {
+                        let arg = self.gen_expr(&call.args[0]);
+                        format!("EXCLUDED.{}", arg)
+                    }
+                } else {
+                    let args: Vec<String> = call.args.iter().map(|a| self.gen_expr(a)).collect();
+                    format!("{}({})", call.callee, args.join(", "))
+                }
             }
             AtomicExpression::MethodCall(mc) => self.gen_method_call(mc),
             AtomicExpression::PropertyAccess(pa) => {
@@ -402,6 +435,11 @@ impl<'a> SqlGenContext<'a> {
             AtomicExpression::Exists(select) => {
                 let sql = self.gen_select(select);
                 format!("EXISTS ({})", sql)
+            }
+            AtomicExpression::Cast(cast) => {
+                let expr = self.gen_expr(&cast.expr);
+                let pg_type = builtin_type_to_pg_type(&cast.target_type);
+                format!("CAST({} AS {})", expr, pg_type)
             }
         }
     }
@@ -470,6 +508,10 @@ impl<'a> SqlGenContext<'a> {
             "eqAny" => {
                 let arr = self.gen_expr(&mc.args[0]);
                 format!("{} = ANY({})", target, arr)
+            }
+            "neAny" if mc.args.len() == 1 => {
+                let arg = self.gen_expr(&mc.args[0]);
+                format!("NOT ({} = ANY({}))", target, arg)
             }
             "in" => {
                 let items: Vec<String> = mc.args.iter().map(|a| self.gen_expr(a)).collect();
@@ -1426,6 +1468,53 @@ mod tests {
     }
 
     #[test]
+    fn test_method_ne_any() {
+        let mc = Expression::Atomic(AtomicExpression::MethodCall(MethodCall {
+            target: Box::new(col_implicit("id")),
+            method: "neAny".to_string(),
+            args: vec![var("ids")],
+        }));
+        let reg = RelationRegistry::empty();
+        let mut ctx = SqlGenContext::new(&reg);
+        assert_eq!(ctx.gen_expr(&mc), "NOT (id = ANY($1))");
+    }
+
+    #[test]
+    fn test_excluded_in_on_conflict() {
+        let mut map = HashMap::new();
+        map.insert("email".to_string(), var("email"));
+        map.insert("name".to_string(), var("name"));
+
+        // excluded(name) → Call { callee: "excluded", args: [Column(ImplicitTarget("name"))] }
+        let excluded_name = Expression::Atomic(AtomicExpression::Call(CallExpression {
+            callee: "excluded".to_string(),
+            args: vec![col_implicit("name")],
+            span: None,
+        }));
+
+        let insert = Insert {
+            into: "users".to_string(),
+            values: vec![Expression::Atomic(AtomicExpression::Literal(
+                Literal::Object(ObjectLiteralExpression(map)),
+            ))],
+            on_conflict: Some(OnConflictClause {
+                columns: vec!["email".to_string()],
+                action: OnConflictAction::DoUpdate(vec![(
+                    "name".to_string(),
+                    excluded_name,
+                )]),
+            }),
+            returning: None,
+        };
+        let result = generate_insert_sql(&insert);
+        assert!(
+            result.sql.contains("ON CONFLICT (email) DO UPDATE SET name = EXCLUDED.name"),
+            "Expected 'EXCLUDED.name' in: {}",
+            result.sql
+        );
+    }
+
+    #[test]
     fn test_method_in() {
         let mc = Expression::Atomic(AtomicExpression::MethodCall(MethodCall {
             target: Box::new(col_implicit("status")),
@@ -2052,6 +2141,7 @@ mod tests {
                 ("name".to_string(), var("name")),
                 ("email".to_string(), var("email")),
             ],
+            set_variable: None,
             where_clause: Some(binary(
                 col_explicit("users", "id"),
                 BinaryOp::Equal,
@@ -2075,6 +2165,7 @@ mod tests {
                 span: None,
             },
             set: vec![("active".to_string(), bool_lit(false))],
+            set_variable: None,
             where_clause: None,
             returning: None,
         };
@@ -2090,6 +2181,7 @@ mod tests {
                 span: None,
             },
             set: vec![("name".to_string(), var("name"))],
+            set_variable: None,
             where_clause: Some(binary(
                 col_implicit("id"),
                 BinaryOp::Equal,
@@ -2846,6 +2938,40 @@ query test($min_orders: i64) {
         assert!(
             result.sql.contains("COUNT(users.id) AS total"),
             "Expected 'COUNT(users.id) AS total' in: {}",
+            result.sql
+        );
+    }
+
+    #[test]
+    fn test_cast_sql_generation() {
+        // cast(col, string) -> CAST(col AS TEXT)
+        let input = r#"
+            query castToString {
+                from(items)
+                .where(cast(items.origin, string) == "foo")
+                .select(items.*)
+            }
+        "#;
+        let stmt = parse_first_select(input);
+        let result = generate_select_sql(&stmt);
+        assert!(
+            result.sql.contains("CAST(items.origin AS TEXT)"),
+            "Expected 'CAST(items.origin AS TEXT)' in: {}",
+            result.sql
+        );
+
+        // cast(col, i32) -> CAST(col AS INTEGER)
+        let input = r#"
+            query castToInt {
+                from(items)
+                .select(cast(items.amount, i32))
+            }
+        "#;
+        let stmt = parse_first_select(input);
+        let result = generate_select_sql(&stmt);
+        assert!(
+            result.sql.contains("CAST(items.amount AS INTEGER)"),
+            "Expected 'CAST(items.amount AS INTEGER)' in: {}",
             result.sql
         );
     }

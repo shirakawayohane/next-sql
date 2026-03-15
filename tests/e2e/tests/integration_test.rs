@@ -541,15 +541,7 @@ async fn test_search_customers_dynamic_filter() {
     );
 }
 
-// BUG: The tokio-postgres backend does not support Vec<ProductId> as a parameter type.
-// The runtime panics with "Unsupported parameter type for tokio-postgres backend"
-// when trying to pass a Vec<ProductId> for the ANY($1) clause.
-// The backend needs to implement ToSql for Vec<T> where T wraps uuid::Uuid.
-// When fixed, remove #[ignore] and verify:
-// - results.len() == 2
-// - result contains prod_ids[0] and prod_ids[1] but not prod_ids[2]
 #[tokio::test]
-#[ignore = "BUG: Vec<ProductId> not supported by tokio-postgres backend (panics at runtime)"]
 async fn test_find_products_by_ids() {
     let client = setup().await;
     let inner = client.inner();
@@ -767,12 +759,7 @@ async fn test_count_orders_by_status() {
     assert_eq!(cancelled.order_count, 1);
 }
 
-// BUG: SUM(order_items.unit_price * order_items.quantity) returns float8 when unit_price
-// is DOUBLE PRECISION, but the generated SalesByCategoryRow reads total_revenue as i64.
-// This causes a runtime panic: "cannot convert between Rust type `i64` and Postgres type `float8`"
-// The code generator should emit f64 for SUM over float columns.
 #[tokio::test]
-#[ignore = "BUG: SUM(float8*int4) returns float8 but generated code reads i64 (panics at runtime)"]
 async fn test_sales_by_category() {
     let client = setup().await;
     let inner = client.inner();
@@ -841,20 +828,14 @@ async fn test_sales_by_category() {
         .unwrap();
 
     // total_revenue = (2 * 25.0) + (1 * 50.0) = 100.0, total_items = 2
-    // BUG: See #[ignore] comment on this test.
     let results = analytics::sales_by_category(&client).await.unwrap();
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].category_id.0, cat_id);
-    assert_eq!(results[0].total_revenue, 100);
+    assert_eq!(results[0].total_revenue, 100.0);
     assert_eq!(results[0].total_items, 2);
 }
 
-// BUG: SUM(orders.total_amount) returns float8 when total_amount is DOUBLE PRECISION,
-// but the generated TopCustomersRow reads total_spent as i64.
-// This causes a runtime panic: "cannot convert between Rust type `i64` and Postgres type `float8`"
-// The code generator should emit f64 for SUM over float columns.
 #[tokio::test]
-#[ignore = "BUG: SUM(float8) returns float8 but generated code reads i64 (panics at runtime)"]
 async fn test_top_customers_with_having() {
     let client = setup().await;
     let inner = client.inner();
@@ -907,7 +888,7 @@ async fn test_top_customers_with_having() {
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].customer_id.0, cust1_id);
     assert_eq!(results[0].order_count, 3);
-    assert_eq!(results[0].total_spent, 600);
+    assert_eq!(results[0].total_spent, 600.0);
 }
 
 #[tokio::test]
@@ -1047,11 +1028,7 @@ async fn test_on_conflict_do_nothing() {
 }
 
 // BUG: The generated FindOrderItemsRow has `price: String` but products.price is DOUBLE PRECISION.
-// The generated code uses get_string(6) for a float8 column, causing a runtime panic:
-//   "cannot convert between Rust type `String` and Postgres type `float8`"
-// The code generator incorrectly infers the type of the joined column as String.
 #[tokio::test]
-#[ignore = "BUG: products.price is float8 but generated code reads it as String (panics at runtime)"]
 async fn test_find_order_items_with_product_join() {
     let client = setup().await;
     let inner = client.inner();
@@ -1113,10 +1090,7 @@ async fn test_find_order_items_with_product_join() {
     assert_eq!(results[0].quantity, 2);
     assert_eq!(results[0].unit_price, 42.5);
     assert_eq!(results[0].name, "JoinProduct");
-    // Note: products.price is DOUBLE PRECISION but FindOrderItemsRow::price is String.
-    // The generated code uses get_string(6) for a float column, which may cause a runtime error.
-    // If this test passes, verify the price value is correct as a string.
-    assert_eq!(results[0].price, "42.5");
+    assert_eq!(results[0].price, 42.5);
 }
 
 #[tokio::test]

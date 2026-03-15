@@ -1,5 +1,30 @@
 use std::future::Future;
 
+/// Represents a field in a partial update operation.
+/// - `Unchanged`: field is not included in the SET clause
+/// - `Set(T)`: field is set to the given value (use `Set(None)` for nullable columns to set NULL)
+#[derive(Debug, Clone, PartialEq)]
+pub enum UpdateField<T> {
+    Unchanged,
+    Set(T),
+}
+
+impl<T> UpdateField<T> {
+    pub fn is_set(&self) -> bool {
+        matches!(self, UpdateField::Set(_))
+    }
+
+    pub fn is_unchanged(&self) -> bool {
+        matches!(self, UpdateField::Unchanged)
+    }
+}
+
+impl<T> Default for UpdateField<T> {
+    fn default() -> Self {
+        UpdateField::Unchanged
+    }
+}
+
 /// Trait for values that can be bound as SQL query parameters.
 pub trait ToSqlParam: Send + Sync {
     /// Convert this value into a format the database driver can accept.
