@@ -1,0 +1,81 @@
+// E-Commerce Sample Project - Review Queries and Mutations
+
+// Relations needed for this file
+relation reviewer for reviews returning customers {
+  customers.id == reviews.customer_id
+}
+
+relation product for reviews returning products {
+  products.id == reviews.product_id
+}
+
+relation category for products returning categories {
+  categories.id == products.category_id
+}
+
+// 1. SELECT with relation (review -> customer)
+query findProductReviews($product_id: ProductId) {
+  from(reviews)
+  .where(reviews.product_id == $product_id)
+  .select(reviews.*, reviews.reviewer.name)
+  .orderBy(reviews.created_at.desc())
+}
+
+// 2. SELECT with nested relation (review -> product -> category)
+query findHighRatedReviews($min_rating: i32) {
+  from(reviews)
+  .where(reviews.rating >= $min_rating)
+  .select(reviews.*, product_name: reviews.product.name, category_name: reviews.product.category.name)
+  .orderBy(reviews.rating.desc(), reviews.created_at.desc())
+}
+
+// 3. Filter with comparison operators
+query findReviewsByRatingRange($min: i32, $max: i32) {
+  from(reviews)
+  .where(reviews.rating >= $min && reviews.rating <= $max)
+  .select(reviews.*)
+  .orderBy(reviews.created_at.desc())
+}
+
+// 4. Find reviews by customer
+query findCustomerReviews($customer_id: CustomerId) {
+  from(reviews)
+  .where(reviews.customer_id == $customer_id)
+  .select(reviews.*, reviews.product.name)
+  .orderBy(reviews.created_at.desc())
+}
+
+// 5. INSERT with ON CONFLICT DO NOTHING (one review per customer per product)
+mutation createReview($product_id: ProductId, $customer_id: CustomerId, $rating: i32, $comment: string?) {
+  insert(reviews)
+  .value({
+    product_id: $product_id,
+    customer_id: $customer_id,
+    rating: $rating,
+    comment: $comment,
+  })
+  .onConflict(product_id, customer_id)
+  .doNothing()
+}
+
+// 6. DELETE with RETURNING
+mutation deleteReview($id: ReviewId) {
+  delete(reviews)
+  .where(reviews.id == $id)
+  .returning(reviews.*)
+}
+
+// 7. UPDATE review
+mutation updateReview($id: ReviewId, $rating: i32, $comment: string?) {
+  update(reviews)
+  .where(reviews.id == $id)
+  .set({ rating: $rating, comment: $comment })
+  .returning(reviews.*)
+}
+
+// 8. Reviews with null comments
+query findReviewsWithoutComments($product_id: ProductId) {
+  from(reviews)
+  .where(reviews.product_id == $product_id && reviews.comment.isNull())
+  .select(reviews.id, reviews.rating, reviews.reviewer.name)
+}

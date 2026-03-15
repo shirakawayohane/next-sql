@@ -1,0 +1,76 @@
+// E-Commerce Sample Project - Customer Queries and Mutations
+
+// 1. Simple SELECT by ID
+query findCustomerById($id: CustomerId) {
+  from(customers)
+  .where(customers.id == $id)
+  .select(customers.*)
+}
+
+// 2. SELECT with multiple WHERE conditions (AND) and LIKE search
+query searchCustomers($name_like: string?, $email_like: string?, $is_active: bool?) {
+  from(customers)
+  .when($name_like != null, where(upper(customers.name).like($name_like)))
+  .when($email_like != null, where(customers.email.like($email_like)))
+  .when($is_active != null, where(customers.is_active == $is_active))
+  .select(customers.*)
+  .orderBy(customers.name.asc())
+}
+
+// 3. Pagination with ORDER BY + LIMIT + OFFSET
+query listCustomers($limit: i64, $offset: i64) {
+  from(customers)
+  .where(customers.is_active == true)
+  .select(customers.*)
+  .orderBy(customers.created_at.desc())
+  .limit($limit)
+  .offset($offset)
+}
+
+// 4. EXISTS subquery check
+query hasActiveOrders($customer_id: CustomerId) {
+  from(customers)
+  .where(
+    customers.id == $customer_id
+    && exists($(
+      from(orders)
+      .where(orders.customer_id == $customer_id && orders.status != "cancelled")
+      .select(orders.id)
+    ))
+  )
+  .select(customers.id)
+}
+
+// 5. Find customer by email (exact match)
+query findCustomerByEmail($email: string) {
+  from(customers)
+  .where(customers.email == $email && customers.is_active == true)
+  .select(customers.*)
+}
+
+// 6. INSERT with RETURNING
+mutation createCustomer($name: string, $email: string, $phone: string?) {
+  insert(customers)
+  .value({
+    name: $name,
+    email: $email,
+    phone: $phone,
+    is_active: true,
+  })
+  .returning(customers.*)
+}
+
+// 7. UPDATE multiple columns with RETURNING
+mutation updateCustomer($id: CustomerId, $name: string, $email: string, $phone: string?) {
+  update(customers)
+  .where(customers.id == $id)
+  .set({ name: $name, email: $email, phone: $phone })
+  .returning(customers.*)
+}
+
+// 8. Soft delete (UPDATE is_active = false)
+mutation deactivateCustomer($id: CustomerId) {
+  update(customers)
+  .where(customers.id == $id)
+  .set({ is_active: false })
+}

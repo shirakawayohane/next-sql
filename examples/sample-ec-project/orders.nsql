@@ -1,0 +1,159 @@
+// E-Commerce Sample Project - Order Queries and Mutations
+
+// Relations needed for this file
+relation customer for orders returning customers {
+  customers.id == orders.customer_id
+}
+
+relation product for order_items returning products {
+  products.id == order_items.product_id
+}
+
+// 1. INSERT with object literal
+mutation createOrder($customer_id: CustomerId, $total_amount: f64, $notes: string?) {
+  insert(orders)
+  .value({
+    customer_id: $customer_id,
+    status: "pending",
+    total_amount: $total_amount,
+    ordered_at: now(),
+    notes: $notes,
+  })
+  .returning(orders.*)
+}
+
+// 2. INSERT order item
+mutation addOrderItem($order_id: OrderId, $product_id: ProductId, $quantity: i32, $unit_price: f64) {
+  insert(order_items)
+  .value({
+    order_id: $order_id,
+    product_id: $product_id,
+    quantity: $quantity,
+    unit_price: $unit_price,
+  })
+  .returning(order_items.*)
+}
+
+// 3. UPSERT (ON CONFLICT DO UPDATE)
+mutation upsertOrderItem($order_id: OrderId, $product_id: ProductId, $quantity: i32, $unit_price: f64) {
+  insert(order_items)
+  .value({
+    order_id: $order_id,
+    product_id: $product_id,
+    quantity: $quantity,
+    unit_price: $unit_price,
+  })
+  .onConflict(order_id, product_id)
+  .doUpdate({
+    quantity: $quantity,
+    unit_price: $unit_price
+  })
+  .returning(order_items.*)
+}
+
+// 4. UPSERT (ON CONFLICT DO NOTHING)
+mutation insertOrderItemIfNotExists($order_id: OrderId, $product_id: ProductId, $quantity: i32, $unit_price: f64) {
+  insert(order_items)
+  .value({
+    order_id: $order_id,
+    product_id: $product_id,
+    quantity: $quantity,
+    unit_price: $unit_price,
+  })
+  .onConflict(order_id, product_id)
+  .doNothing()
+}
+
+// 5. UPDATE with RETURNING
+mutation updateOrderStatus($id: OrderId, $status: string) {
+  update(orders)
+  .where(orders.id == $id)
+  .set({ status: $status })
+  .returning(orders.*)
+}
+
+// 6. UPDATE multiple columns
+mutation shipOrder($id: OrderId) {
+  update(orders)
+  .where(orders.id == $id && orders.status == "pending")
+  .set({ status: "shipped", shipped_at: now() })
+  .returning(orders.*)
+}
+
+// 7. Simple UPDATE without RETURNING
+mutation cancelOrder($id: OrderId) {
+  update(orders)
+  .where(orders.id == $id && orders.status == "pending")
+  .set({ status: "cancelled" })
+}
+
+// 8. DELETE with WHERE
+mutation deleteOrderItem($id: uuid) {
+  delete(order_items)
+  .where(order_items.id == $id)
+}
+
+// 9. SELECT with relation access (order -> customer)
+query findOrderById($id: OrderId) {
+  from(orders)
+  .where(orders.id == $id)
+  .select(orders.*, orders.customer.name, orders.customer.email)
+}
+
+// 10. SELECT with ORDER BY DESC + pagination
+query findOrdersByCustomer($customer_id: CustomerId, $limit: i64, $offset: i64) {
+  from(orders)
+  .where(orders.customer_id == $customer_id)
+  .select(orders.*)
+  .orderBy(orders.ordered_at.desc())
+  .limit($limit)
+  .offset($offset)
+}
+
+// 11. SELECT with relation access on order_items (item -> product)
+query findOrderItems($order_id: OrderId) {
+  from(order_items)
+  .where(order_items.order_id == $order_id)
+  .select(order_items.*, order_items.product.name, order_items.product.price)
+}
+
+// 12. BETWEEN + eqAny filter
+query findRecentOrders($from_date: timestamp, $to_date: timestamp, $statuses: [string]) {
+  from(orders)
+  .where(
+    orders.ordered_at.between($from_date, $to_date)
+    && orders.status.eqAny($statuses)
+  )
+  .select(orders.*, orders.customer.name)
+  .orderBy(orders.ordered_at.desc())
+}
+
+// 13. UNION of two queries
+query findAllActiveOrders() {
+  from(orders)
+  .where(orders.status == "pending")
+  .select(orders.id, orders.customer_id, orders.total_amount)
+  .union(
+    from(orders)
+    .where(orders.status == "shipped")
+    .select(orders.id, orders.customer_id, orders.total_amount)
+  )
+}
+
+// 14. Subquery in WHERE (EXISTS)
+query findOrdersWithHighValueItems($min_price: f64) {
+  from(orders)
+  .where(exists($(
+    from(order_items)
+    .where(order_items.order_id == orders.id && order_items.unit_price >= $min_price)
+    .select(order_items.id)
+  )))
+  .select(orders.*)
+}
+
+// 15. DELETE with RETURNING
+mutation deleteOrderItemReturning($id: uuid) {
+  delete(order_items)
+  .where(order_items.id == $id)
+  .returning(order_items.*)
+}

@@ -1,0 +1,54 @@
+// E-Commerce Sample Project - Shared Types and Relations
+
+// Value types
+valtype CustomerId = uuid for customers.id
+valtype ProductId = uuid for products.id
+valtype OrderId = uuid for orders.id
+valtype CategoryId = uuid for categories.id
+valtype ReviewId = uuid for reviews.id
+valtype AddressId = uuid for addresses.id
+
+// Relations: orders -> customers
+relation customer for orders returning customers {
+  customers.id == orders.customer_id
+}
+
+// Relations: order_items -> products
+relation product for order_items returning products {
+  products.id == order_items.product_id
+}
+
+// Relations: order_items -> orders
+relation order for order_items returning orders {
+  orders.id == order_items.order_id
+}
+
+// Relations: products -> categories
+relation category for products returning categories {
+  categories.id == products.category_id
+}
+
+// Relations: reviews -> customers
+relation reviewer for reviews returning customers {
+  customers.id == reviews.customer_id
+}
+
+// Relations: reviews -> products
+relation product for reviews returning products {
+  products.id == reviews.product_id
+}
+
+// Relations: categories -> parent category (optional)
+optional relation parent for categories returning categories {
+  categories.id == categories.parent_id
+}
+
+// Relations: orders -> order_items (one-to-many)
+relation items for orders returning order_items {
+  order_items.order_id == orders.id
+}
+
+// Relations: addresses -> customers
+relation customer for addresses returning customers {
+  customers.id == addresses.customer_id
+}

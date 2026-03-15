@@ -1,0 +1,86 @@
+// E-Commerce Sample Project - Product and Category Queries
+
+// Relations needed for this file
+relation category for products returning categories {
+  categories.id == products.category_id
+}
+
+// 1. SELECT with relation access (products -> category)
+query findProductById($id: ProductId) {
+  from(products)
+  .where(products.id == $id)
+  .select(products.*, category_name: products.category.name)
+}
+
+// 2. Filter by category
+query findProductsByCategory($category_id: CategoryId) {
+  from(products)
+  .where(products.category_id == $category_id && products.is_active == true)
+  .select(products.*)
+  .orderBy(products.name.asc())
+}
+
+// 3. Filter with eqAny (IN operator)
+query findProductsByIds($ids: [ProductId]) {
+  from(products)
+  .where(products.id.eqAny($ids))
+  .select(products.*)
+}
+
+// 4. Dynamic filtering with when() - multiple optional params, BETWEEN (price range)
+query searchProducts($min_price: f64?, $max_price: f64?, $category_ids: [CategoryId]?, $name_like: string?) {
+  from(products)
+  .where(products.is_active == true)
+  .when($min_price != null, where(products.price >= $min_price))
+  .when($max_price != null, where(products.price <= $max_price))
+  .when($category_ids != null, where(products.category_id.eqAny($category_ids)))
+  .when($name_like != null, where(products.name.like($name_like)))
+  .select(products.*)
+  .orderBy(products.price.asc(), products.name.asc())
+}
+
+// 5. SELECT with relation access and ORDER BY multiple columns
+query findProductsWithCategory() {
+  from(products)
+  .where(products.is_active == true)
+  .select(products.name, products.price, category_name: products.category.name)
+  .orderBy(products.name.asc())
+}
+
+// 6. DISTINCT
+query findDistinctCategoryIds() {
+  from(products)
+  .where(products.is_active == true)
+  .distinct()
+  .select(products.category_id)
+}
+
+// 7. SELECT with IS NULL
+query findProductsWithNullDescription() {
+  from(products)
+  .where(products.description.isNull())
+  .select(products.id, products.name)
+}
+
+// 8. BETWEEN for price range
+query findProductsInPriceRange($min: f64, $max: f64) {
+  from(products)
+  .where(products.price.between($min, $max) && products.is_active == true)
+  .select(products.*)
+  .orderBy(products.price.asc())
+}
+
+// 9. IS NOT NULL check
+query findProductsWithDescription() {
+  from(products)
+  .where(products.description.isNotNull() && products.is_active == true)
+  .select(products.id, products.name, products.description)
+}
+
+// 10. Products low on stock
+query findLowStockProducts($threshold: i32) {
+  from(products)
+  .where(products.stock <= $threshold && products.is_active == true)
+  .select(products.id, products.name, products.stock)
+  .orderBy(products.stock.asc())
+}

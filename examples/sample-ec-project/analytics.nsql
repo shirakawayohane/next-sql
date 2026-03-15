@@ -1,0 +1,98 @@
+// E-Commerce Sample Project - Aggregation and Analytics Queries
+
+// 1. GROUP BY with COUNT
+query countOrdersByStatus() {
+  from(orders)
+  .groupBy(orders.status)
+  .aggregate(order_count: COUNT(orders.id))
+  .select(orders.status, order_count)
+}
+
+// 2. GROUP BY with SUM and multiple aggregates
+query salesByCategory() {
+  from(order_items
+    .innerJoin(products, order_items.product_id == products.id))
+  .groupBy(products.category_id)
+  .aggregate(
+    total_revenue: SUM(order_items.unit_price * order_items.quantity),
+    total_items: COUNT(order_items.id)
+  )
+  .select(products.category_id, total_revenue, total_items)
+  .orderBy(total_revenue.desc())
+}
+
+// 3. GROUP BY with HAVING
+query topCustomers($min_orders: i64) {
+  from(orders)
+  .groupBy(orders.customer_id)
+  .having(COUNT(orders.id) >= $min_orders)
+  .aggregate(
+    order_count: COUNT(orders.id),
+    total_spent: SUM(orders.total_amount)
+  )
+  .select(orders.customer_id, order_count, total_spent)
+  .orderBy(total_spent.desc())
+}
+
+// 4. AVG aggregate with HAVING
+query averageRatingByProduct() {
+  from(reviews)
+  .groupBy(reviews.product_id)
+  .having(COUNT(reviews.id) > 0)
+  .aggregate(
+    avg_rating: AVG(reviews.rating),
+    review_count: COUNT(reviews.id)
+  )
+  .select(reviews.product_id, avg_rating, review_count)
+  .orderBy(avg_rating.desc())
+}
+
+// 5. GROUP BY with JOIN and multiple aggregates
+query customerSpending() {
+  from(orders
+    .innerJoin(order_items, orders.id == order_items.order_id))
+  .where(orders.status != "cancelled")
+  .groupBy(orders.customer_id)
+  .aggregate(
+    total: SUM(order_items.unit_price * order_items.quantity),
+    item_count: COUNT(order_items.id)
+  )
+  .select(orders.customer_id, total, item_count)
+  .orderBy(total.desc())
+  .limit(100)
+}
+
+// 6. MIN / MAX aggregates
+query priceRangeByCategory() {
+  from(products)
+  .where(products.is_active == true)
+  .groupBy(products.category_id)
+  .aggregate(
+    min_price: MIN(products.price),
+    max_price: MAX(products.price),
+    product_count: COUNT(products.id)
+  )
+  .select(products.category_id, min_price, max_price, product_count)
+}
+
+// 7. COUNT with filter
+query activeCustomerCount() {
+  from(customers)
+  .where(customers.is_active == true)
+  .aggregate(total: COUNT(customers.id))
+  .select(total)
+}
+
+// 8. SUM with HAVING threshold
+query highValueCustomers($min_total: f64) {
+  from(orders)
+  .where(orders.status != "cancelled")
+  .groupBy(orders.customer_id)
+  .having(SUM(orders.total_amount) >= $min_total)
+  .aggregate(
+    total_spent: SUM(orders.total_amount),
+    order_count: COUNT(orders.id)
+  )
+  .select(orders.customer_id, total_spent, order_count)
+  .orderBy(total_spent.desc())
+}

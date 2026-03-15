@@ -1,0 +1,391 @@
+{
+  "tables": {
+    "customers": {
+      "name": "customers",
+      "columns": [
+        {
+          "name": "id",
+          "column_type": { "BuiltIn": "Uuid" },
+          "nullable": false,
+          "primary_key": true,
+          "has_default": true,
+          "default_value": "gen_random_uuid()"
+        },
+        {
+          "name": "email",
+          "column_type": { "BuiltIn": "String" },
+          "nullable": false,
+          "primary_key": false,
+          "has_default": false,
+          "default_value": null
+        },
+        {
+          "name": "name",
+          "column_type": { "BuiltIn": "String" },
+          "nullable": false,
+          "primary_key": false,
+          "has_default": false,
+          "default_value": null
+        },
+        {
+          "name": "phone",
+          "column_type": { "BuiltIn": "String" },
+          "nullable": true,
+          "primary_key": false,
+          "has_default": false,
+          "default_value": null
+        },
+        {
+          "name": "created_at",
+          "column_type": { "BuiltIn": "Timestamp" },
+          "nullable": false,
+          "primary_key": false,
+          "has_default": true,
+          "default_value": "CURRENT_TIMESTAMP"
+        },
+        {
+          "name": "is_active",
+          "column_type": { "BuiltIn": "Bool" },
+          "nullable": false,
+          "primary_key": false,
+          "has_default": true,
+          "default_value": "true"
+        }
+      ]
+    },
+    "categories": {
+      "name": "categories",
+      "columns": [
+        {
+          "name": "id",
+          "column_type": { "BuiltIn": "Uuid" },
+          "nullable": false,
+          "primary_key": true,
+          "has_default": true,
+          "default_value": "gen_random_uuid()"
+        },
+        {
+          "name": "name",
+          "column_type": { "BuiltIn": "String" },
+          "nullable": false,
+          "primary_key": false,
+          "has_default": false,
+          "default_value": null
+        },
+        {
+          "name": "parent_id",
+          "column_type": { "BuiltIn": "Uuid" },
+          "nullable": true,
+          "primary_key": false,
+          "has_default": false,
+          "default_value": null
+        },
+        {
+          "name": "sort_order",
+          "column_type": { "BuiltIn": "I32" },
+          "nullable": false,
+          "primary_key": false,
+          "has_default": false,
+          "default_value": null
+        },
+        {
+          "name": "is_active",
+          "column_type": { "BuiltIn": "Bool" },
+          "nullable": false,
+          "primary_key": false,
+          "has_default": true,
+          "default_value": "true"
+        }
+      ]
+    },
+    "products": {
+      "name": "products",
+      "columns": [
+        {
+          "name": "id",
+          "column_type": { "BuiltIn": "Uuid" },
+          "nullable": false,
+          "primary_key": true,
+          "has_default": true,
+          "default_value": "gen_random_uuid()"
+        },
+        {
+          "name": "category_id",
+          "column_type": { "BuiltIn": "Uuid" },
+          "nullable": false,
+          "primary_key": false,
+          "has_default": false,
+          "default_value": null
+        },
+        {
+          "name": "name",
+          "column_type": { "BuiltIn": "String" },
+          "nullable": false,
+          "primary_key": false,
+          "has_default": false,
+          "default_value": null
+        },
+        {
+          "name": "description",
+          "column_type": { "BuiltIn": "String" },
+          "nullable": true,
+          "primary_key": false,
+          "has_default": false,
+          "default_value": null
+        },
+        {
+          "name": "price",
+          "column_type": { "BuiltIn": "F64" },
+          "nullable": false,
+          "primary_key": false,
+          "has_default": false,
+          "default_value": null
+        },
+        {
+          "name": "stock",
+          "column_type": { "BuiltIn": "I32" },
+          "nullable": false,
+          "primary_key": false,
+          "has_default": false,
+          "default_value": null
+        },
+        {
+          "name": "is_active",
+          "column_type": { "BuiltIn": "Bool" },
+          "nullable": false,
+          "primary_key": false,
+          "has_default": true,
+          "default_value": "true"
+        },
+        {
+          "name": "created_at",
+          "column_type": { "BuiltIn": "Timestamp" },
+          "nullable": false,
+          "primary_key": false,
+          "has_default": true,
+          "default_value": "CURRENT_TIMESTAMP"
+        }
+      ]
+    },
+    "orders": {
+      "name": "orders",
+      "columns": [
+        {
+          "name": "id",
+          "column_type": { "BuiltIn": "Uuid" },
+          "nullable": false,
+          "primary_key": true,
+          "has_default": true,
+          "default_value": "gen_random_uuid()"
+        },
+        {
+          "name": "customer_id",
+          "column_type": { "BuiltIn": "Uuid" },
+          "nullable": false,
+          "primary_key": false,
+          "has_default": false,
+          "default_value": null
+        },
+        {
+          "name": "status",
+          "column_type": { "BuiltIn": "String" },
+          "nullable": false,
+          "primary_key": false,
+          "has_default": false,
+          "default_value": null
+        },
+        {
+          "name": "total_amount",
+          "column_type": { "BuiltIn": "F64" },
+          "nullable": false,
+          "primary_key": false,
+          "has_default": false,
+          "default_value": null
+        },
+        {
+          "name": "ordered_at",
+          "column_type": { "BuiltIn": "Timestamp" },
+          "nullable": false,
+          "primary_key": false,
+          "has_default": false,
+          "default_value": null
+        },
+        {
+          "name": "shipped_at",
+          "column_type": { "BuiltIn": "Timestamp" },
+          "nullable": true,
+          "primary_key": false,
+          "has_default": false,
+          "default_value": null
+        },
+        {
+          "name": "notes",
+          "column_type": { "BuiltIn": "String" },
+          "nullable": true,
+          "primary_key": false,
+          "has_default": false,
+          "default_value": null
+        }
+      ]
+    },
+    "order_items": {
+      "name": "order_items",
+      "columns": [
+        {
+          "name": "id",
+          "column_type": { "BuiltIn": "Uuid" },
+          "nullable": false,
+          "primary_key": true,
+          "has_default": true,
+          "default_value": "gen_random_uuid()"
+        },
+        {
+          "name": "order_id",
+          "column_type": { "BuiltIn": "Uuid" },
+          "nullable": false,
+          "primary_key": false,
+          "has_default": false,
+          "default_value": null
+        },
+        {
+          "name": "product_id",
+          "column_type": { "BuiltIn": "Uuid" },
+          "nullable": false,
+          "primary_key": false,
+          "has_default": false,
+          "default_value": null
+        },
+        {
+          "name": "quantity",
+          "column_type": { "BuiltIn": "I32" },
+          "nullable": false,
+          "primary_key": false,
+          "has_default": false,
+          "default_value": null
+        },
+        {
+          "name": "unit_price",
+          "column_type": { "BuiltIn": "F64" },
+          "nullable": false,
+          "primary_key": false,
+          "has_default": false,
+          "default_value": null
+        }
+      ]
+    },
+    "reviews": {
+      "name": "reviews",
+      "columns": [
+        {
+          "name": "id",
+          "column_type": { "BuiltIn": "Uuid" },
+          "nullable": false,
+          "primary_key": true,
+          "has_default": true,
+          "default_value": "gen_random_uuid()"
+        },
+        {
+          "name": "product_id",
+          "column_type": { "BuiltIn": "Uuid" },
+          "nullable": false,
+          "primary_key": false,
+          "has_default": false,
+          "default_value": null
+        },
+        {
+          "name": "customer_id",
+          "column_type": { "BuiltIn": "Uuid" },
+          "nullable": false,
+          "primary_key": false,
+          "has_default": false,
+          "default_value": null
+        },
+        {
+          "name": "rating",
+          "column_type": { "BuiltIn": "I32" },
+          "nullable": false,
+          "primary_key": false,
+          "has_default": false,
+          "default_value": null
+        },
+        {
+          "name": "comment",
+          "column_type": { "BuiltIn": "String" },
+          "nullable": true,
+          "primary_key": false,
+          "has_default": false,
+          "default_value": null
+        },
+        {
+          "name": "created_at",
+          "column_type": { "BuiltIn": "Timestamp" },
+          "nullable": false,
+          "primary_key": false,
+          "has_default": true,
+          "default_value": "CURRENT_TIMESTAMP"
+        }
+      ]
+    },
+    "addresses": {
+      "name": "addresses",
+      "columns": [
+        {
+          "name": "id",
+          "column_type": { "BuiltIn": "Uuid" },
+          "nullable": false,
+          "primary_key": true,
+          "has_default": true,
+          "default_value": "gen_random_uuid()"
+        },
+        {
+          "name": "customer_id",
+          "column_type": { "BuiltIn": "Uuid" },
+          "nullable": false,
+          "primary_key": false,
+          "has_default": false,
+          "default_value": null
+        },
+        {
+          "name": "label",
+          "column_type": { "BuiltIn": "String" },
+          "nullable": false,
+          "primary_key": false,
+          "has_default": false,
+          "default_value": null
+        },
+        {
+          "name": "postal_code",
+          "column_type": { "BuiltIn": "String" },
+          "nullable": false,
+          "primary_key": false,
+          "has_default": false,
+          "default_value": null
+        },
+        {
+          "name": "city",
+          "column_type": { "BuiltIn": "String" },
+          "nullable": false,
+          "primary_key": false,
+          "has_default": false,
+          "default_value": null
+        },
+        {
+          "name": "street",
+          "column_type": { "BuiltIn": "String" },
+          "nullable": false,
+          "primary_key": false,
+          "has_default": false,
+          "default_value": null
+        },
+        {
+          "name": "is_default",
+          "column_type": { "BuiltIn": "Bool" },
+          "nullable": false,
+          "primary_key": false,
+          "has_default": true,
+          "default_value": "false"
+        }
+      ]
+    }
+  }
+}
