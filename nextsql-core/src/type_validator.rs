@@ -1,4 +1,4 @@
-use crate::ast::{Module, MutationBody, MutationBodyItem, MutationStatement, Expression, Type, BuiltInType, Literal, CallExpression, AtomicExpression};
+use crate::ast::{Module, MutationBody, MutationBodyItem, MutationStatement, Expression, Type, BuiltInType, Literal, CallExpression, AtomicExpression, Column, PropertyAccess, FromExpr, Span, RelationReturnType};
 use crate::schema::DatabaseSchema;
 use std::collections::{HashMap, HashSet};
 
@@ -9,32 +9,50 @@ pub struct ValidationError {
 }
 
 #[derive(Debug, Clone)]
-pub struct Span {
-    pub start: usize,
-    pub end: usize,
+pub struct RelationInfo {
+    pub for_table: String,
+    pub returning_type: RelationReturnType,
+    pub join_condition: Expression,
+    pub is_optional: bool,
 }
 
 pub struct TypeValidator<'a> {
     schema: &'a DatabaseSchema,
     variables: HashMap<String, Type>,
-    table_aliases: HashMap<String, String>,
+    valid_tables: HashSet<String>,  // 有効なテーブル名
     errors: Vec<ValidationError>,
+    relations: HashMap<String, RelationInfo>,  // relation name -> relation info
 }
 
 impl<'a> TypeValidator<'a> {
     pub fn new(schema: &'a DatabaseSchema) -> Self {
+        let mut valid_tables = HashSet::new();
+        // 実際のテーブル名を追加
+        for table_name in schema.tables.keys() {
+            valid_tables.insert(table_name.clone());
+        }
+        
         Self {
             schema,
             variables: HashMap::new(),
-            table_aliases: HashMap::new(),
+            valid_tables,
             errors: Vec::new(),
+            relations: HashMap::new(),
         }
     }
 
     pub fn validate_module(&mut self, module: &Module) -> Vec<ValidationError> {
         self.errors.clear();
+        self.variables.clear();
+        self.relations.clear();
         
-        // First pass: collect all function signatures and variables
+        // valid_tablesを実テーブル名で初期化
+        self.valid_tables.clear();
+        for table_name in self.schema.tables.keys() {
+            self.valid_tables.insert(table_name.clone());
+        }
+        
+        // First pass: collect all function signatures, variables, and relations
         for toplevel in &module.toplevels {
             match toplevel {
                 crate::ast::TopLevel::Query(query) => {
@@ -47,6 +65,20 @@ impl<'a> TypeValidator<'a> {
                         self.variables.insert(arg.name.clone(), arg.typ.clone());
                     }
                 }
+                crate::ast::TopLevel::Relation(relation) => {
+                    let is_optional = relation.decl.modifiers.iter()
+                        .any(|m| matches!(m, crate::ast::RelationModifier::Optional));
+                    
+                    self.relations.insert(
+                        relation.decl.name.clone(),
+                        RelationInfo {
+                            for_table: relation.decl.for_table.clone(),
+                            returning_type: relation.decl.returning_type.clone(),
+                            join_condition: relation.join_condition.clone(),
+                            is_optional,
+                        }
+                    );
+                }
                 _ => {}
             }
         }
@@ -54,8 +86,14 @@ impl<'a> TypeValidator<'a> {
         // Second pass: validate function bodies
         for toplevel in &module.toplevels {
             match toplevel {
+                crate::ast::TopLevel::Query(query) => {
+                    self.validate_query_body(&query.body);
+                }
                 crate::ast::TopLevel::Mutation(mutation) => {
                     self.validate_mutation_body(&mutation.body);
+                }
+                crate::ast::TopLevel::Relation(relation) => {
+                    self.validate_relation(relation);
                 }
                 _ => {}
             }
@@ -70,7 +108,7 @@ impl<'a> TypeValidator<'a> {
                 if !self.variables.contains_key(&var.name) {
                     self.errors.push(ValidationError {
                         message: format!("Undefined variable: ${}", var.name),
-                        span: None,
+                        span: var.span.clone(),
                     });
                 }
             }
@@ -80,6 +118,12 @@ impl<'a> TypeValidator<'a> {
             Expression::Atomic(AtomicExpression::Literal(Literal::Object(_obj))) => {
                 // Object literals are validated in context
             }
+            Expression::Atomic(AtomicExpression::PropertyAccess(property_access)) => {
+                self.validate_property_access(property_access);
+            }
+            Expression::Atomic(AtomicExpression::Column(column)) => {
+                self.validate_column_reference(column);
+            }
             Expression::Binary { left, right, .. } => {
                 self.validate_expression(left);
                 self.validate_expression(right);
@@ -88,17 +132,208 @@ impl<'a> TypeValidator<'a> {
         }
     }
 
+    fn validate_property_access(&mut self, property_access: &PropertyAccess) {
+        // First validate the base expression
+        self.validate_expression(&property_access.target);
+        
+        // Check if this is a relation access
+        match property_access.target.as_ref() {
+            Expression::Atomic(AtomicExpression::Column(Column::ExplicitTarget(table_name, _, _))) => {
+                // This could be a relation access like table.relation.field
+                let actual_table_name = table_name;
+                
+                // Check if the property is a relation defined for this table
+                if let Some(relation_info) = self.relations.get(&property_access.property) {
+                    if &relation_info.for_table != actual_table_name {
+                        self.errors.push(ValidationError {
+                            message: format!(
+                                "Relation '{}' is not defined for table '{}' (it's defined for '{}')",
+                                property_access.property, table_name, relation_info.for_table
+                            ),
+                            span: None,
+                        });
+                    }
+                } else {
+                    // If it's not a relation, it should be a column
+                    if let Some(table) = self.schema.get_table(actual_table_name) {
+                        if !table.has_column(&property_access.property) {
+                            self.errors.push(ValidationError {
+                                message: format!(
+                                    "Column '{}' not found in table '{}'",
+                                    property_access.property, table_name
+                                ),
+                                span: None,
+                            });
+                        }
+                    }
+                }
+            }
+            Expression::Atomic(AtomicExpression::PropertyAccess(_inner_property_access)) => {
+                // This is a nested property access like p.author.name
+                // The inner property access (p.author) should resolve to a relation
+                // that returns a table, and then we validate the outer property (name)
+                // against that returned table
+                
+                // For now, we'll just validate that each part is valid
+                // A more complete implementation would track the resolved types
+            }
+            _ => {
+                // Other types of property access (e.g., on variables)
+            }
+        }
+    }
+
+    fn validate_column_reference(&mut self, column: &Column) {
+        match column {
+            Column::ExplicitTarget(table_name, column_name, span) => {
+                if let Some(table) = self.schema.get_table(table_name) {
+                    if !table.has_column(column_name) {
+                        self.errors.push(ValidationError {
+                            message: format!("Column '{}' not found in table '{}'", column_name, table_name),
+                            span: span.clone(),
+                        });
+                    }
+                } else {
+                    self.errors.push(ValidationError {
+                        message: format!("Table '{}' not found", table_name),
+                        span: span.clone(),
+                    });
+                }
+            }
+            Column::ImplicitTarget(_column_name, _span) => {
+                // For implicit targets, we'd need to search all available tables
+                // For now, we'll skip this validation as it requires more context
+            }
+            Column::WildcardOf(table_name, span) => {
+                if !self.schema.tables.contains_key(table_name) {
+                    self.errors.push(ValidationError {
+                        message: format!("Table '{}' not found", table_name),
+                        span: span.clone(),
+                    });
+                }
+            }
+            Column::Wildcard(_span) => {
+                // Wildcard is always valid if there are tables in the query
+            }
+        }
+    }
+
+    fn validate_query_body(&mut self, query_body: &crate::ast::QueryBody) {
+        for statement in &query_body.statements {
+            match statement {
+                crate::ast::QueryStatement::Select(select) => {
+                    self.validate_select_statement(select);
+                }
+            }
+        }
+    }
+
+    fn validate_select_statement(&mut self, select: &crate::ast::SelectStatement) {
+        // Validate FROM clause
+        self.validate_from_clause(&select.from);
+
+        // Validate query clauses
+        for clause in &select.clauses {
+            self.validate_query_clause(clause);
+        }
+
+        // Validate union clauses
+        for union_clause in &select.unions {
+            self.validate_select_statement(&union_clause.select);
+        }
+    }
+
+    fn validate_query_clause(&mut self, clause: &crate::ast::QueryClause) {
+        match clause {
+            crate::ast::QueryClause::Where(condition) => {
+                self.validate_expression(condition);
+            }
+            crate::ast::QueryClause::Select(select_expressions) => {
+                for select_expr in select_expressions {
+                    self.validate_expression(&select_expr.expr);
+                }
+            }
+            crate::ast::QueryClause::Limit(limit_expr) => {
+                self.validate_expression(limit_expr);
+            }
+            crate::ast::QueryClause::OrderBy(order_exprs) => {
+                for order_expr in order_exprs {
+                    self.validate_expression(&order_expr.expr);
+                }
+            }
+            crate::ast::QueryClause::GroupBy(expressions) => {
+                for expr in expressions {
+                    self.validate_expression(expr);
+                }
+            }
+            crate::ast::QueryClause::When(when_clause) => {
+                self.validate_expression(&when_clause.condition);
+                self.validate_query_clause(&when_clause.clause);
+            }
+            crate::ast::QueryClause::Join(join) => {
+                if !self.schema.tables.contains_key(&join.table) {
+                    self.errors.push(ValidationError {
+                        message: format!("Table '{}' not found in join", join.table),
+                        span: None,
+                    });
+                }
+                self.validate_expression(&join.condition);
+            }
+            crate::ast::QueryClause::Aggregate(aggregates) => {
+                for aggregate in aggregates {
+                    self.validate_expression(&aggregate.expr);
+                }
+            }
+            crate::ast::QueryClause::Distinct => {
+                // No expression to validate
+            }
+            crate::ast::QueryClause::Offset(offset_expr) => {
+                self.validate_expression(offset_expr);
+            }
+            crate::ast::QueryClause::Having(having_expr) => {
+                self.validate_expression(having_expr);
+            }
+            crate::ast::QueryClause::ForUpdate => {
+                // No expression to validate
+            }
+        }
+    }
+
+    fn validate_from_clause(&mut self, from: &FromExpr) {
+        // エイリアスまたは実テーブル名をチェック
+        if !self.valid_tables.contains(&from.table) && !self.schema.tables.contains_key(&from.table) {
+            self.errors.push(ValidationError {
+                message: format!("Table '{}' not found", from.table),
+                span: from.span.clone(),
+            });
+        }
+        
+        // Validate joins
+        for join in &from.joins {
+            if !self.valid_tables.contains(&join.table) && !self.schema.tables.contains_key(&join.table) {
+                self.errors.push(ValidationError {
+                    message: format!("Table '{}' not found in join", join.table),
+                    span: join.span.clone(),
+                });
+            }
+            self.validate_expression(&join.condition);
+        }
+    }
+
     fn validate_mutation_body(&mut self, mutation_body: &MutationBody) {
         for item in &mutation_body.items {
             match item {
-                MutationBodyItem::Alias(alias) => {
-                    // Add alias to scope
-                    self.table_aliases.insert(alias.alias.clone(), alias.target.clone());
-                }
                 MutationBodyItem::Mutation(statement) => {
                     match statement {
                         MutationStatement::Insert(insert) => {
                             self.validate_insert(&insert.into, &insert.values);
+                            if let Some(on_conflict) = &insert.on_conflict {
+                                if let crate::ast::OnConflictAction::DoUpdate(sets) = &on_conflict.action {
+                                    for (_key, value) in sets {
+                                        self.validate_expression(value);
+                                    }
+                                }
+                            }
                         }
                         MutationStatement::Update(update) => {
                             self.validate_update(&update.target.name, &update.set, update.where_clause.as_ref());
@@ -116,10 +351,13 @@ impl<'a> TypeValidator<'a> {
         let table = match self.schema.get_table(target) {
             Some(table) => table,
             None => {
-                self.errors.push(ValidationError {
-                    message: format!("Table '{}' not found", target),
-                    span: None,
-                });
+                // 実テーブル名をチェック
+                if !self.valid_tables.contains(target) {
+                    self.errors.push(ValidationError {
+                        message: format!("Table '{}' not found", target),
+                        span: None,
+                    });
+                }
                 return;
             }
         };
@@ -174,10 +412,13 @@ impl<'a> TypeValidator<'a> {
         let table = match self.schema.get_table(target) {
             Some(table) => table,
             None => {
-                self.errors.push(ValidationError {
-                    message: format!("Table '{}' not found", target),
-                    span: None,
-                });
+                // 実テーブル名をチェック
+                if !self.valid_tables.contains(target) {
+                    self.errors.push(ValidationError {
+                        message: format!("Table '{}' not found", target),
+                        span: None,
+                    });
+                }
                 return;
             }
         };
@@ -204,7 +445,7 @@ impl<'a> TypeValidator<'a> {
     }
 
     fn validate_delete(&mut self, target: &str, where_clause: Option<&Expression>) {
-        if !self.schema.tables.contains_key(target) {
+        if !self.schema.tables.contains_key(target) && !self.valid_tables.contains(target) {
             self.errors.push(ValidationError {
                 message: format!("Table '{}' not found", target),
                 span: None,
@@ -333,6 +574,36 @@ impl<'a> TypeValidator<'a> {
             BuiltInType::I16 | BuiltInType::I32 | BuiltInType::I64 | 
             BuiltInType::F32 | BuiltInType::F64
         )
+    }
+
+    fn validate_relation(&mut self, relation: &crate::ast::Relation) {
+        // Validate that the for_table exists
+        if !self.schema.tables.contains_key(&relation.decl.for_table) {
+            self.errors.push(ValidationError {
+                message: format!("Table '{}' not found for relation '{}'", 
+                    relation.decl.for_table, relation.decl.name),
+                span: None,
+            });
+            return;
+        }
+        
+        // Validate the returning type
+        match &relation.decl.returning_type {
+            RelationReturnType::Table(table_name) => {
+                if !self.schema.tables.contains_key(table_name) {
+                    self.errors.push(ValidationError {
+                        message: format!("Returning table '{}' not found for relation '{}'", 
+                            table_name, relation.decl.name),
+                        span: None,
+                    });
+                }
+            }
+            RelationReturnType::Type(_) => {
+                // Type validation for aggregation return types
+            }
+        }
+        
+        // TODO: Validate join condition expression
     }
 }
 

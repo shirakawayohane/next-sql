@@ -1,10 +1,31 @@
 use std::{collections::HashMap, fmt::Display};
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct Span {
+    pub start: usize,
+    pub end: usize,
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct ColumnRef {
+    pub table: String,
+    pub column: String,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct ValType {
+    pub name: String,
+    pub base_type: BuiltInType,
+    pub source_column: Option<ColumnRef>,
+}
+
 #[derive(Debug, PartialEq)]
 pub enum TopLevel {
     Query(Query),
     Mutation(Mutation),
     With(WithStatement),
+    Relation(Relation),
+    ValType(ValType),
 }
 
 #[derive(Debug, PartialEq)]
@@ -15,12 +36,14 @@ pub struct Module {
 #[derive(Debug, PartialEq, Clone)]
 pub struct Target {
     pub name: String,
+    pub span: Option<Span>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct FromExpr {
     pub table: String,
     pub joins: Vec<JoinExpr>,
+    pub span: Option<Span>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -37,6 +60,7 @@ pub struct JoinExpr {
     pub join_type: JoinType,
     pub table: String,
     pub condition: Expression,
+    pub span: Option<Span>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -113,10 +137,10 @@ pub enum AtomicExpression {
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Column {
-    ImplicitTarget(String),
-    ExplicitTarget(String, String),
-    WildcardOf(String),
-    Wildcard,
+    ImplicitTarget(String, Option<Span>),
+    ExplicitTarget(String, String, Option<Span>),
+    WildcardOf(String, Option<Span>),
+    Wildcard(Option<Span>),
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -133,6 +157,7 @@ pub enum Literal {
 pub struct CallExpression {
     pub callee: String,
     pub args: Vec<Expression>,
+    pub span: Option<Span>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -160,6 +185,7 @@ pub struct ArrayExpression(pub Vec<Expression>);
 #[derive(Debug, PartialEq, Clone)]
 pub struct Variable {
     pub name: String,
+    pub span: Option<Span>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -272,8 +298,8 @@ pub struct SwitchExpression {
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct SelectExpression {
-    pub expr: Expression,
     pub alias: Option<String>,
+    pub expr: Expression,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -294,10 +320,26 @@ pub enum QueryClause {
     Select(Vec<SelectExpression>),
     When(WhenClause),
     Limit(Expression),
-    OrderBy(Expression),
+    OrderBy(Vec<OrderByExpression>),
     Join(JoinExpr),
     GroupBy(Vec<Expression>),
     Aggregate(Vec<AggregateExpression>),
+    Distinct,
+    Offset(Expression),
+    Having(Expression),
+    ForUpdate,
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum OrderDirection {
+    Asc,
+    Desc,
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct OrderByExpression {
+    pub expr: Expression,
+    pub direction: Option<OrderDirection>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -306,21 +348,28 @@ pub struct WhenClause {
     pub clause: Box<QueryClause>,
 }
 
+
 #[derive(Debug, PartialEq, Clone)]
-pub struct AliasStatement {
-    pub alias: String,
-    pub target: String,
+pub enum UnionType {
+    Union,
+    UnionAll,
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct UnionClause {
+    pub union_type: UnionType,
+    pub select: Box<SelectStatement>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct SelectStatement {
     pub from: FromExpr,
     pub clauses: Vec<QueryClause>,
+    pub unions: Vec<UnionClause>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum QueryStatement {
-    Alias(AliasStatement),
     Select(SelectStatement),
 }
 
@@ -342,9 +391,22 @@ pub struct MutationDecl {
 }
 
 #[derive(Debug, PartialEq)]
+pub enum OnConflictAction {
+    DoUpdate(Vec<(String, Expression)>),
+    DoNothing,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct OnConflictClause {
+    pub columns: Vec<String>,
+    pub action: OnConflictAction,
+}
+
+#[derive(Debug, PartialEq)]
 pub struct Insert {
     pub into: String,
     pub values: Vec<Expression>,
+    pub on_conflict: Option<OnConflictClause>,
     pub returning: Option<Vec<Column>>,
 }
 
@@ -372,7 +434,6 @@ pub enum MutationStatement {
 
 #[derive(Debug, PartialEq)]
 pub enum MutationBodyItem {
-    Alias(AliasStatement),
     Mutation(MutationStatement),
 }
 
@@ -385,4 +446,37 @@ pub struct MutationBody {
 pub struct Mutation {
     pub decl: MutationDecl,
     pub body: MutationBody,
+}
+
+#[derive(Debug, PartialEq)]
+pub enum RelationModifier {
+    Public,
+    Optional,
+}
+
+#[derive(Debug, PartialEq)]
+pub enum RelationType {
+    Relation,
+    Aggregation,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct RelationDecl {
+    pub modifiers: Vec<RelationModifier>,
+    pub relation_type: RelationType,
+    pub name: String,
+    pub for_table: String,
+    pub returning_type: RelationReturnType,
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum RelationReturnType {
+    Table(String),
+    Type(Type),
+}
+
+#[derive(Debug, PartialEq)]
+pub struct Relation {
+    pub decl: RelationDecl,
+    pub join_condition: Expression,
 }

@@ -7,7 +7,7 @@ null = @{ "null" }
 
 ident = @{ !ASCII_DIGIT ~ (ASCII_ALPHANUMERIC | "_")+ }
 wildcard = @{ "*" }
-column = { wildcard | ident ~ "." ~ (wildcard | ident) | ident ~ !(("[" | "(")) }
+column = { wildcard | ident ~ "." ~ (wildcard | ident ~ !("(")) | ident ~ !(("[" | "(")) }
 
 add = @{ "+" }
 subtract = @{ "-" }
@@ -71,6 +71,12 @@ insert_clause = { "insert" ~ "(" ~ ident ~ ")" }
 value_clause = { dot ~ "value" ~ "(" ~ expression ~ ")" }
 values_clause = { dot ~ "values" ~ "(" ~ expression ~ (s* ~ "," ~ expression)* ~ ")" }
 
+on_conflict_columns = { ident ~ (s* ~ "," ~ ident)* }
+do_update_clause = { dot ~ "doUpdate" ~ "(" ~ "{" ~ ident ~ ":" ~ expression ~ (s* ~ "," ~ ident ~ ":" ~ expression)* ~ ","? ~ "}" ~ ")" }
+do_nothing_clause = { dot ~ "doNothing" ~ "(" ~ ")" }
+on_conflict_action = { do_update_clause | do_nothing_clause }
+on_conflict_clause = { dot ~ "onConflict" ~ "(" ~ on_conflict_columns ~ ")" ~ on_conflict_action }
+
 update_clause = { "update" ~ "(" ~ target ~ ")"}
 set_clause = { dot ~ "set" ~ "(" ~ "{" ~ ident ~ ":" ~ expression ~ (s* ~ "," ~ ident ~ ":" ~ expression)* ~ "}" ~ ")"}
 
@@ -82,10 +88,14 @@ select_clause = { dot ~ "select" ~ "(" ~ select_expression ~ (s* ~ "," ~ select_
 when_clause = { dot ~ "when" ~ "(" ~ expression ~ "," ~ call_expression ~ ")" }
 join_clause = { "join" ~ "(" ~ target ~ "," ~ expression ~ ")" }
 limit_clause = { dot ~ "limit" ~ "(" ~ expression ~ ")" }
-order_by_clause = { dot ~ "orderBy" ~ "(" ~ expression ~ ")" }
+order_by_clause = { dot ~ "orderBy" ~ "(" ~ expression ~ (s* ~ "," ~ expression)* ~ ")" }
 group_by_clause = { dot ~ "groupBy" ~ "(" ~ expression ~ (s* ~ "," ~ expression)* ~ ")" }
 aggregate_expr = { ident ~ ":" ~ expression }
 aggregate_clause = { dot ~ "aggregate" ~ "(" ~ aggregate_expr ~ (s* ~ "," ~ aggregate_expr)* ~ ")" }
+distinct_clause = { dot ~ "distinct" ~ "(" ~ ")" }
+offset_clause = { dot ~ "offset" ~ "(" ~ expression ~ ")" }
+having_clause = { dot ~ "having" ~ "(" ~ expression ~ ")" }
+for_update_clause = { dot ~ "forUpdate" ~ "(" ~ ")" }
 
 i16_type = @{ "i16" }
 i32_type = @{ "i32" }
@@ -110,13 +120,13 @@ type = { (array_type | builtin_type | utility_type | user_defined_type) ~ questi
 argument = { variable ~ ":" ~ type }
 argument_list = { "(" ~ ")" | "(" ~ argument ~ (s* ~ "," ~ argument)* ~ ")" }
 
-// Alias statement: alias u = users
-alias_keyword = @{ "alias" }
-alias_statement = { alias_keyword ~ ident ~ "=" ~ ident }
+// Union support
+union_type = @{ "unionAll" | "union" }
+union_clause = { dot ~ union_type ~ "(" ~ select_statement ~ ")" }
 
-// Query statements can include alias declarations
-select_statement = { from_clause ~ (when_clause | where_clause | group_by_clause | aggregate_clause)* ~ select_clause ~ (limit_clause | order_by_clause)* }
-query_statement = { alias_statement | select_statement }
+// Query statements
+select_statement = { from_clause ~ (when_clause | where_clause | group_by_clause | aggregate_clause | distinct_clause | having_clause)* ~ select_clause ~ (limit_clause | order_by_clause | offset_clause | for_update_clause)* ~ union_clause* }
+query_statement = { select_statement }
 
 query_body = { "{" ~ query_statement+ ~ "}" }
 query_decl = { "query" ~ ident ~ argument_list? }
@@ -127,13 +137,13 @@ delete_clause = { "delete" ~ "(" ~ target ~ ")" }
 mutation_decl = { "mutation" ~ ident ~ argument_list? }
 
 // Mutation statements
-mutation_statement = { 
-      (insert_clause ~ (value_clause | values_clause) ~ returning_clause?)
+mutation_statement = {
+      (insert_clause ~ (value_clause | values_clause) ~ on_conflict_clause? ~ returning_clause?)
     | (update_clause ~ where_clause? ~ set_clause ~ returning_clause?)
     | (delete_clause ~ where_clause? ~ returning_clause?)
 }
-// Mutation body can include alias statements
-mutation_item = { alias_statement | mutation_statement }
+// Mutation body
+mutation_item = { mutation_statement }
 mutation_body = { "{" ~ mutation_item+ ~ "}" }
 mutation = { mutation_decl ~ mutation_body }
 
@@ -160,4 +170,20 @@ migration_body = { "{" ~ up_block ~ down_block ~ "}" }
 migration = { migration_decl ~ migration_body }
 
 with_statement = { "with" ~ ident ~ "=" ~ "{" ~ query_statement+ ~ "}" }
-module = { SOI ~ (with_statement | query | mutation)* ~ EOI }
+
+// Relation definitions
+public_modifier = @{ "public" }
+optional_modifier = @{ "optional" }
+relation_keyword = @{ "relation" }
+aggregation_keyword = @{ "aggregation" }
+relation_modifier = { public_modifier | optional_modifier }
+relation_type = { relation_keyword | aggregation_keyword }
+relation_decl = { relation_modifier* ~ relation_type ~ ident ~ "for" ~ ident ~ "returning" ~ (builtin_type | array_type | utility_type | ident) }
+relation_body = { "{" ~ expression ~ "}" }
+relation = { relation_decl ~ relation_body }
+
+valtype_column_ref = { ident ~ "." ~ ident }
+valtype_binding = { "for" ~ valtype_column_ref }
+valtype_decl = { "valtype" ~ ident ~ "=" ~ builtin_type ~ valtype_binding? }
+
+module = { SOI ~ (valtype_decl | relation | with_statement | query | mutation)* ~ EOI }

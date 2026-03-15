@@ -51,6 +51,10 @@ impl TableSchema {
         self.columns.iter().find(|col| col.name == name)
     }
 
+    pub fn has_column(&self, name: &str) -> bool {
+        self.get_column(name).is_some()
+    }
+
     pub fn add_column(&mut self, column: ColumnSchema) {
         self.columns.push(column);
     }

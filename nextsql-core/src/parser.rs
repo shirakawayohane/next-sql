@@ -7,13 +7,20 @@ use pest_derive::Parser;
 
 use crate::ast::*;
 
+fn get_span(pair: &pest::iterators::Pair<Rule>) -> Option<Span> {
+    let span = pair.as_span();
+    Some(Span {
+        start: span.start(),
+        end: span.end(),
+    })
+}
+
 #[derive(Parser)]
 #[grammar = "nextsql.pest"]
 pub struct NextSqlParser;
 
 pub fn parse_module(input: &str) -> Result<Module, Error<Rule>> {
-    let pairs: pest::iterators::Pairs<Rule> =
-        NextSqlParser::parse(Rule::module, &input)?;
+    let pairs: pest::iterators::Pairs<Rule> = NextSqlParser::parse(Rule::module, &input)?;
 
     let mut toplevels = Vec::new();
 
@@ -36,10 +43,19 @@ pub fn parse_module(input: &str) -> Result<Module, Error<Rule>> {
                                 inner_pair.into_inner(),
                             )));
                         }
+                        Rule::relation => {
+                            toplevels.push(TopLevel::Relation(parse_relation(inner_pair.into_inner())));
+                        }
+                        Rule::valtype_decl => {
+                            toplevels.push(TopLevel::ValType(parse_valtype_decl(inner_pair)));
+                        }
                         Rule::EOI => break,
                         _ => {
                             // Skip unexpected rules instead of panicking
-                            eprintln!("Warning: Unexpected rule in module: {:?}", inner_pair.as_rule());
+                            eprintln!(
+                                "Warning: Unexpected rule in module: {:?}",
+                                inner_pair.as_rule()
+                            );
                         }
                     }
                 }
@@ -56,8 +72,10 @@ pub fn parse_module(input: &str) -> Result<Module, Error<Rule>> {
 
 fn parse_variable(pairs: pest::iterators::Pairs<Rule>) -> Variable {
     let mut pairs = pairs.peekable();
-    let name = pairs.next().unwrap().as_str()[1..].to_string();
-    Variable { name }
+    let pair = pairs.next().unwrap();
+    let name = pair.as_str()[1..].to_string();
+    let span = get_span(&pair);
+    Variable { name, span }
 }
 
 #[test]
@@ -67,7 +85,11 @@ fn test_simple_query_parse() {
   .select(users.*)
 }"#;
     let result = parse_module(input);
-    assert!(result.is_ok(), "Failed to parse simple query: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Failed to parse simple query: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -95,7 +117,53 @@ fn test_parse_type() {
         assert_eq!(input, typ.to_string());
     }
 
+    // Test basic Insertable type
     let input = "Insertable<User>";
+    let pairs = match NextSqlParser::parse(Rule::r#type, input) {
+        Ok(p) => p,
+        Err(e) => panic!("{}のパースでエラーが発生しました: {}", input, e),
+    };
+    let typ = parse_type(pairs.peekable().next().unwrap().into_inner());
+    assert_eq!(input, typ.to_string());
+
+    // Test Insertable with built-in type
+    let input = "Insertable<string>";
+    let pairs = match NextSqlParser::parse(Rule::r#type, input) {
+        Ok(p) => p,
+        Err(e) => panic!("{}のパースでエラーが発生しました: {}", input, e),
+    };
+    let typ = parse_type(pairs.peekable().next().unwrap().into_inner());
+    assert_eq!(input, typ.to_string());
+
+    // Test optional Insertable type
+    let input = "Insertable<User>?";
+    let pairs = match NextSqlParser::parse(Rule::r#type, input) {
+        Ok(p) => p,
+        Err(e) => panic!("{}のパースでエラーが発生しました: {}", input, e),
+    };
+    let typ = parse_type(pairs.peekable().next().unwrap().into_inner());
+    assert_eq!(input, typ.to_string());
+
+    // Test array of Insertable type
+    let input = "[Insertable<User>]";
+    let pairs = match NextSqlParser::parse(Rule::r#type, input) {
+        Ok(p) => p,
+        Err(e) => panic!("{}のパースでエラーが発生しました: {}", input, e),
+    };
+    let typ = parse_type(pairs.peekable().next().unwrap().into_inner());
+    assert_eq!(input, typ.to_string());
+
+    // Test optional array of Insertable type
+    let input = "[Insertable<User>]?";
+    let pairs = match NextSqlParser::parse(Rule::r#type, input) {
+        Ok(p) => p,
+        Err(e) => panic!("{}のパースでエラーが発生しました: {}", input, e),
+    };
+    let typ = parse_type(pairs.peekable().next().unwrap().into_inner());
+    assert_eq!(input, typ.to_string());
+
+    // Test Insertable with optional inner type
+    let input = "Insertable<User?>";
     let pairs = match NextSqlParser::parse(Rule::r#type, input) {
         Ok(p) => p,
         Err(e) => panic!("{}のパースでエラーが発生しました: {}", input, e),
@@ -113,6 +181,44 @@ fn test_parse_type() {
         Type::Array(_)
     );
 }
+fn parse_builtin_type_from_pair(pair: pest::iterators::Pair<Rule>) -> BuiltInType {
+    match pair.into_inner().next().unwrap().as_rule() {
+        Rule::i16_type => BuiltInType::I16,
+        Rule::i32_type => BuiltInType::I32,
+        Rule::i64_type => BuiltInType::I64,
+        Rule::f32_type => BuiltInType::F32,
+        Rule::f64_type => BuiltInType::F64,
+        Rule::timestamp_type => BuiltInType::Timestamp,
+        Rule::timestamptz_type => BuiltInType::Timestamptz,
+        Rule::date_type => BuiltInType::Date,
+        Rule::uuid_type => BuiltInType::Uuid,
+        Rule::string_type => BuiltInType::String,
+        Rule::bool_type => BuiltInType::Bool,
+        _ => unreachable!(),
+    }
+}
+
+fn parse_valtype_decl(pair: pest::iterators::Pair<Rule>) -> ValType {
+    let mut inner = pair.into_inner();
+    let name = inner.next().unwrap().as_str().to_string();
+
+    // Parse the builtin_type
+    let base_type_pair = inner.next().unwrap();
+    let base_type = parse_builtin_type_from_pair(base_type_pair);
+
+    // Parse optional column binding
+    let source_column = inner.next().map(|binding_pair| {
+        // valtype_binding contains valtype_column_ref
+        let col_ref_pair = binding_pair.into_inner().next().unwrap();
+        let mut col_inner = col_ref_pair.into_inner();
+        let table = col_inner.next().unwrap().as_str().to_string();
+        let column = col_inner.next().unwrap().as_str().to_string();
+        ColumnRef { table, column }
+    });
+
+    ValType { name, base_type, source_column }
+}
+
 fn parse_type(pairs: pest::iterators::Pairs<Rule>) -> Type {
     fn parse_utility_type(pairs: pest::iterators::Pairs<Rule>) -> Type {
         let mut pairs = pairs.peekable();
@@ -234,19 +340,9 @@ fn parse_query(pairs: pest::iterators::Pairs<Rule>) -> Query {
                 match pair.as_rule() {
                     Rule::query_statement => {
                         let inner = pair.into_inner().next().unwrap();
-                        match inner.as_rule() {
-                            Rule::alias_statement => {
-                                statements.push(QueryStatement::Alias(
-                                    parse_alias_statement(inner.into_inner())
-                                ));
-                            }
-                            Rule::select_statement => {
-                                statements.push(QueryStatement::Select(
-                                    parse_select_statement(inner.into_inner())
-                                ));
-                            }
-                            _ => unreachable!("Unexpected query statement: {:?}", inner.as_rule()),
-                        }
+                        statements.push(QueryStatement::Select(parse_select_statement(
+                            inner.into_inner(),
+                        )));
                     }
                     _ => unreachable!("Unexpected rule in query body: {:?}", pair.as_rule()),
                 }
@@ -261,31 +357,103 @@ fn parse_query(pairs: pest::iterators::Pairs<Rule>) -> Query {
 fn parse_with_statement(pairs: pest::iterators::Pairs<Rule>) -> WithStatement {
     let mut pairs = pairs.peekable();
     let name = pairs.next().unwrap().as_str().to_string();
-    
+
     let mut body = Vec::new();
     for pair in pairs {
         match pair.as_rule() {
             Rule::query_statement => {
                 let inner = pair.into_inner().next().unwrap();
-                match inner.as_rule() {
-                    Rule::alias_statement => {
-                        body.push(QueryStatement::Alias(
-                            parse_alias_statement(inner.into_inner())
-                        ));
-                    }
-                    Rule::select_statement => {
-                        body.push(QueryStatement::Select(
-                            parse_select_statement(inner.into_inner())
-                        ));
-                    }
-                    _ => unreachable!("Unexpected query statement: {:?}", inner.as_rule()),
-                }
+                body.push(QueryStatement::Select(parse_select_statement(
+                    inner.into_inner(),
+                )));
             }
             _ => unreachable!("Unexpected rule in with statement: {:?}", pair.as_rule()),
         }
     }
-    
+
     WithStatement { name, body }
+}
+
+fn parse_relation(pairs: pest::iterators::Pairs<Rule>) -> Relation {
+    let mut pairs = pairs.peekable();
+    let decl = parse_relation_decl(pairs.next().unwrap().into_inner());
+    let body = pairs.next().unwrap();
+    let join_condition = parse_expression(body.into_inner().next().unwrap().into_inner());
+    
+    Relation {
+        decl,
+        join_condition,
+    }
+}
+
+fn parse_relation_decl(pairs: pest::iterators::Pairs<Rule>) -> RelationDecl {
+    let pairs = pairs.peekable();
+    let mut modifiers = Vec::new();
+    let mut relation_type = None;
+    let mut name = None;
+    let mut for_table = None;
+    let mut returning_type = None;
+    
+    for pair in pairs {
+        match pair.as_rule() {
+            Rule::relation_modifier => {
+                let modifier_inner = pair.into_inner().next().unwrap();
+                match modifier_inner.as_rule() {
+                    Rule::public_modifier => modifiers.push(RelationModifier::Public),
+                    Rule::optional_modifier => modifiers.push(RelationModifier::Optional),
+                    _ => unreachable!("Unknown relation modifier: {:?}", modifier_inner.as_rule()),
+                }
+            }
+            Rule::relation_type => {
+                let type_inner = pair.into_inner().next().unwrap();
+                relation_type = Some(match type_inner.as_rule() {
+                    Rule::relation_keyword => RelationType::Relation,
+                    Rule::aggregation_keyword => RelationType::Aggregation,
+                    _ => unreachable!("Unknown relation type: {:?}", type_inner.as_rule()),
+                });
+            }
+            Rule::ident => {
+                if name.is_none() {
+                    name = Some(pair.as_str().to_string());
+                } else if for_table.is_none() {
+                    for_table = Some(pair.as_str().to_string());
+                } else {
+                    // This is the returning table
+                    returning_type = Some(RelationReturnType::Table(pair.as_str().to_string()));
+                }
+            }
+            Rule::builtin_type => {
+                // Built-in types need to be parsed directly from the pair
+                let builtin = match pair.as_str() {
+                    "i16" => crate::ast::BuiltInType::I16,
+                    "i32" => crate::ast::BuiltInType::I32,
+                    "i64" => crate::ast::BuiltInType::I64,
+                    "f32" => crate::ast::BuiltInType::F32,
+                    "f64" => crate::ast::BuiltInType::F64,
+                    "timestamp" => crate::ast::BuiltInType::Timestamp,
+                    "timestamptz" => crate::ast::BuiltInType::Timestamptz,
+                    "date" => crate::ast::BuiltInType::Date,
+                    "uuid" => crate::ast::BuiltInType::Uuid,
+                    "string" => crate::ast::BuiltInType::String,
+                    "bool" => crate::ast::BuiltInType::Bool,
+                    _ => unreachable!("Unknown builtin type: {}", pair.as_str()),
+                };
+                returning_type = Some(RelationReturnType::Type(crate::ast::Type::BuiltIn(builtin)));
+            }
+            Rule::array_type | Rule::utility_type => {
+                returning_type = Some(RelationReturnType::Type(parse_type(pair.into_inner())));
+            }
+            _ => {} // Skip keywords like "for" and "returning"
+        }
+    }
+    
+    RelationDecl {
+        modifiers,
+        relation_type: relation_type.expect("Relation type is required"),
+        name: name.expect("Relation name is required"),
+        for_table: for_table.expect("For table is required"),
+        returning_type: returning_type.expect("Returning type is required"),
+    }
 }
 
 fn parse_mutation_decl(pairs: pest::iterators::Pairs<Rule>) -> MutationDecl {
@@ -414,6 +582,42 @@ fn test_parse_mutation_body() {
     let body = parse_mutation_body(pairs.peekable().next().unwrap().into_inner());
     dbg!(&body);
 }
+fn parse_on_conflict_clause(pair: pest::iterators::Pair<Rule>) -> OnConflictClause {
+    let mut inner = pair.into_inner();
+
+    // Parse conflict columns
+    let columns_pair = inner.next().unwrap(); // on_conflict_columns
+    let columns: Vec<String> = columns_pair
+        .into_inner()
+        .filter(|p| p.as_rule() == Rule::ident)
+        .map(|p| p.as_str().to_string())
+        .collect();
+
+    // Parse action (doUpdate or doNothing)
+    let action_pair = inner.next().unwrap(); // on_conflict_action
+    let action_inner = action_pair.into_inner().next().unwrap();
+
+    let action = match action_inner.as_rule() {
+        Rule::do_nothing_clause => OnConflictAction::DoNothing,
+        Rule::do_update_clause => {
+            let mut sets = Vec::new();
+            let mut pairs = action_inner.into_inner();
+            while let Some(p) = pairs.next() {
+                if p.as_rule() == Rule::ident {
+                    let key = p.as_str().to_string();
+                    let value_pair = pairs.next().unwrap();
+                    let value = parse_expression(value_pair.into_inner());
+                    sets.push((key, value));
+                }
+            }
+            OnConflictAction::DoUpdate(sets)
+        }
+        _ => unreachable!(),
+    };
+
+    OnConflictClause { columns, action }
+}
+
 fn parse_insert(pairs: pest::iterators::Pairs<Rule>) -> Insert {
     let mut pairs = pairs.peekable();
     // dbg!(&pairs);
@@ -427,6 +631,12 @@ fn parse_insert(pairs: pest::iterators::Pairs<Rule>) -> Insert {
         Rule::values_clause => parse_values_clause(next.into_inner()),
         _ => Vec::new(),
     };
+    let on_conflict = match pairs.peek().map(|p| p.as_rule()) {
+        Some(Rule::on_conflict_clause) => {
+            Some(parse_on_conflict_clause(pairs.next().unwrap()))
+        }
+        _ => None,
+    };
     let returning = match pairs.peek().map(|p| p.as_rule()) {
         Some(Rule::returning_clause) => {
             Some(parse_returning_clause(pairs.next().unwrap().into_inner()))
@@ -436,6 +646,7 @@ fn parse_insert(pairs: pest::iterators::Pairs<Rule>) -> Insert {
     Insert {
         into: insert,
         values,
+        on_conflict,
         returning,
     }
 }
@@ -465,11 +676,12 @@ fn test_parse_where_clause() {
     assert_eq!(
         Expression::Binary {
             left: Box::new(Expression::Atomic(AtomicExpression::Column(
-                Column::ExplicitTarget("u".to_string(), "id".to_string())
+                Column::ExplicitTarget("u".to_string(), "id".to_string(), Some(Span { start: 9, end: 11 }))
             ))),
             op: BinaryOp::Equal,
             right: Box::new(Expression::Atomic(AtomicExpression::Variable(Variable {
-                name: "id".to_string()
+                name: "id".to_string(),
+                span: Some(Span { start: 15, end: 18 }),
             })))
         },
         clause
@@ -530,28 +742,18 @@ fn parse_update(pairs: pest::iterators::Pairs<Rule>) -> Update {
 
 fn parse_mutation_body(pairs: pest::iterators::Pairs<Rule>) -> MutationBody {
     let mut items = Vec::new();
-    
+
     for pair in pairs {
         match pair.as_rule() {
             Rule::mutation_item => {
                 let inner = pair.into_inner().next().unwrap();
-                match inner.as_rule() {
-                    Rule::alias_statement => {
-                        items.push(MutationBodyItem::Alias(
-                            parse_alias_statement(inner.into_inner())
-                        ));
-                    }
-                    Rule::mutation_statement => {
-                        let statement = parse_mutation_statement(inner.into_inner());
-                        items.push(MutationBodyItem::Mutation(statement));
-                    }
-                    _ => unreachable!("Unexpected mutation item: {:?}", inner.as_rule()),
-                }
+                let statement = parse_mutation_statement(inner.into_inner());
+                items.push(MutationBodyItem::Mutation(statement));
             }
             _ => unreachable!("Unexpected rule in mutation body: {:?}", pair.as_rule()),
         }
     }
-    
+
     MutationBody { items }
 }
 
@@ -621,63 +823,52 @@ fn test_parse_target() {
         target,
         Target {
             name: "foo".to_string(),
+            span: Some(Span { start: 0, end: 3 }),
         }
     );
 }
 fn parse_target(pair: pest::iterators::Pair<Rule>) -> Target {
     let name = pair.as_str().to_string();
-    Target { name }
+    let span = get_span(&pair);
+    Target { name, span }
 }
 
 fn parse_join_expr(pairs: pest::iterators::Pairs<Rule>) -> JoinExpr {
     let mut pairs = pairs.peekable();
-    
-    // Skip dot
-    pairs.next();
-    
-    // Get join method
+
+    // Get join method (dot is not captured as a separate pair)
     let join_method = pairs.next().unwrap();
+    let span = get_span(&join_method);
     let join_type = match join_method.as_str() {
         "innerJoin" => JoinType::Inner,
         "leftJoin" => JoinType::Left,
         "rightJoin" => JoinType::Right,
         "fullOuterJoin" => JoinType::FullOuter,
         "crossJoin" => JoinType::Cross,
-        _ => unreachable!(),
+        _ => unreachable!("Unknown join method: {}", join_method.as_str()),
     };
 
     // Parse table name and condition
     let table = pairs.next().unwrap().as_str().to_string();
     let condition = parse_expression(pairs.next().unwrap().into_inner());
-    
+
     JoinExpr {
         join_type,
         table,
         condition,
+        span,
     }
 }
 
 fn parse_from_expr(pairs: pest::iterators::Pairs<Rule>) -> FromExpr {
     let mut pairs = pairs.peekable();
-    let table = pairs.next().unwrap().as_str().to_string();
+    let first_pair = pairs.next().unwrap();
+    let table = first_pair.as_str().to_string();
+    let span = get_span(&first_pair);
     let joins = pairs.map(|p| parse_join_expr(p.into_inner())).collect();
-    FromExpr { table, joins }
+    FromExpr { table, joins, span }
 }
 
-fn parse_alias_statement(pairs: pest::iterators::Pairs<Rule>) -> AliasStatement {
-    let mut pairs = pairs.peekable();
-    
-    // Skip "alias" keyword
-    pairs.next();
-    
-    // Get alias name
-    let alias = pairs.next().unwrap().as_str().to_string();
-    
-    // Get target name (no need to skip "=" as it's not captured separately)
-    let target = pairs.next().unwrap().as_str().to_string();
-    
-    AliasStatement { alias, target }
-}
 
 fn parse_select_expression(pairs: pest::iterators::Pairs<Rule>) -> SelectExpression {
     let mut pairs = pairs.peekable();
@@ -685,15 +876,15 @@ fn parse_select_expression(pairs: pest::iterators::Pairs<Rule>) -> SelectExpress
 
     match first_pair.as_rule() {
         Rule::ident => {
-            // This is an aliased expression: alias : expression
-            let alias = Some(first_pair.as_str().to_string());
-            let expr = parse_expression(pairs.next().unwrap().into_inner());
-            SelectExpression { expr, alias }
+            // Aliased select expression: alias: expression
+            let alias = first_pair.as_str().to_string();
+            let expr_pair = pairs.next().unwrap();
+            let expr = parse_expression(expr_pair.into_inner());
+            SelectExpression { alias: Some(alias), expr }
         }
         Rule::expression => {
-            // This is a regular expression without alias
             let expr = parse_expression(first_pair.into_inner());
-            SelectExpression { expr, alias: None }
+            SelectExpression { alias: None, expr }
         }
         _ => unreachable!(
             "Unexpected rule in select_expression: {:?}",
@@ -705,10 +896,14 @@ fn parse_select_expression(pairs: pest::iterators::Pairs<Rule>) -> SelectExpress
 fn parse_select_statement(pairs: pest::iterators::Pairs<Rule>) -> SelectStatement {
     let mut from = None;
     let mut clauses = Vec::new();
+    let mut unions: Vec<UnionClause> = Vec::new();
 
     for pair in pairs {
         match pair.as_rule() {
-            Rule::from_clause => from = Some(parse_from_expr(pair.into_inner())),
+            Rule::from_clause => {
+                let from_expr_pair = pair.into_inner().next().unwrap();
+                from = Some(parse_from_expr(from_expr_pair.into_inner()));
+            }
             Rule::where_clause => {
                 let expr = parse_expression(pair.into_inner().next().unwrap().into_inner());
                 clauses.push(QueryClause::Where(expr));
@@ -734,12 +929,26 @@ fn parse_select_statement(pairs: pest::iterators::Pairs<Rule>) -> SelectStatemen
                                 call.args
                                     .iter()
                                     .map(|arg| SelectExpression {
-                                        expr: arg.clone(),
                                         alias: None,
+                                        expr: arg.clone(),
                                     })
                                     .collect(),
                             ),
-                            "orderBy" => QueryClause::OrderBy(call.args[0].clone()),
+                            "orderBy" => QueryClause::OrderBy(
+                                call.args.iter().map(|arg| {
+                                    match arg {
+                                        Expression::Atomic(AtomicExpression::MethodCall(mc))
+                                            if (mc.method == "asc" || mc.method == "desc") && mc.args.is_empty() =>
+                                        {
+                                            OrderByExpression {
+                                                direction: Some(if mc.method == "asc" { OrderDirection::Asc } else { OrderDirection::Desc }),
+                                                expr: *mc.target.clone(),
+                                            }
+                                        }
+                                        _ => OrderByExpression { expr: arg.clone(), direction: None },
+                                    }
+                                }).collect(),
+                            ),
                             "limit" => QueryClause::Limit(call.args[0].clone()),
                             "join" => {
                                 // For join, parse the first argument as target and second as condition
@@ -750,7 +959,7 @@ fn parse_select_statement(pairs: pest::iterators::Pairs<Rule>) -> SelectStatemen
                                 // Extract table name from the first argument
                                 let table = match &call.args[0] {
                                     Expression::Atomic(AtomicExpression::Column(
-                                        Column::ImplicitTarget(name),
+                                        Column::ImplicitTarget(name, _),
                                     )) => name.clone(),
                                     _ => unreachable!(
                                         "Join first argument should be a table reference"
@@ -761,6 +970,7 @@ fn parse_select_statement(pairs: pest::iterators::Pairs<Rule>) -> SelectStatemen
                                     join_type: JoinType::Inner,
                                     table,
                                     condition: call.args[1].clone(),
+                                    span: None,
                                 })
                             }
                             _ => unreachable!("Unsupported clause type: {}", call.callee),
@@ -779,8 +989,24 @@ fn parse_select_statement(pairs: pest::iterators::Pairs<Rule>) -> SelectStatemen
                 clauses.push(QueryClause::Limit(expr));
             }
             Rule::order_by_clause => {
-                let expr = parse_expression(pair.into_inner().next().unwrap().into_inner());
-                clauses.push(QueryClause::OrderBy(expr));
+                let order_exprs: Vec<OrderByExpression> = pair.into_inner()
+                    .filter(|p| p.as_rule() == Rule::expression)
+                    .map(|p| {
+                        let expr = parse_expression(p.into_inner());
+                        match &expr {
+                            Expression::Atomic(AtomicExpression::MethodCall(mc))
+                                if (mc.method == "asc" || mc.method == "desc") && mc.args.is_empty() =>
+                            {
+                                OrderByExpression {
+                                    direction: Some(if mc.method == "asc" { OrderDirection::Asc } else { OrderDirection::Desc }),
+                                    expr: *mc.target.clone(),
+                                }
+                            }
+                            _ => OrderByExpression { expr, direction: None },
+                        }
+                    })
+                    .collect();
+                clauses.push(QueryClause::OrderBy(order_exprs));
             }
             Rule::group_by_clause => {
                 let group_exprs: Vec<Expression> = pair
@@ -801,6 +1027,35 @@ fn parse_select_statement(pairs: pest::iterators::Pairs<Rule>) -> SelectStatemen
                     .collect();
                 clauses.push(QueryClause::Aggregate(aggregate_exprs));
             }
+            Rule::distinct_clause => {
+                clauses.push(QueryClause::Distinct);
+            }
+            Rule::offset_clause => {
+                let expr = parse_expression(pair.into_inner().next().unwrap().into_inner());
+                clauses.push(QueryClause::Offset(expr));
+            }
+            Rule::having_clause => {
+                let expr = parse_expression(pair.into_inner().next().unwrap().into_inner());
+                clauses.push(QueryClause::Having(expr));
+            }
+            Rule::for_update_clause => {
+                clauses.push(QueryClause::ForUpdate);
+            }
+            Rule::union_clause => {
+                let mut union_inner = pair.into_inner();
+                let union_type_pair = union_inner.next().unwrap();
+                let union_type = match union_type_pair.as_str() {
+                    "union" => UnionType::Union,
+                    "unionAll" => UnionType::UnionAll,
+                    _ => unreachable!(),
+                };
+                let select_pair = union_inner.next().unwrap();
+                let select = parse_select_statement(select_pair.into_inner());
+                unions.push(UnionClause {
+                    union_type,
+                    select: Box::new(select),
+                });
+            }
             _ => {
                 unreachable!()
             }
@@ -810,6 +1065,7 @@ fn parse_select_statement(pairs: pest::iterators::Pairs<Rule>) -> SelectStatemen
     SelectStatement {
         from: from.unwrap(),
         clauses,
+        unions,
     }
 }
 
@@ -847,11 +1103,11 @@ fn test_parse_expression() {
     assert_eq!(
         Expression::Binary {
             left: Box::new(Expression::Atomic(AtomicExpression::Column(
-                Column::ImplicitTarget("a".to_string())
+                Column::ImplicitTarget("a".to_string(), Some(Span { start: 0, end: 1 }))
             ))),
             op: BinaryOp::Equal,
             right: Box::new(Expression::Atomic(AtomicExpression::Column(
-                Column::ImplicitTarget("b".to_string())
+                Column::ImplicitTarget("b".to_string(), Some(Span { start: 5, end: 6 }))
             )))
         },
         expr
@@ -947,7 +1203,8 @@ fn test_parse_expression() {
                     "a,b,c".to_string()
                 ))),
                 Expression::Atomic(AtomicExpression::Literal(Literal::String(",".to_string())))
-            ]
+            ],
+            span: Some(Span { start: 0, end: 5 }),
         })),
         expr
     );
@@ -965,7 +1222,8 @@ fn test_parse_expression() {
         Expression::Atomic(AtomicExpression::IndexAccess(IndexAccess {
             target: Box::new(Expression::Atomic(AtomicExpression::Call(CallExpression {
                 callee: "call".to_string(),
-                args: vec![]
+                args: vec![],
+                span: Some(Span { start: 0, end: 4 }),
             }))),
             index: Box::new(Expression::Atomic(AtomicExpression::Literal(
                 Literal::Numeric(0.0)
@@ -1058,7 +1316,7 @@ fn parse_logical_expression(pairs: pest::iterators::Pairs<Rule>) -> Expression {
 
 fn parse_equality_expression(pairs: pest::iterators::Pairs<Rule>) -> Expression {
     let mut pairs = pairs.peekable();
-    let left = parse_expression(pairs.next().unwrap().into_inner());
+    let left = parse_relational_expression(pairs.next().unwrap().into_inner());
     if pairs.peek().is_none() {
         return left;
     }
@@ -1067,7 +1325,7 @@ fn parse_equality_expression(pairs: pest::iterators::Pairs<Rule>) -> Expression 
         Rule::unequal => BinaryOp::Unequal,
         _ => unreachable!(),
     };
-    let right = parse_expression(pairs.next().unwrap().into_inner());
+    let right = parse_relational_expression(pairs.next().unwrap().into_inner());
     Expression::Binary {
         left: Box::new(left),
         op,
@@ -1158,7 +1416,7 @@ fn test_parse_column() {
         Err(e) => panic!("パースエラーが発生しました: {}", e),
     };
     let column = parse_column(pairs.peekable().next().unwrap().into_inner());
-    assert_eq!(Column::Wildcard, column);
+    assert_eq!(Column::Wildcard(Some(Span { start: 0, end: 1 })), column);
 
     let input = "foo_bar";
     let pairs = match NextSqlParser::parse(Rule::column, &input) {
@@ -1166,7 +1424,7 @@ fn test_parse_column() {
         Err(e) => panic!("パースエラーが発生しました: {}", e),
     };
     let column = parse_column(pairs.peekable().next().unwrap().into_inner());
-    assert_eq!(Column::ImplicitTarget("foo_bar".to_string()), column);
+    assert_eq!(Column::ImplicitTarget("foo_bar".to_string(), Some(Span { start: 0, end: 7 })), column);
 
     let input = "foo.bar";
     let pairs = match NextSqlParser::parse(Rule::column, &input) {
@@ -1175,7 +1433,7 @@ fn test_parse_column() {
     };
     let column = parse_column(pairs.peekable().next().unwrap().into_inner());
     assert_eq!(
-        Column::ExplicitTarget("foo".to_string(), "bar".to_string()),
+        Column::ExplicitTarget("foo".to_string(), "bar".to_string(), Some(Span { start: 4, end: 7 })),
         column
     );
 
@@ -1185,22 +1443,34 @@ fn test_parse_column() {
         Err(e) => panic!("パースエラーが発生しました: {}", e),
     };
     let column = parse_column(pairs.peekable().next().unwrap().into_inner());
-    assert_eq!(Column::WildcardOf("foo".to_string()), column);
+    assert_eq!(Column::WildcardOf("foo".to_string(), Some(Span { start: 4, end: 5 })), column);
 }
 fn parse_column(pairs: pest::iterators::Pairs<Rule>) -> Column {
     let mut pairs = pairs.peekable();
-    match pairs.peek().unwrap().as_rule() {
-        Rule::wildcard => Column::Wildcard,
+    let first_pair = pairs.peek().unwrap();
+    match first_pair.as_rule() {
+        Rule::wildcard => {
+            let span = get_span(first_pair);
+            Column::Wildcard(span)
+        },
         Rule::ident => {
-            let first = pairs.next().unwrap().as_str().to_string();
+            let first_pair = pairs.next().unwrap();
+            let first = first_pair.as_str().to_string();
+            let first_span = get_span(&first_pair);
+            
             if let Some(second) = pairs.next() {
                 if second.as_str() == "*" {
-                    Column::WildcardOf(first)
+                    // WildcardOfの場合、*の位置を使用
+                    let wildcard_span = get_span(&second);
+                    Column::WildcardOf(first, wildcard_span)
                 } else {
-                    Column::ExplicitTarget(first, second.as_str().to_string())
+                    // ExplicitTargetの場合、カラム名（second）の位置を使用
+                    let column_span = get_span(&second);
+                    Column::ExplicitTarget(first, second.as_str().to_string(), column_span)
                 }
             } else {
-                Column::ImplicitTarget(first)
+                // ImplicitTargetの場合、そのまま使用
+                Column::ImplicitTarget(first, first_span)
             }
         }
         _ => unreachable!(),
@@ -1249,12 +1519,14 @@ fn parse_literal_expression(pairs: pest::iterators::Pairs<Rule>) -> Expression {
 
 fn parse_call_expression(pairs: pest::iterators::Pairs<Rule>) -> Expression {
     let mut pairs = pairs.peekable();
-    let callee = pairs.next().unwrap().as_str().to_string();
+    let callee_pair = pairs.next().unwrap();
+    let callee = callee_pair.as_str().to_string();
+    let span = get_span(&callee_pair);
     let mut args = Vec::new();
     while pairs.peek().is_some() {
         args.push(parse_expression(pairs.next().unwrap().into_inner()));
     }
-    Expression::Atomic(AtomicExpression::Call(CallExpression { callee, args }))
+    Expression::Atomic(AtomicExpression::Call(CallExpression { callee, args, span }))
 }
 
 fn parse_atomic_expression(pairs: pest::iterators::Pairs<Rule>) -> Expression {
@@ -1391,12 +1663,16 @@ fn parse_basic_expression(pairs: pest::iterators::Pairs<Rule>) -> Expression {
 fn parse_property_access(pairs: pest::iterators::Pairs<Rule>) -> Expression {
     let mut pairs = pairs.peekable();
     let target_pair = pairs.next().unwrap();
-    let target = parse_basic_expression(target_pair.into_inner());
-    let property = pairs.next().unwrap().as_str().to_string();
-    Expression::Atomic(AtomicExpression::PropertyAccess(PropertyAccess {
-        target: Box::new(target),
-        property,
-    }))
+    let mut result = parse_basic_expression(target_pair.into_inner());
+    // Consume all chained property idents (the grammar `("." ~ ident)+` may produce multiple)
+    while let Some(prop_pair) = pairs.next() {
+        let property = prop_pair.as_str().to_string();
+        result = Expression::Atomic(AtomicExpression::PropertyAccess(PropertyAccess {
+            target: Box::new(result),
+            property,
+        }));
+    }
+    result
 }
 
 fn parse_method_call(pairs: pest::iterators::Pairs<Rule>) -> Expression {
@@ -1540,6 +1816,161 @@ mod tests {
     }
 
     #[test]
+    fn test_relation_parsing() {
+        let input = r#"
+relation author for posts returning users {
+  users.id == posts.author_id
+}
+
+public optional relation post_detail for posts returning post_details {
+  post_details.id == posts.detail_id
+}
+
+public relation organization for users returning organizations {
+  organizations.id == users.organization_id
+}
+
+aggregation comment_count for posts returning i32 {
+  count(comments.id)
+}
+"#;
+        
+        let result = parse_module(input);
+        assert!(result.is_ok(), "Failed to parse relations: {:?}", result.err());
+        
+        let module = result.unwrap();
+        assert_eq!(module.toplevels.len(), 4);
+        
+        // Check first relation
+        if let TopLevel::Relation(relation) = &module.toplevels[0] {
+            assert_eq!(relation.decl.name, "author");
+            assert_eq!(relation.decl.for_table, "posts");
+            assert!(relation.decl.modifiers.is_empty());
+            assert!(matches!(relation.decl.relation_type, crate::ast::RelationType::Relation));
+            
+            if let crate::ast::RelationReturnType::Table(table) = &relation.decl.returning_type {
+                assert_eq!(table, "users");
+            } else {
+                panic!("Expected Table return type, got: {:?}", relation.decl.returning_type);
+            }
+        } else {
+            panic!("Expected first item to be a relation");
+        }
+        
+        // Check optional relation
+        if let TopLevel::Relation(relation) = &module.toplevels[1] {
+            assert_eq!(relation.decl.name, "post_detail");
+            assert_eq!(relation.decl.modifiers.len(), 2);
+            assert!(relation.decl.modifiers.iter().any(|m| matches!(m, crate::ast::RelationModifier::Public)));
+            assert!(relation.decl.modifiers.iter().any(|m| matches!(m, crate::ast::RelationModifier::Optional)));
+        } else {
+            panic!("Expected second item to be a relation");
+        }
+        
+        // Check aggregation
+        if let TopLevel::Relation(relation) = &module.toplevels[3] {
+            assert_eq!(relation.decl.name, "comment_count");
+            assert!(matches!(relation.decl.relation_type, crate::ast::RelationType::Aggregation));
+            if let crate::ast::RelationReturnType::Type(typ) = &relation.decl.returning_type {
+                assert!(matches!(typ, crate::ast::Type::BuiltIn(crate::ast::BuiltInType::I32)));
+            } else {
+                panic!("Expected Type return type");
+            }
+        } else {
+            panic!("Expected fourth item to be an aggregation");
+        }
+    }
+    
+    #[test]
+    fn test_union() {
+        let input = r#"
+            query findAllPeople() {
+                from(employees)
+                .select(employees.name, employees.email)
+                .union(
+                    from(contractors)
+                    .select(contractors.name, contractors.email)
+                )
+            }
+        "#;
+        let module = parse_module(input).unwrap();
+        let query = match &module.toplevels[0] {
+            TopLevel::Query(q) => q,
+            _ => panic!("Expected query"),
+        };
+        let select = match &query.body.statements[0] {
+            QueryStatement::Select(s) => s,
+        };
+        assert_eq!(select.unions.len(), 1);
+        match &select.unions[0].union_type {
+            UnionType::Union => {},
+            _ => panic!("Expected Union"),
+        }
+    }
+
+    #[test]
+    fn test_union_all() {
+        let input = r#"
+            query findAllPeople() {
+                from(employees)
+                .select(employees.name)
+                .unionAll(
+                    from(contractors)
+                    .select(contractors.name)
+                )
+            }
+        "#;
+        let module = parse_module(input).unwrap();
+        let query = match &module.toplevels[0] {
+            TopLevel::Query(q) => q,
+            _ => panic!("Expected query"),
+        };
+        let select = match &query.body.statements[0] {
+            QueryStatement::Select(s) => s,
+        };
+        assert_eq!(select.unions.len(), 1);
+        match &select.unions[0].union_type {
+            UnionType::UnionAll => {},
+            _ => panic!("Expected UnionAll"),
+        }
+    }
+
+    #[test]
+    fn test_multiple_unions() {
+        let input = r#"
+            query findAllPeople() {
+                from(employees)
+                .select(employees.name)
+                .union(
+                    from(contractors)
+                    .select(contractors.name)
+                )
+                .union(
+                    from(freelancers)
+                    .select(freelancers.name)
+                )
+            }
+        "#;
+        let module = parse_module(input).unwrap();
+        let query = match &module.toplevels[0] {
+            TopLevel::Query(q) => q,
+            _ => panic!("Expected query"),
+        };
+        let select = match &query.body.statements[0] {
+            QueryStatement::Select(s) => s,
+        };
+        assert_eq!(select.unions.len(), 2);
+        match &select.unions[0].union_type {
+            UnionType::Union => {},
+            _ => panic!("Expected Union for first union clause"),
+        }
+        match &select.unions[1].union_type {
+            UnionType::Union => {},
+            _ => panic!("Expected Union for second union clause"),
+        }
+    }
+
+    #[test]
     fn comprehensive_examples_test() {
         use std::fs;
         use std::path::Path;
@@ -1600,13 +2031,6 @@ mod tests {
             total_files += 1;
             print!("Testing {}... ", filename);
 
-            // Skip files that are intentionally incomplete for LSP completion testing
-            if filename == "test-alias-completion.nsql" {
-                skipped_files += 1;
-                skipped_file_names.push(filename);
-                println!("⚠️  SKIPPED (intentionally incomplete for LSP testing)");
-                continue;
-            }
 
             match parse_module(&content) {
                 Ok(module) => {
@@ -1623,17 +2047,20 @@ mod tests {
                     let mut queries = 0;
                     let mut mutations = 0;
                     let mut with_statements = 0;
+                    let mut relations = 0;
                     for toplevel in &module.toplevels {
                         match toplevel {
                             TopLevel::Query(_) => queries += 1,
                             TopLevel::Mutation(_) => mutations += 1,
                             TopLevel::With(_) => with_statements += 1,
+                            TopLevel::Relation(_) => relations += 1,
+                            TopLevel::ValType(_) => {}
                         }
                     }
 
                     println!(
-                        "✅ ({} queries, {} mutations, {} with statements)",
-                        queries, mutations, with_statements
+                        "✅ ({} queries, {} mutations, {} with statements, {} relations)",
+                        queries, mutations, with_statements, relations
                     );
                 }
                 Err(e) => {
@@ -1752,6 +2179,7 @@ mod tests {
                     Expression::Atomic(AtomicExpression::Column(Column::ExplicitTarget(
                         table,
                         col,
+                        _,
                     ))) => {
                         assert_eq!(table, "users");
                         assert_eq!(col, "name");
@@ -1779,6 +2207,7 @@ mod tests {
                     Expression::Atomic(AtomicExpression::Column(Column::ExplicitTarget(
                         table,
                         col,
+                        _,
                     ))) => {
                         assert_eq!(table, "users");
                         assert_eq!(col, "id");
@@ -1830,5 +2259,425 @@ mod tests {
             }
             _ => panic!("Expected method call, got {:?}", expr),
         }
+    }
+
+    #[test]
+    fn test_distinct_clause() {
+        let input = r#"
+            query findDistinctNames() {
+                from(users)
+                .distinct()
+                .select(users.name)
+            }
+        "#;
+        let module = parse_module(input).unwrap();
+        let query = match &module.toplevels[0] {
+            TopLevel::Query(q) => q,
+            _ => panic!("Expected query"),
+        };
+        let stmt = match &query.body.statements[0] {
+            QueryStatement::Select(s) => s,
+        };
+        assert!(stmt.clauses.iter().any(|c| matches!(c, QueryClause::Distinct)));
+    }
+
+    #[test]
+    fn test_offset_clause() {
+        let input = r#"
+            query findUsersWithOffset($limit: i32, $offset: i32) {
+                from(users)
+                .select(users.*)
+                .limit($limit)
+                .offset($offset)
+            }
+        "#;
+        let module = parse_module(input).unwrap();
+        let query = match &module.toplevels[0] {
+            TopLevel::Query(q) => q,
+            _ => panic!("Expected query"),
+        };
+        let stmt = match &query.body.statements[0] {
+            QueryStatement::Select(s) => s,
+        };
+        assert!(stmt.clauses.iter().any(|c| matches!(c, QueryClause::Offset(_))));
+    }
+
+    #[test]
+    fn test_having_clause() {
+        let input = r#"
+            query findActiveGroups() {
+                from(orders)
+                .groupBy(orders.customer_id)
+                .having(COUNT(orders.id) > 5)
+                .aggregate(order_count: COUNT(orders.id))
+                .select(orders.customer_id, order_count)
+            }
+        "#;
+        let module = parse_module(input).unwrap();
+        let query = match &module.toplevels[0] {
+            TopLevel::Query(q) => q,
+            _ => panic!("Expected query"),
+        };
+        let stmt = match &query.body.statements[0] {
+            QueryStatement::Select(s) => s,
+        };
+        assert!(stmt.clauses.iter().any(|c| matches!(c, QueryClause::Having(_))));
+    }
+
+    #[test]
+    fn test_order_by_with_direction() {
+        let input = r#"
+            query findUsers() {
+                from(users)
+                .select(users.*)
+                .orderBy(users.name.asc(), users.created_at.desc())
+            }
+        "#;
+        let module = parse_module(input).unwrap();
+        let query = match &module.toplevels[0] {
+            TopLevel::Query(q) => q,
+            _ => panic!("Expected query"),
+        };
+        let select = match &query.body.statements[0] {
+            QueryStatement::Select(s) => s,
+        };
+        let order_by = select.clauses.iter().find(|c| matches!(c, QueryClause::OrderBy(_)));
+        assert!(order_by.is_some());
+        match order_by.unwrap() {
+            QueryClause::OrderBy(exprs) => {
+                assert_eq!(exprs.len(), 2);
+                assert_eq!(exprs[0].direction, Some(OrderDirection::Asc));
+                assert_eq!(exprs[1].direction, Some(OrderDirection::Desc));
+            }
+            _ => panic!("Expected OrderBy"),
+        }
+    }
+
+    #[test]
+    fn test_order_by_without_direction() {
+        let input = r#"
+            query findUsers() {
+                from(users)
+                .select(users.*)
+                .orderBy(users.name)
+            }
+        "#;
+        let module = parse_module(input).unwrap();
+        let query = match &module.toplevels[0] {
+            TopLevel::Query(q) => q,
+            _ => panic!("Expected query"),
+        };
+        let select = match &query.body.statements[0] {
+            QueryStatement::Select(s) => s,
+        };
+        let order_by = select.clauses.iter().find(|c| matches!(c, QueryClause::OrderBy(_)));
+        assert!(order_by.is_some());
+        match order_by.unwrap() {
+            QueryClause::OrderBy(exprs) => {
+                assert_eq!(exprs.len(), 1);
+                assert_eq!(exprs[0].direction, None);
+            }
+            _ => panic!("Expected OrderBy"),
+        }
+    }
+}
+
+#[test]
+fn test_on_conflict_do_update() {
+    let input = r#"
+        mutation upsertUser($name: string, $email: string) {
+            insert(users)
+            .value({ name: $name, email: $email })
+            .onConflict(email)
+            .doUpdate({ name: $name })
+        }
+    "#;
+    let module = parse_module(input).unwrap();
+    let toplevel = &module.toplevels[0];
+    match toplevel {
+        TopLevel::Mutation(mutation) => {
+            assert_eq!(mutation.decl.name, "upsertUser");
+            match &mutation.body.items[0] {
+                MutationBodyItem::Mutation(MutationStatement::Insert(insert)) => {
+                    assert_eq!(insert.into, "users");
+                    let on_conflict = insert.on_conflict.as_ref().unwrap();
+                    assert_eq!(on_conflict.columns, vec!["email".to_string()]);
+                    match &on_conflict.action {
+                        OnConflictAction::DoUpdate(sets) => {
+                            assert_eq!(sets.len(), 1);
+                            assert_eq!(sets[0].0, "name");
+                        }
+                        _ => panic!("Expected DoUpdate"),
+                    }
+                    assert!(insert.returning.is_none());
+                }
+                _ => panic!("Expected Insert"),
+            }
+        }
+        _ => panic!("Expected Mutation"),
+    }
+}
+
+#[test]
+fn test_on_conflict_do_nothing() {
+    let input = r#"
+        mutation upsertUser($name: string, $email: string) {
+            insert(users)
+            .value({ name: $name, email: $email })
+            .onConflict(email, organization_id)
+            .doNothing()
+        }
+    "#;
+    let module = parse_module(input).unwrap();
+    let toplevel = &module.toplevels[0];
+    match toplevel {
+        TopLevel::Mutation(mutation) => {
+            match &mutation.body.items[0] {
+                MutationBodyItem::Mutation(MutationStatement::Insert(insert)) => {
+                    let on_conflict = insert.on_conflict.as_ref().unwrap();
+                    assert_eq!(on_conflict.columns, vec!["email".to_string(), "organization_id".to_string()]);
+                    assert_eq!(on_conflict.action, OnConflictAction::DoNothing);
+                }
+                _ => panic!("Expected Insert"),
+            }
+        }
+        _ => panic!("Expected Mutation"),
+    }
+}
+
+#[test]
+fn test_on_conflict_with_returning() {
+    let input = r#"
+        mutation upsertUser($name: string, $email: string) {
+            insert(users)
+            .value({ name: $name, email: $email })
+            .onConflict(email)
+            .doUpdate({ name: $name })
+            .returning(users.*)
+        }
+    "#;
+    let module = parse_module(input).unwrap();
+    let toplevel = &module.toplevels[0];
+    match toplevel {
+        TopLevel::Mutation(mutation) => {
+            match &mutation.body.items[0] {
+                MutationBodyItem::Mutation(MutationStatement::Insert(insert)) => {
+                    assert!(insert.on_conflict.is_some());
+                    assert!(insert.returning.is_some());
+                    let returning = insert.returning.as_ref().unwrap();
+                    assert_eq!(returning.len(), 1);
+                    match &returning[0] {
+                        Column::WildcardOf(name, _) => assert_eq!(name, "users"),
+                        _ => panic!("Expected WildcardOf"),
+                    }
+                }
+                _ => panic!("Expected Insert"),
+            }
+        }
+        _ => panic!("Expected Mutation"),
+    }
+}
+
+#[test]
+fn test_order_by_method_call_on_column() {
+    let input = r#"
+query findPopularProducts($min_sales: i32) {
+  from(order_items)
+  .groupBy(order_items.product_id)
+  .having(SUM(order_items.quantity) >= $min_sales)
+  .aggregate(total_sold: SUM(order_items.quantity))
+  .select(order_items.product_id, total_sold)
+  .orderBy(total_sold.desc())
+}
+"#;
+    let module = parse_module(input).expect("Parsing should succeed for orderBy with method call on column");
+    assert_eq!(module.toplevels.len(), 1);
+    match &module.toplevels[0] {
+        TopLevel::Query(query) => {
+            assert_eq!(query.decl.name, "findPopularProducts");
+        }
+        _ => panic!("Expected Query"),
+    }
+}
+
+#[test]
+fn test_valtype_with_source_column() {
+    let input = r#"
+        valtype UserId = uuid for users.id
+    "#;
+    let module = parse_module(input).unwrap();
+    assert_eq!(module.toplevels.len(), 1);
+    match &module.toplevels[0] {
+        TopLevel::ValType(vt) => {
+            assert_eq!(vt.name, "UserId");
+            assert_eq!(vt.base_type, BuiltInType::Uuid);
+            let src = vt.source_column.as_ref().unwrap();
+            assert_eq!(src.table, "users");
+            assert_eq!(src.column, "id");
+        }
+        _ => panic!("Expected ValType"),
+    }
+}
+
+#[test]
+fn test_valtype_without_binding() {
+    let input = r#"
+        valtype Amount = f64
+    "#;
+    let module = parse_module(input).unwrap();
+    match &module.toplevels[0] {
+        TopLevel::ValType(vt) => {
+            assert_eq!(vt.name, "Amount");
+            assert_eq!(vt.base_type, BuiltInType::F64);
+            assert!(vt.source_column.is_none());
+        }
+        _ => panic!("Expected ValType"),
+    }
+}
+
+#[test]
+fn test_valtype_with_query() {
+    let input = r#"
+        valtype UserId = uuid for users.id
+
+        query findUserById($id: UserId) {
+            from(users)
+            .where(users.id == $id)
+            .select(users.*)
+        }
+    "#;
+    let module = parse_module(input).unwrap();
+    assert_eq!(module.toplevels.len(), 2);
+}
+
+#[test]
+fn test_multiple_valtypes() {
+    let input = r#"
+        valtype UserId = uuid for users.id
+        valtype Email = string for users.email
+        valtype PostId = uuid for posts.id
+    "#;
+    let module = parse_module(input).unwrap();
+    assert_eq!(module.toplevels.len(), 3);
+}
+
+#[test]
+fn test_for_update_clause() {
+    let input = r#"
+        query findForUpdate($id: uuid) {
+            from(users)
+            .where(users.id == $id)
+            .select(users.*)
+            .forUpdate()
+        }
+    "#;
+    let module = parse_module(input).unwrap();
+    let q = match &module.toplevels[0] {
+        TopLevel::Query(q) => q,
+        _ => panic!("expected query"),
+    };
+    let stmt = match &q.body.statements[0] {
+        QueryStatement::Select(s) => s,
+    };
+    assert!(
+        stmt.clauses.iter().any(|c| matches!(c, QueryClause::ForUpdate)),
+        "Expected ForUpdate clause in parsed query"
+    );
+}
+
+#[test]
+fn test_set_with_column_expression() {
+    let input = r#"
+        mutation incrementStage($id: uuid) {
+            update(requests)
+            .where(requests.id == $id)
+            .set({ stage: stage + 1 })
+        }
+    "#;
+    let module = parse_module(input).unwrap();
+    let m = match &module.toplevels[0] {
+        TopLevel::Mutation(m) => m,
+        _ => panic!("expected mutation"),
+    };
+    let update = match &m.body.items[0] {
+        MutationBodyItem::Mutation(MutationStatement::Update(u)) => u,
+        _ => panic!("expected update"),
+    };
+    // Find the "stage" set entry
+    let (col, expr) = update.set.iter().find(|(c, _)| c == "stage").expect("expected 'stage' in set");
+    assert_eq!(col, "stage");
+    // Should be a binary add expression
+    match expr {
+        Expression::Binary { op, .. } => {
+            assert_eq!(*op, BinaryOp::Add);
+        }
+        _ => panic!("expected binary expression for stage, got {:?}", expr),
+    }
+}
+
+#[test]
+fn test_now_function_call_parse() {
+    let input = r#"
+        mutation touchUpdatedAt($id: uuid) {
+            update(records)
+            .where(records.id == $id)
+            .set({ updated_at: now() })
+        }
+    "#;
+    let module = parse_module(input).unwrap();
+    let m = match &module.toplevels[0] {
+        TopLevel::Mutation(m) => m,
+        _ => panic!("expected mutation"),
+    };
+    let update = match &m.body.items[0] {
+        MutationBodyItem::Mutation(MutationStatement::Update(u)) => u,
+        _ => panic!("expected update"),
+    };
+    let (_, expr) = update.set.iter().find(|(c, _)| c == "updated_at").expect("expected 'updated_at' in set");
+    match expr {
+        Expression::Atomic(AtomicExpression::Call(call)) => {
+            assert_eq!(call.callee, "now");
+            assert!(call.args.is_empty());
+        }
+        _ => panic!("expected call expression for now(), got {:?}", expr),
+    }
+}
+
+#[test]
+fn test_count_with_alias_parse() {
+    let input = r#"
+        query countRecords() {
+            from(users)
+            .where(users.is_active == true)
+            .select(total: COUNT(users.id))
+        }
+    "#;
+    let module = parse_module(input).unwrap();
+    let q = match &module.toplevels[0] {
+        TopLevel::Query(q) => q,
+        _ => panic!("expected query"),
+    };
+    let stmt = match &q.body.statements[0] {
+        QueryStatement::Select(s) => s,
+    };
+    // Find Select clause
+    let select_clause = stmt.clauses.iter().find_map(|c| match c {
+        QueryClause::Select(exprs) => Some(exprs),
+        _ => None,
+    }).expect("expected select clause");
+    assert_eq!(select_clause.len(), 1);
+    assert_eq!(select_clause[0].alias.as_deref(), Some("total"));
+    // COUNT in select_expression context is parsed as a CallExpression
+    // (since call_expression matches before aggregate_function in the grammar).
+    // The SQL generator handles both correctly.
+    match &select_clause[0].expr {
+        Expression::Atomic(AtomicExpression::Call(call)) => {
+            assert_eq!(call.callee, "COUNT");
+            assert_eq!(call.args.len(), 1);
+        }
+        Expression::Atomic(AtomicExpression::Aggregate(agg)) => {
+            assert_eq!(agg.function_type, AggregateFunctionType::Count);
+        }
+        _ => panic!("expected call or aggregate expression, got {:?}", select_clause[0].expr),
     }
 }

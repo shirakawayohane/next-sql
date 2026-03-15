@@ -1,8 +1,11 @@
 [package]
 name = "nextsql-core"
-version = "0.1.0"
-edition = "2021"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
 description = "Core parser and AST for NextSQL language"
+publish = false
 
 [dependencies]
 pest = { version = "2" }
