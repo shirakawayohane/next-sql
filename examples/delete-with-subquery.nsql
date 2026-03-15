@@ -1,12 +1,10 @@
 mutation deleteUser($id: uuid) {
-  alias u = users
-  alias log = user_action_logs
   delete(users)
   .where(exists(
     $(
       from(user_action_logs)
       .where(
-        log.user_id == u.id && log.deleted == true
+        user_action_logs.user_id == users.id && user_action_logs.deleted == true
       )
       .select(*)
     )

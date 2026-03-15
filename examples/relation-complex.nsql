@@ -1,0 +1,124 @@
+// Complex relation scenarios
+
+// Relations for a social media platform
+relation author for posts returning users {
+  users.id == posts.author_id
+}
+
+relation posts for users returning posts {
+  posts.author_id == users.id
+}
+
+relation followers for users returning users {
+  user_follows.follower_id == users.id && user_follows.followed_id == users.id
+}
+
+relation following for users returning users {
+  user_follows.followed_id == users.id && user_follows.follower_id == users.id
+}
+
+optional relation replied_to for comments returning comments {
+  comments.id == comments.parent_comment_id
+}
+
+relation post for comments returning posts {
+  posts.id == comments.post_id
+}
+
+relation commenter for comments returning users {
+  users.id == comments.user_id
+}
+
+// Aggregations
+aggregation follower_count for users returning i32 {
+  count(user_follows.follower_id)
+}
+
+aggregation following_count for users returning i32 {
+  count(user_follows.followed_id)
+}
+
+aggregation like_count for posts returning i32 {
+  count(post_likes.id)
+}
+
+aggregation reply_count for comments returning i32 {
+  count(comments.parent_comment_id)
+}
+
+// Public aggregation
+public aggregation engagement_score for posts returning f64 {
+  (count(comments.id) * 2) + count(post_likes.id)
+}
+
+// Complex queries using multiple relations and aggregations
+query getSocialFeed($userId: uuid) {
+  from(posts)
+  .where(posts.author.id == $userId)
+  .select(
+    posts.id,
+    posts.title,
+    posts.content,
+    posts.author.name,
+    posts.author.follower_count,
+    posts.like_count,
+    posts.comment_count,
+    posts.engagement_score,
+    posts.created_at
+  )
+  .orderBy(posts.created_at)
+  .limit(50)
+}
+
+// Query with complex relation navigation
+query getThreadedComments($postId: uuid) {
+  from(comments)
+  .where(comments.post.id == $postId && comments.parent_comment_id == null)
+  .select(
+    comments.id,
+    comments.content,
+    comments.commenter.name,
+    comments.commenter.profile_picture.url,
+    comments.reply_count,
+    comments.replied_to.content,              // Will be null for top-level comments
+    comments.replied_to.commenter.name,        // Will be null for top-level comments
+    comments.created_at
+  )
+  .orderBy(comments.created_at)
+}
+
+// Query combining multiple relation types
+query getUserProfile($username: string) {
+  from(users)
+  .where(users.username == $username)
+  .select(
+    users.id,
+    users.name,
+    users.bio,
+    users.profile_picture.url,
+    users.profile_picture.thumbnail_url,
+    users.follower_count,
+    users.following_count,
+    users.post_count,
+    users.created_at
+  )
+}
+
+// Complex mutation using relations for validation
+mutation createComment($postId: uuid, $userId: uuid, $content: string, $parentCommentId: uuid?) {
+  insert(comments)
+  .value({
+    post_id: $postId,
+    user_id: $userId,
+    content: $content,
+    parent_comment_id: $parentCommentId,
+    created_at: now()
+  })
+  .returning(
+    id,
+    content,
+    commenter.name,
+    post.title,
+    replied_to.content
+  )
+}

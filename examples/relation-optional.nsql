@@ -1,0 +1,88 @@
+// Optional relation examples
+
+// Required relations
+relation author for posts returning users {
+  users.id == posts.author_id
+}
+
+relation category for posts returning categories {
+  categories.id == posts.category_id
+}
+
+// Optional relations - not all posts have these
+optional relation featured_image for posts returning images {
+  images.id == posts.featured_image_id
+}
+
+optional relation parent_post for posts returning posts {
+  posts.id == posts.parent_id
+}
+
+optional relation profile_picture for users returning images {
+  images.id == users.profile_picture_id
+}
+
+optional relation manager for users returning users {
+  users.id == users.manager_id
+}
+
+// Public optional relation
+public optional relation metadata for posts returning post_metadata {
+  post_metadata.post_id == posts.id
+}
+
+// Query handling optional relations
+query getPostsWithOptionalData() {
+  from(posts)
+  .select(
+    posts.title,
+    posts.author.name,
+    posts.featured_image.url,           // May be null
+    posts.featured_image.alt_text,      // May be null
+    posts.parent_post.title,            // May be null
+    posts.metadata.views,               // May be null
+    posts.metadata.likes                // May be null
+  )
+  .limit(20)
+}
+
+// Query filtering on optional relations
+query getPostsWithImages() {
+  from(posts)
+  .where(posts.featured_image.id != null)
+  .select(
+    posts.title,
+    posts.featured_image.url,
+    posts.featured_image.width,
+    posts.featured_image.height
+  )
+}
+
+// Query with nested optional relations
+query getUserHierarchy($userId: uuid) {
+  from(users)
+  .where(users.id == $userId)
+  .select(
+    users.name,
+    users.email,
+    users.profile_picture.url,              // Optional
+    users.manager.name,                     // Optional
+    users.manager.email,                    // Optional
+    users.manager.manager.name,             // Optional, nested
+    users.manager.profile_picture.url       // Optional, different branch
+  )
+}
+
+// Mutation with optional relation reference
+mutation createPost($title: string, $content: string, $authorId: uuid, $imageId: uuid?, $parentId: uuid?) {
+  insert(posts)
+  .value({
+    title: $title,
+    content: $content,
+    author_id: $authorId,
+    featured_image_id: $imageId,      // Optional field
+    parent_id: $parentId,             // Optional field
+    created_at: now()
+  })
+  .returning(id, title)
+}

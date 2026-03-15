@@ -1,0 +1,18 @@
+// GROUP BY with HAVING clause
+
+query findActiveCustomers() {
+  from(orders)
+  .groupBy(orders.customer_id)
+  .having(COUNT(orders.id) > 5)
+  .aggregate(order_count: COUNT(orders.id), total_amount: SUM(orders.amount))
+  .select(orders.customer_id, order_count, total_amount)
+}
+
+query findPopularProducts($min_sales: i32) {
+  from(order_items)
+  .groupBy(order_items.product_id)
+  .having(SUM(order_items.quantity) >= $min_sales)
+  .aggregate(total_sold: SUM(order_items.quantity))
+  .select(order_items.product_id, total_sold)
+  .orderBy(total_sold.desc())
+}

@@ -1,0 +1,25 @@
+// ON CONFLICT (UPSERT) examples
+
+mutation upsertProduct($sku: string, $name: string, $price: f64, $stock: i32) {
+  insert(products)
+  .value({
+    sku: $sku,
+    name: $name,
+    price: $price,
+    stock: $stock
+  })
+  .onConflict(sku)
+  .doUpdate({
+    name: $name,
+    price: $price,
+    stock: $stock
+  })
+  .returning(products.*)
+}
+
+mutation insertIgnore($name: string, $email: string) {
+  insert(users)
+  .value({ name: $name, email: $email })
+  .onConflict(email)
+  .doNothing()
+}

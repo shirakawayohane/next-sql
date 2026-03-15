@@ -1,0 +1,24 @@
+// DISTINCT and pagination (OFFSET) examples
+
+query findDistinctEmails() {
+  from(users)
+  .distinct()
+  .select(users.email)
+}
+
+query findUsersWithPagination($limit: i32, $offset: i32) {
+  from(users)
+  .select(users.*)
+  .orderBy(users.created_at.desc())
+  .limit($limit)
+  .offset($offset)
+}
+
+query findDistinctCitiesWithPagination($limit: i32, $offset: i32) {
+  from(users)
+  .distinct()
+  .select(users.city)
+  .orderBy(users.city.asc())
+  .limit($limit)
+  .offset($offset)
+}

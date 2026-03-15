@@ -1,0 +1,18 @@
+// ORDER BY with multiple columns and direction
+
+query findUsersSorted() {
+  from(users)
+  .select(users.*)
+  .orderBy(users.name.asc(), users.created_at.desc())
+}
+
+query findOrdersByCustomer($customer_id: uuid) {
+  from(orders.innerJoin(order_items, orders.id == order_items.order_id))
+  .where(orders.customer_id == $customer_id)
+  .select(orders.*)
+  .orderBy(
+    orders.created_at.desc(),
+    orders.total_amount.desc(),
+    orders.id.asc()
+  )
+}

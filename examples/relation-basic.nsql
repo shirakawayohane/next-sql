@@ -1,0 +1,47 @@
+// Basic relation definitions and usage
+
+// Define a relation from posts to users (the author)
+relation author for posts returning users {
+  users.id == posts.author_id
+}
+
+// Define a relation from comments to posts
+relation post for comments returning posts {
+  posts.id == comments.post_id
+}
+
+// Define a relation from comments to users (the commenter)
+relation commenter for comments returning users {
+  users.id == comments.user_id
+}
+
+// Query using basic relations
+query getPostWithAuthor($postId: uuid) {
+  from(posts)
+  .where(posts.id == $postId)
+  .select(posts.title, posts.content, posts.author.name, posts.author.email)
+}
+
+// Query using multiple relations
+query getCommentDetails($commentId: uuid) {
+  from(comments)
+  .where(comments.id == $commentId)
+  .select(
+    comments.content,
+    comments.commenter.name,
+    comments.post.title,
+    comments.post.author.name
+  )
+}
+
+// Mutation that references related data
+mutation addComment($postId: uuid, $userId: uuid, $content: string) {
+  insert(comments)
+  .value({
+    post_id: $postId,
+    user_id: $userId,
+    content: $content,
+    created_at: now()
+  })
+  .returning(id, content)
+}

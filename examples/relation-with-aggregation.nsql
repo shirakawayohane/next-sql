@@ -1,0 +1,67 @@
+// Relation with aggregation examples
+
+// Basic relations
+relation author for posts returning users {
+  users.id == posts.author_id
+}
+
+relation posts for users returning posts {
+  posts.author_id == users.id
+}
+
+// Aggregation relations
+aggregation post_count for users returning i32 {
+  count(posts.id)
+}
+
+aggregation comment_count for posts returning i32 {
+  count(comments.id)
+}
+
+aggregation total_likes for posts returning i32 {
+  sum(post_likes.like_count)
+}
+
+aggregation avg_rating for posts returning f64 {
+  avg(post_ratings.rating)
+}
+
+// Query using aggregations
+query getUserStats($userId: uuid) {
+  from(users)
+  .where(users.id == $userId)
+  .select(
+    users.name,
+    users.email,
+    users.post_count,
+    users.created_at
+  )
+}
+
+// Query combining regular relations and aggregations
+query getPostsWithStats() {
+  from(posts)
+  .where(posts.published == true)
+  .select(
+    posts.title,
+    posts.author.name,
+    posts.comment_count,
+    posts.total_likes,
+    posts.avg_rating
+  )
+  .orderBy(posts.comment_count)
+  .limit(10)
+}
+
+// Complex query with multiple aggregations
+query getAuthorLeaderboard() {
+  from(users)
+  .where(users.post_count > 0)
+  .select(
+    users.name,
+    users.post_count,
+    users.created_at
+  )
+  .orderBy(users.post_count)
+  .limit(100)
+}

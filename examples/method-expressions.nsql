@@ -1,0 +1,37 @@
+// Method-style expressions: isNull, isNotNull, like, between, in, eqAny
+
+query findUsersWithNullEmail() {
+  from(users)
+  .where(users.email.isNull())
+  .select(users.*)
+}
+
+query findActiveUsers() {
+  from(users)
+  .where(users.deleted_at.isNull() && users.email.isNotNull())
+  .select(users.*)
+}
+
+query searchUsers($pattern: string) {
+  from(users)
+  .where(users.name.like($pattern))
+  .select(users.*)
+}
+
+query findUsersInAgeRange($min: i32, $max: i32) {
+  from(users)
+  .where(users.age.between($min, $max))
+  .select(users.*)
+}
+
+query findUsersByStatus($statuses: [string]) {
+  from(users)
+  .where(users.status.eqAny($statuses))
+  .select(users.*)
+}
+
+query findUsersByIds($ids: [uuid]) {
+  from(users)
+  .where(users.id.eqAny($ids))
+  .select(users.*)
+}

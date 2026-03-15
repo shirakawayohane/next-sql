@@ -27,11 +27,11 @@ mutation isnertUser($new: Insertable<User>) {
 
 mutation updateUser($id: uuid, $name: string, $email: string) {
   update(users)
+  .where(users.id == $id)
   .set({
     name: $name,
-    email: $email,
+    email: $email
   })
-  .where(users.id == $id)
   .returning(users.*)
 }
 

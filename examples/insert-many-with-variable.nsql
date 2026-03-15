@@ -1,5 +1,5 @@
-mutation insertManyUser($news: [Insertable<User>]) {
+mutation insertManyUser($news: Insertable<Users>) {
   insert(users)
   .values($news)
-  .returning(*)
+  .returning(users.created_at)
 }

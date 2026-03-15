@@ -1,0 +1,74 @@
+// Nested relation access examples
+
+// Define relations for a multi-level hierarchy
+relation author for posts returning users {
+  users.id == posts.author_id
+}
+
+relation organization for users returning organizations {
+  organizations.id == users.organization_id
+}
+
+relation parent_org for organizations returning organizations {
+  organizations.id == organizations.parent_id
+}
+
+relation category for posts returning categories {
+  categories.id == posts.category_id
+}
+
+relation parent_category for categories returning categories {
+  categories.id == categories.parent_id
+}
+
+// Query with nested relation access
+query getPostWithFullHierarchy($postId: uuid) {
+  from(posts)
+  .where(posts.id == $postId)
+  .select(
+    posts.title,
+    posts.content,
+    posts.author.name,
+    posts.author.organization.name,
+    posts.author.organization.parent_org.name,
+    posts.category.name,
+    posts.category.parent_category.name
+  )
+}
+
+// Query filtering by nested relation properties
+query getPostsByOrganization($orgName: string) {
+  from(posts)
+  .where(posts.author.organization.name == $orgName)
+  .select(posts.title, posts.author.name, posts.created_at)
+}
+
+// Complex nested filtering
+query getPostsByParentOrganization($parentOrgId: uuid) {
+  from(posts)
+  .where(posts.author.organization.parent_org.id == $parentOrgId)
+  .select(
+    posts.title,
+    posts.author.name,
+    posts.author.organization.name,
+    posts.author.organization.parent_org.name
+  )
+}
+
+// Multiple levels of nesting in different branches
+query getDetailedPostInfo($postId: uuid) {
+  from(posts)
+  .where(posts.id == $postId)
+  .select(
+    posts.title,
+    posts.content,
+    posts.author.name,
+    posts.author.email,
+    posts.author.organization.name,
+    posts.author.organization.parent_org.name,
+    posts.author.organization.parent_org.created_at,
+    posts.category.name,
+    posts.category.parent_category.name,
+    posts.category.parent_category.description
+  )
+}

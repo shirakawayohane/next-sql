@@ -1,0 +1,25 @@
+// UNION and UNION ALL examples
+
+query findAllProjectMembers($project_id: uuid) {
+  from(project_owners.innerJoin(users, project_owners.user_id == users.id))
+  .where(project_owners.project_id == $project_id)
+  .select(users.id, users.name)
+  .union(
+    from(project_members.innerJoin(users, project_members.user_id == users.id))
+    .where(project_members.project_id == $project_id)
+    .select(users.id, users.name)
+  )
+}
+
+query findAllContactEmails() {
+  from(employees)
+  .select(employees.email)
+  .unionAll(
+    from(contractors)
+    .select(contractors.email)
+  )
+  .unionAll(
+    from(freelancers)
+    .select(freelancers.email)
+  )
+}

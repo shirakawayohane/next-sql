@@ -24,13 +24,13 @@ query demonstrateMethodChaining($searchTerm: string, $tags: [string]) {
 
 // Example with complex expressions
 query searchWithFilters($keyword: string, $categoryIds: [uuid]) {
-  from(articles<a>)
+  from(articles)
   .where(
     // Method call on expression result
-    a.title.toLowerCase().includes($keyword) &&
-    
+    articles.title.toLowerCase().includes($keyword) &&
+
     // Method on column with argument
-    a.category_id.in($categoryIds)
+    articles.category_id.in($categoryIds)
   )
-  .select(a.*)
+  .select(articles.*)
 }

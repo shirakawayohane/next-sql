@@ -8,16 +8,14 @@ query getUserEmail($id: uuid) {
   .select(users.email)
 }
 
-// Using table aliases
+// Direct table references with joins
 query getPostsWithAuthors($startDate: date) {
-  alias p = posts
-  alias u = users
-  from(posts.innerJoin(users, p.author_id == u.id))
-  .where(p.created_at > $startDate)  // Type "p." to see posts columns
+  from(posts.innerJoin(users, posts.author_id == users.id))
+  .where(posts.created_at > $startDate)  // Type "posts." to see posts columns
   .select({
-    title: p.title,           // Type "p." for posts columns
-    author: u.name,           // Type "u." for users columns
-    email: u.email
+    title: posts.title,           // Type "posts." for posts columns
+    author: users.name,           // Type "users." for users columns
+    email: users.email
   })
 }
 

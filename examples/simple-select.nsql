@@ -1,6 +1,5 @@
 query findUserById($id: uuid) {
-  alias u = users
-  from(a)
-  .where(u.id == $id)
-  .select(u.id)
+  from(users)
+  .where(users.id == $id)
+  .select(users.id)
 }

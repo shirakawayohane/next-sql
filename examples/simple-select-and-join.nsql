@@ -1,7 +1,17 @@
-query findUserById($id: uuid) {
-  alias u = users
-  alias p = profiles
-  from(users.leftJoin(profiles, u.id == p.user_id))
-  .where(u.id == $id)
-  .select(u.*, p.*)
+relation author for posts returning users {
+  users.id == posts.user_id
+}
+
+optional relation detail for posts returning post_details {
+  post_details.id == posts.detail_id
+}
+
+relation organization for users returning users {
+  users.id == users.organization_id
+}
+
+query usersPosts($id: uuid) {
+  from(posts)
+  .where(posts.author.organization.name == $id)
+  .select(posts.author.name, posts.author.organization.name, posts.title)
 }

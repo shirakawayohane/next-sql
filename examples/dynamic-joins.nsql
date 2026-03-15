@@ -1,10 +1,9 @@
 query getUserData($id: uuid, $withOrders: bool, $withProfile: bool) {
-  alias u = users
   from(users)
-  .where(u.id == $id)
+  .where(users.id == $id)
   .select(
-    u.*,
-    when($withOrders, u.name),
-    when($withProfile, u.email)
+    users.*,
+    when($withOrders, users.name),
+    when($withProfile, users.email)
   )
 }
