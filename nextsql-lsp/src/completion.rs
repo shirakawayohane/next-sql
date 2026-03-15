@@ -2,6 +2,25 @@ use crate::schema_cache::SchemaCache;
 use std::sync::Arc;
 use tower_lsp::lsp_types::*;
 
+mod context;
+mod field_completion;
+mod method_completion;
+mod model_completion;
+mod table_completion;
+mod type_completion;
+mod utils;
+
+use context::{
+    CompletionContext, FunctionContext, analyze_context_before_dot, check_function_context,
+    is_after_insertable_angle_bracket, is_after_variable_colon
+};
+use field_completion::FieldCompletionProvider;
+use method_completion::MethodCompletionProvider;
+use model_completion::ModelCompletionProvider;
+use table_completion::TableCompletionProvider;
+use type_completion::TypeCompletionProvider;
+use utils::utf16_position_to_byte_index;
+
 pub struct CompletionProvider<'a> {
     text: &'a str,
     schema_cache: Option<Arc<SchemaCache>>,
@@ -49,8 +68,7 @@ impl<'a> CompletionProvider<'a> {
         let current_line = lines[position.line as usize];
 
         // LSPはUTF-16コード単位で文字位置を計算するため、バイト位置に変換
-        let byte_position =
-            self.utf16_position_to_byte_index(current_line, position.character as usize);
+        let byte_position = utf16_position_to_byte_index(current_line, position.character as usize);
 
         eprintln!("LSP: Current line {}: '{}'", position.line, current_line);
         eprintln!(
@@ -63,14 +81,46 @@ impl<'a> CompletionProvider<'a> {
         }
 
         let before_cursor = &current_line[..byte_position.min(current_line.len())];
+        let after_cursor = &current_line[byte_position.min(current_line.len())..];
+        
+        // Collect all text up to the current position to find aliases
+        let text_before_position = if position.line > 0 {
+            let mut full_text = String::new();
+            for i in 0..position.line as usize {
+                full_text.push_str(lines[i]);
+                full_text.push('\n');
+            }
+            full_text.push_str(before_cursor);
+            full_text
+        } else {
+            before_cursor.to_string()
+        };
+        
         eprintln!("LSP: Text before cursor: '{}'", before_cursor);
+        eprintln!("LSP: Text after cursor: '{}'", after_cursor);
 
+        // "Insertable<" の後でのモデル名補完
+        if is_after_insertable_angle_bracket(before_cursor) {
+            eprintln!("LSP: Detected Insertable< context");
+            let has_closing_bracket = after_cursor.chars().next() == Some('>');
+            completions.extend(self.get_model_completions_for_insertable(has_closing_bracket, position, current_line).await);
+        }
+        // "$variable: " の後での型補完
+        else if is_after_variable_colon(before_cursor) {
+            eprintln!("LSP: Detected $variable: context");
+            completions.extend(self.get_type_completions().await);
+        }
         // "." が直前にある場合のメソッド補完
-        if before_cursor.ends_with('.') {
-            let context = self.analyze_context_before_dot(before_cursor);
+        else if before_cursor.ends_with('.') {
+            let context = analyze_context_before_dot(self.text, before_cursor);
             match &context {
                 CompletionContext::TableField(table_name) => {
+                    // For field completions, table_name has already been resolved from alias
+                    // We trust the context analyzer to only provide valid table references
                     completions.extend(self.get_field_completions(table_name).await);
+                }
+                CompletionContext::TableJoinMethod(_) => {
+                    completions.extend(self.get_method_completions(context));
                 }
                 _ => {
                     completions.extend(self.get_method_completions(context));
@@ -78,7 +128,7 @@ impl<'a> CompletionProvider<'a> {
             }
         }
         // "insert(" などの関数呼び出しでのテーブル名補完
-        else if let Some(function_context) = self.check_function_context(before_cursor) {
+        else if let Some(function_context) = check_function_context(before_cursor) {
             match function_context {
                 FunctionContext::Insert | FunctionContext::Update | FunctionContext::Delete => {
                     completions.extend(self.get_table_completions().await);
@@ -86,477 +136,14 @@ impl<'a> CompletionProvider<'a> {
                 FunctionContext::From => {
                     completions.extend(self.get_table_completions().await);
                 }
-            }
-        }
-        // "alias <name> =" の後でのテーブル名補完
-        else if self.is_after_alias_equals(before_cursor) {
-            eprintln!("LSP: Detected alias assignment context");
-            // Check if we need to add a space after =
-            let needs_space = before_cursor.trim_end().ends_with('=');
-            let table_completions = self.get_table_completions_for_alias(needs_space).await;
-            eprintln!("LSP: Found {} table completions for alias (needs_space: {})", table_completions.len(), needs_space);
-            completions.extend(table_completions);
-        }
-
-        completions
-    }
-
-    fn extract_table_before_dot(&self, text: &str) -> Option<String> {
-        eprintln!("LSP: extract_table_before_dot - text: '{}'", text);
-
-        // ドットの直前の識別子を抽出
-        let parts: Vec<&str> = text.split_whitespace().collect();
-        eprintln!("LSP: Split parts: {:?}", parts);
-
-        if let Some(last_part) = parts.last() {
-            eprintln!("LSP: Last part: '{}'", last_part);
-
-            // 識別子の文字のみを取得（句読点などを除外）
-            let identifier: String = last_part
-                .chars()
-                .rev()
-                .take_while(|c| c.is_alphanumeric() || *c == '_')
-                .collect::<String>()
-                .chars()
-                .rev()
-                .collect();
-
-            eprintln!("LSP: Extracted identifier: '{}'", identifier);
-
-            // 識別子は文字で始まる必要がある（数字のみは除外）
-            if !identifier.is_empty() && identifier.chars().next().unwrap().is_alphabetic() {
-                // エイリアスを解決
-                if let Some(table_name) = self.resolve_table_alias(&identifier) {
-                    eprintln!(
-                        "LSP: Resolved alias '{}' to table '{}'",
-                        identifier, table_name
-                    );
-                    return Some(table_name);
+                FunctionContext::JoinMethod => {
+                    completions.extend(self.get_table_completions().await);
                 }
-                // エイリアスでなければ、そのままテーブル名として扱う
-                eprintln!("LSP: Using identifier as table name: '{}'", identifier);
-                return Some(identifier);
-            }
-        }
-        eprintln!("LSP: No table identifier found");
-        None
-    }
-
-    fn resolve_table_alias(&self, alias: &str) -> Option<String> {
-        eprintln!("LSP: resolve_table_alias - looking for alias: '{}'", alias);
-        eprintln!("LSP: Full text to search:\n{}", self.text);
-
-        // 新しい文法: alias エイリアス = テーブル名
-        let alias_pattern = format!(r"alias\s+{}\s*=\s*(\w+)", regex::escape(alias));
-        eprintln!("LSP: Regex pattern for new syntax: '{}'", alias_pattern);
-
-        if let Ok(re) = regex::Regex::new(&alias_pattern) {
-            if let Some(captures) = re.captures(self.text) {
-                if let Some(table_name) = captures.get(1) {
-                    eprintln!(
-                        "LSP: Found table name '{}' for alias '{}' (new syntax)",
-                        table_name.as_str(),
-                        alias
-                    );
-                    return Some(table_name.as_str().to_string());
+                FunctionContext::JoinCondition => {
+                    // Add all table names directly (not from FROM clause)
+                    // since we're in a join condition context where all tables should be available
+                    completions.extend(self.get_table_completions().await);
                 }
-            }
-        }
-
-        // 旧文法もサポート（後方互換性のため）: テーブル名<エイリアス>
-        let old_alias_pattern = format!(r"(\w+)<{}>", regex::escape(alias));
-        eprintln!("LSP: Regex pattern for old syntax: '{}'", old_alias_pattern);
-
-        if let Ok(re) = regex::Regex::new(&old_alias_pattern) {
-            if let Some(captures) = re.captures(self.text) {
-                if let Some(table_name) = captures.get(1) {
-                    eprintln!(
-                        "LSP: Found table name '{}' for alias '{}' (old syntax)",
-                        table_name.as_str(),
-                        alias
-                    );
-                    return Some(table_name.as_str().to_string());
-                }
-            }
-        }
-
-        eprintln!("LSP: No table found for alias '{}'", alias);
-        None
-    }
-
-    async fn get_field_completions(&self, table_name: &str) -> Vec<CompletionItem> {
-        let mut completions = Vec::new();
-        eprintln!("LSP: get_field_completions for table: '{}'", table_name);
-
-        if let (Some(schema_cache), Some(_file_uri)) = (&self.schema_cache, &self.file_uri) {
-            let path = std::path::Path::new(
-                self.file_uri
-                    .as_ref()
-                    .unwrap()
-                    .trim_start_matches("file://"),
-            );
-            eprintln!("LSP: File path for schema lookup: {:?}", path);
-
-            if let Some(schema) = schema_cache.get_schema_for_file(path).await {
-                eprintln!("LSP: Schema found, looking for table '{}'", table_name);
-                if let Some(table) = schema.tables.get(table_name) {
-                    eprintln!(
-                        "LSP: Table '{}' found with {} columns",
-                        table_name,
-                        table.columns.len()
-                    );
-                    for column in &table.columns {
-                        let type_info = format!("{}", column.column_type);
-                        let mut detail = type_info.clone();
-                        if column.nullable {
-                            detail.push_str(" (nullable)");
-                        }
-                        if column.primary_key {
-                            detail.push_str(" (primary key)");
-                        }
-
-                        eprintln!("LSP: Adding column completion: {}", column.name);
-                        completions.push(CompletionItem {
-                            label: column.name.clone(),
-                            kind: Some(CompletionItemKind::FIELD),
-                            detail: Some(detail),
-                            documentation: Some(Documentation::String(format!(
-                                "Column '{}' of table '{}'",
-                                column.name, table_name
-                            ))),
-                            insert_text: Some(column.name.clone()),
-                            ..Default::default()
-                        });
-                    }
-                } else {
-                    eprintln!("LSP: Table '{}' not found in schema", table_name);
-                }
-            } else {
-                eprintln!("LSP: No schema found for file");
-            }
-        } else {
-            eprintln!("LSP: No schema cache or file URI available");
-        }
-
-        eprintln!("LSP: Returning {} field completions", completions.len());
-        completions
-    }
-
-    fn utf16_position_to_byte_index(&self, text: &str, utf16_pos: usize) -> usize {
-        let mut utf16_count = 0;
-        let mut byte_index = 0;
-
-        for ch in text.chars() {
-            if utf16_count >= utf16_pos {
-                break;
-            }
-
-            // UTF-16でのコード単位数を計算
-            let utf16_len = if ch.len_utf16() == 1 { 1 } else { 2 };
-            utf16_count += utf16_len;
-            byte_index += ch.len_utf8();
-        }
-
-        byte_index
-    }
-
-    fn analyze_context_before_dot(&self, text_before_dot: &str) -> CompletionContext {
-        let trimmed = text_before_dot.trim_end_matches('.');
-        eprintln!("LSP: analyze_context_before_dot - trimmed: '{}'", trimmed);
-
-        // まず、テーブル名.かどうかをチェック
-        if let Some(table_name) = self.extract_table_before_dot(trimmed) {
-            eprintln!(
-                "LSP: Detected table field context for table: {}",
-                table_name
-            );
-            return CompletionContext::TableField(table_name);
-        }
-
-        // 直前の閉じ括弧を探して、その前の関数名を確認
-        if let Some(close_paren_pos) = trimmed.rfind(')') {
-            // 対応する開き括弧を探す
-            let mut paren_count = 1;
-            let mut open_paren_pos = None;
-
-            for (i, ch) in trimmed[..close_paren_pos].chars().rev().enumerate() {
-                match ch {
-                    ')' => paren_count += 1,
-                    '(' => {
-                        paren_count -= 1;
-                        if paren_count == 0 {
-                            open_paren_pos = Some(close_paren_pos - i - 1);
-                            break;
-                        }
-                    }
-                    _ => {}
-                }
-            }
-
-            if let Some(open_pos) = open_paren_pos {
-                // 括弧の前の関数名を取得
-                let before_paren = &trimmed[..open_pos];
-                let function_name = before_paren
-                    .split_whitespace()
-                    .last()
-                    .unwrap_or("")
-                    .split(['(', ')', ',', '{', '}', '.'])
-                    .last()
-                    .unwrap_or("");
-
-                // 関数名に基づいてコンテキストを判定
-                match function_name {
-                    "insert" | "update" | "delete" => return CompletionContext::MutationMethod,
-                    "from" => return CompletionContext::TableReference,
-                    _ => {}
-                }
-            }
-        }
-
-        // mutation宣言内かどうかチェック
-        if trimmed.contains("mutation ") {
-            return CompletionContext::MutationMethod;
-        }
-
-        // query宣言内かどうかチェック
-        if trimmed.contains("query ") {
-            return CompletionContext::QueryMethod;
-        }
-
-        CompletionContext::Unknown
-    }
-
-    fn get_method_completions(&self, context: CompletionContext) -> Vec<CompletionItem> {
-        match context {
-            CompletionContext::QueryMethod => {
-                vec![
-                    self.create_method_completion(
-                        "select",
-                        "select(fields)",
-                        "Select specific fields",
-                    ),
-                    self.create_method_completion("where", "where(condition)", "Filter rows"),
-                    self.create_method_completion("join", "join(table)", "Join with another table"),
-                    self.create_method_completion(
-                        "limit",
-                        "limit(count)",
-                        "Limit number of results",
-                    ),
-                    self.create_method_completion(
-                        "offset",
-                        "offset(count)",
-                        "Skip number of results",
-                    ),
-                    self.create_method_completion("orderBy", "orderBy(field)", "Order results"),
-                    self.create_method_completion("groupBy", "groupBy(field)", "Group results"),
-                ]
-            }
-            CompletionContext::MutationMethod => {
-                // より正確なコンテキスト判定のため、直前のテキストを確認
-                let is_after_insert = self.text.contains("insert(");
-                let is_after_update = self.text.contains("update(");
-                let is_after_delete = self.text.contains("delete(");
-
-                let mut methods = vec![];
-
-                if is_after_insert {
-                    methods.push(self.create_method_completion(
-                        "value",
-                        "value({$1})",
-                        "Set values for insert",
-                    ));
-                    methods.push(self.create_method_completion(
-                        "values",
-                        "values($1)",
-                        "Set multiple values",
-                    ));
-                } else if is_after_update {
-                    methods.push(self.create_method_completion(
-                        "where",
-                        "where($1)",
-                        "Filter rows to update",
-                    ));
-                    methods.push(self.create_method_completion(
-                        "set",
-                        "set({$1})",
-                        "Set field values for update",
-                    ));
-                } else if is_after_delete {
-                    methods.push(self.create_method_completion(
-                        "where",
-                        "where($1)",
-                        "Filter rows to delete",
-                    ));
-                }
-
-                // 共通メソッド
-                methods.push(self.create_method_completion(
-                    "returning",
-                    "returning($1)",
-                    "Return specific fields",
-                ));
-
-                methods
-            }
-            CompletionContext::TableReference => {
-                vec![
-                    self.create_method_completion(
-                        "select",
-                        "select(fields)",
-                        "Select specific fields",
-                    ),
-                    self.create_method_completion("where", "where(condition)", "Filter rows"),
-                    self.create_method_completion("join", "join(table)", "Join with another table"),
-                    self.create_method_completion(
-                        "limit",
-                        "limit(count)",
-                        "Limit number of results",
-                    ),
-                    self.create_method_completion(
-                        "offset",
-                        "offset(count)",
-                        "Skip number of results",
-                    ),
-                ]
-            }
-            CompletionContext::Unknown => vec![],
-            CompletionContext::TableField(_) => vec![], // フィールド補完は別メソッドで処理
-        }
-    }
-
-    fn create_method_completion(
-        &self,
-        label: &str,
-        insert_text: &str,
-        documentation: &str,
-    ) -> CompletionItem {
-        CompletionItem {
-            label: label.to_string(),
-            kind: Some(CompletionItemKind::METHOD),
-            detail: Some(format!(".{}", insert_text)),
-            documentation: Some(Documentation::String(documentation.to_string())),
-            insert_text: Some(insert_text.to_string()),
-            insert_text_format: Some(InsertTextFormat::SNIPPET),
-            ..Default::default()
-        }
-    }
-
-    fn check_function_context(&self, before_cursor: &str) -> Option<FunctionContext> {
-        // 最後の開いた括弧を探す
-        if let Some(open_paren_pos) = before_cursor.rfind('(') {
-            // 括弧が閉じられていないかチェック
-            let after_paren = &before_cursor[open_paren_pos + 1..];
-            if after_paren.contains(')') {
-                return None;
-            }
-
-            // 括弧の前の単語を取得
-            let before_paren = &before_cursor[..open_paren_pos];
-            let function_name = before_paren
-                .split_whitespace()
-                .last()
-                .unwrap_or("")
-                .split(['(', ')', ',', '{', '}', '.'])
-                .last()
-                .unwrap_or("");
-
-            match function_name {
-                "insert" => Some(FunctionContext::Insert),
-                "update" => Some(FunctionContext::Update),
-                "delete" => Some(FunctionContext::Delete),
-                "from" => Some(FunctionContext::From),
-                _ => None,
-            }
-        } else {
-            None
-        }
-    }
-
-    fn is_after_alias_equals(&self, before_cursor: &str) -> bool {
-        eprintln!("LSP: Checking for alias pattern in: '{}'", before_cursor);
-        
-        // Check if we're in the pattern "alias <name> = " or "alias <name> = <partial>"
-        // First, check if the line contains "alias" and "="
-        if !before_cursor.contains("alias") || !before_cursor.contains("=") {
-            return false;
-        }
-        
-        // Find the last occurrence of "=" to handle cases where user is typing after it
-        if let Some(equals_pos) = before_cursor.rfind('=') {
-            let before_equals = &before_cursor[..equals_pos];
-            let after_equals = &before_cursor[equals_pos + 1..];
-            
-            // Check if we're still in the table name part (no space or complex expression after =)
-            // Allow partial table names but not complete statements
-            let after_trimmed = after_equals.trim();
-            if after_trimmed.contains('.') || after_trimmed.contains('(') || after_trimmed.contains(')') {
-                return false;
-            }
-            
-            // Check if the pattern before = matches "alias <identifier>"
-            let parts: Vec<&str> = before_equals.trim().split_whitespace().collect();
-            if parts.len() >= 2 && parts[parts.len() - 2] == "alias" {
-                eprintln!("LSP: Found alias pattern: alias {} = {}", parts[parts.len() - 1], after_equals.trim());
-                return true;
-            }
-        }
-        
-        false
-    }
-
-    async fn get_table_completions(&self) -> Vec<CompletionItem> {
-        self.get_table_completions_for_alias(false).await
-    }
-
-    async fn get_table_completions_for_alias(&self, needs_space: bool) -> Vec<CompletionItem> {
-        let mut completions = Vec::new();
-
-        if let (Some(schema_cache), Some(file_uri)) = (&self.schema_cache, &self.file_uri) {
-            let path = std::path::Path::new(file_uri.trim_start_matches("file://"));
-
-            if let Some(schema) = schema_cache.get_schema_for_file(path).await {
-                for table_name in schema.tables.keys() {
-                    let insert_text = if needs_space {
-                        format!(" {}", table_name)
-                    } else {
-                        table_name.clone()
-                    };
-
-                    completions.push(CompletionItem {
-                        label: table_name.clone(),
-                        kind: Some(CompletionItemKind::CLASS),
-                        detail: Some(format!("Table: {}", table_name)),
-                        documentation: Some(Documentation::String(format!(
-                            "Table {} from database schema",
-                            table_name
-                        ))),
-                        insert_text: Some(insert_text),
-                        ..Default::default()
-                    });
-                }
-            }
-        }
-
-        // フォールバック: スキーマが利用できない場合の一般的なテーブル名
-        if completions.is_empty() {
-            let common_tables = vec!["users", "posts", "comments", "orders", "products"];
-            for table in common_tables {
-                let insert_text = if needs_space {
-                    format!(" {}", table)
-                } else {
-                    table.to_string()
-                };
-
-                completions.push(CompletionItem {
-                    label: table.to_string(),
-                    kind: Some(CompletionItemKind::CLASS),
-                    detail: Some(format!("Table: {} (suggestion)", table)),
-                    documentation: Some(Documentation::String(
-                        "Common table name suggestion".to_string(),
-                    )),
-                    insert_text: Some(insert_text),
-                    ..Default::default()
-                });
             }
         }
 
@@ -564,60 +151,117 @@ impl<'a> CompletionProvider<'a> {
     }
 }
 
-#[derive(Debug, PartialEq)]
-enum CompletionContext {
-    QueryMethod,
-    MutationMethod,
-    TableReference,
-    TableField(String), // テーブル名を保持
-    Unknown,
+// Delegate to specific completion providers
+impl<'a> FieldCompletionProvider for CompletionProvider<'a> {
+    fn get_schema_cache(&self) -> Option<&Arc<SchemaCache>> {
+        self.schema_cache.as_ref()
+    }
+    
+    fn get_text(&self) -> &str {
+        self.text
+    }
+    
+    fn get_file_uri(&self) -> Option<&str> {
+        self.file_uri.as_deref()
+    }
 }
 
-#[derive(Debug, PartialEq)]
-enum FunctionContext {
-    Insert,
-    Update,
-    Delete,
-    From,
+impl<'a> MethodCompletionProvider for CompletionProvider<'a> {
+    fn get_text(&self) -> &str {
+        self.text
+    }
+}
+
+impl<'a> TableCompletionProvider for CompletionProvider<'a> {
+    fn get_schema_cache(&self) -> Option<&Arc<SchemaCache>> {
+        self.schema_cache.as_ref()
+    }
+    
+    fn get_file_uri(&self) -> Option<&str> {
+        self.file_uri.as_deref()
+    }
+}
+
+impl<'a> TypeCompletionProvider for CompletionProvider<'a> {
+    fn get_schema_cache(&self) -> Option<&Arc<SchemaCache>> {
+        self.schema_cache.as_ref()
+    }
+    
+    fn get_file_uri(&self) -> Option<&str> {
+        self.file_uri.as_deref()
+    }
+}
+
+impl<'a> ModelCompletionProvider for CompletionProvider<'a> {
+    fn get_schema_cache(&self) -> Option<&Arc<SchemaCache>> {
+        self.schema_cache.as_ref()
+    }
+    
+    fn get_file_uri(&self) -> Option<&str> {
+        self.file_uri.as_deref()
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use context::{extract_from_tables, extract_table_before_dot, is_table_reference_context};
 
     #[test]
     fn test_query_method_completion() {
         let provider = CompletionProvider::new("query test() { from(users).");
-        let context = provider.analyze_context_before_dot("query test() { from(users).");
+        let context = analyze_context_before_dot(provider.text, "query test() { from(users).");
         assert_eq!(context, CompletionContext::TableReference);
     }
 
     #[test]
     fn test_mutation_method_completion() {
         let provider = CompletionProvider::new("mutation test() { insert(users).");
-        let context = provider.analyze_context_before_dot("mutation test() { insert(users).");
+        let context = analyze_context_before_dot(provider.text, "mutation test() { insert(users).");
         assert_eq!(context, CompletionContext::MutationMethod);
     }
 
     #[test]
     fn test_function_context_detection() {
-        let provider = CompletionProvider::new("");
-
         // insert( の後
         assert_eq!(
-            provider.check_function_context("mutation test() { insert("),
+            check_function_context("mutation test() { insert("),
             Some(FunctionContext::Insert)
         );
 
         // update( の後
         assert_eq!(
-            provider.check_function_context("mutation test() { update("),
+            check_function_context("mutation test() { update("),
             Some(FunctionContext::Update)
+        );
+
+        // leftJoin( の後
+        assert_eq!(
+            check_function_context("from(users.leftJoin("),
+            Some(FunctionContext::JoinMethod)
+        );
+
+        // innerJoin( の後
+        assert_eq!(
+            check_function_context("from(users.innerJoin("),
+            Some(FunctionContext::JoinMethod)
+        );
+
+        // leftJoin( の第2引数（join条件）
+        assert_eq!(
+            check_function_context("from(users.leftJoin(posts, "),
+            Some(FunctionContext::JoinCondition)
+        );
+
+        // innerJoin( の第2引数（join条件）
+        assert_eq!(
+            check_function_context("from(users.innerJoin(posts, u.id == "),
+            Some(FunctionContext::JoinCondition)
         );
 
         // 括弧が閉じられている場合
         assert_eq!(
-            provider.check_function_context("mutation test() { insert(users) "),
+            check_function_context("mutation test() { insert(users) "),
             None
         );
     }
@@ -627,12 +271,12 @@ mod tests {
         let provider = CompletionProvider::new("");
 
         // メソッドチェーンが既に始まっている場合
-        let context = provider.analyze_context_before_dot("query test() { from(users).select(*).");
+        let context = analyze_context_before_dot(provider.text, "query test() { from(users).select(*).");
         assert_eq!(context, CompletionContext::QueryMethod);
 
         // mutation内でのメソッドチェーン
         let context =
-            provider.analyze_context_before_dot("mutation test() { insert(users).value({}).");
+            analyze_context_before_dot(provider.text, "mutation test() { insert(users).value({}).");
         assert_eq!(context, CompletionContext::MutationMethod);
     }
 
@@ -641,132 +285,113 @@ mod tests {
         let provider = CompletionProvider::new("");
 
         // insert直後
-        let context = provider.analyze_context_before_dot("mutation test() { insert(users).");
+        let context = analyze_context_before_dot(provider.text, "mutation test() { insert(users).");
         assert_eq!(context, CompletionContext::MutationMethod);
 
         // update直後
-        let context = provider.analyze_context_before_dot("mutation test() { update(users).");
+        let context = analyze_context_before_dot(provider.text, "mutation test() { update(users).");
         assert_eq!(context, CompletionContext::MutationMethod);
 
         // delete直後
-        let context = provider.analyze_context_before_dot("mutation test() { delete(users).");
+        let context = analyze_context_before_dot(provider.text, "mutation test() { delete(users).");
         assert_eq!(context, CompletionContext::MutationMethod);
     }
 
     #[test]
     fn test_table_field_detection() {
-        let provider = CompletionProvider::new("query test() { from(users) .where(users.");
+        let text = "query test() { from(users) .where(users.";
+        let _provider = CompletionProvider::new(text);
 
         // テーブル名の後のドット
         let context =
-            provider.analyze_context_before_dot("query test() { from(users) .where(users.");
+            analyze_context_before_dot(text, "query test() { from(users) .where(users.");
         assert_eq!(context, CompletionContext::TableField("users".to_string()));
     }
 
     #[test]
-    fn test_extract_table_before_dot() {
-        let provider = CompletionProvider::new("");
+    fn test_table_join_method_detection() {
+        // Test inside from()
+        let text = "query test() { from(users.";
+        let context = analyze_context_before_dot(text, text);
+        assert_eq!(context, CompletionContext::TableJoinMethod("users".to_string()));
+        
+        // Test after alias =
+        let text = "query test() { alias joined = users.";
+        let context = analyze_context_before_dot(text, text);
+        assert_eq!(context, CompletionContext::TableJoinMethod("users".to_string()));
+        
+        // Test with alias in from()
+        let text = "query test() { alias u = users\n from(u.";
+        let context = analyze_context_before_dot(text, text);
+        assert_eq!(context, CompletionContext::TableJoinMethod("users".to_string()));
+        
+        // Test inside join condition - should NOT be join method context
+        let full_text = "query test() { alias u = users\n from(users.leftJoin(posts, u.";
+        let text_before_dot = "query test() { alias u = users\n from(users.leftJoin(posts, u.";
+        let context = analyze_context_before_dot(full_text, text_before_dot);
+        assert_ne!(context, CompletionContext::TableJoinMethod("users".to_string()));
+        assert_eq!(context, CompletionContext::TableField("users".to_string())); // Should be field context
+    }
 
+    #[tokio::test]
+    async fn test_join_method_completions() {
+        let provider = CompletionProvider::new("query test() { from(users.");
+        
+        // Test join method completions in from()
+        let position = Position {
+            line: 0,
+            character: 26, // After "from(users."
+        };
+        
+        let completions = provider.get_completions(position).await;
+        
+        // Should have join method completions
+        assert!(!completions.is_empty());
+        
+        // Check for leftJoin method
+        let left_join = completions.iter().find(|c| c.label == "leftJoin");
+        assert!(left_join.is_some());
+        
+        let lj = left_join.unwrap();
+        assert_eq!(lj.kind, Some(CompletionItemKind::METHOD));
+        assert_eq!(lj.insert_text, Some("leftJoin($1, $2)".to_string()));
+        
+        // Check for other join methods
+        assert!(completions.iter().any(|c| c.label == "innerJoin"));
+        assert!(completions.iter().any(|c| c.label == "rightJoin"));
+        assert!(completions.iter().any(|c| c.label == "fullOuterJoin"));
+        assert!(completions.iter().any(|c| c.label == "crossJoin"));
+    }
+
+
+
+    #[test]
+    fn test_extract_table_before_dot() {
         // 単純なテーブル名
         assert_eq!(
-            provider.extract_table_before_dot("users"),
+            extract_table_before_dot("", "users"),
             Some("users".to_string())
         );
         assert_eq!(
-            provider.extract_table_before_dot("where(users"),
+            extract_table_before_dot("", "where(users"),
             Some("users".to_string())
         );
         assert_eq!(
-            provider.extract_table_before_dot(".select(posts"),
+            extract_table_before_dot("", ".select(posts"),
             Some("posts".to_string())
         );
 
         // 複雑なケース
         assert_eq!(
-            provider.extract_table_before_dot("from(users).where(orders"),
+            extract_table_before_dot("", "from(users).where(orders"),
             Some("orders".to_string())
         );
-        assert_eq!(provider.extract_table_before_dot(""), None);
-        assert_eq!(provider.extract_table_before_dot("123"), None);
+        assert_eq!(extract_table_before_dot("", ""), None);
+        assert_eq!(extract_table_before_dot("", "123"), None);
     }
 
-    #[test]
-    fn test_table_alias_resolution() {
-        // 新しい文法: alias文を使用
-        let provider = CompletionProvider::new("query test() { alias u = users\n from(users) .where(u.");
 
-        // エイリアスの解決
-        assert_eq!(provider.resolve_table_alias("u"), Some("users".to_string()));
 
-        // エイリアスを持つテーブルフィールドの検出
-        let context =
-            provider.analyze_context_before_dot("query test() { alias u = users\n from(users) .where(u.");
-        assert_eq!(context, CompletionContext::TableField("users".to_string()));
-
-        // 旧文法も動作することを確認（後方互換性）
-        let provider_old = CompletionProvider::new("query test() { from(users<u>) .where(u.");
-        assert_eq!(provider_old.resolve_table_alias("u"), Some("users".to_string()));
-    }
-
-    #[test]
-    fn test_multiple_table_aliases() {
-        // 新しい文法: 複数のalias文
-        let provider =
-            CompletionProvider::new("query test() {\n  alias u = users\n  alias p = posts\n  from(users).innerJoin(posts, u.id == p.user_id).where(p.");
-
-        // 複数のエイリアスがある場合
-        assert_eq!(provider.resolve_table_alias("u"), Some("users".to_string()));
-        assert_eq!(provider.resolve_table_alias("p"), Some("posts".to_string()));
-
-        // postsテーブルのフィールド検出
-        let context = provider
-            .analyze_context_before_dot("query test() {\n  alias u = users\n  alias p = posts\n  from(users).innerJoin(posts, u.id == p.user_id).where(p.");
-        assert_eq!(context, CompletionContext::TableField("posts".to_string()));
-    }
-
-    #[test]
-    fn test_alias_equals_completion() {
-        let provider = CompletionProvider::new("query test() { alias u = ");
-        
-        // Test various alias patterns
-        assert!(provider.is_after_alias_equals("alias u = "));
-        assert!(provider.is_after_alias_equals("  alias myTable = "));
-        assert!(provider.is_after_alias_equals("alias u ="));
-        assert!(provider.is_after_alias_equals("alias u = "));
-        assert!(provider.is_after_alias_equals("alias u = us"));  // Partial table name
-        assert!(provider.is_after_alias_equals("alias u = u"));   // Single character
-        
-        // Test non-matching patterns
-        assert!(!provider.is_after_alias_equals("alias u"));
-        assert!(!provider.is_after_alias_equals("from(users)"));
-        assert!(!provider.is_after_alias_equals("alias = "));
-        assert!(!provider.is_after_alias_equals("alias u = users.id")); // Complete expression
-        assert!(!provider.is_after_alias_equals("alias u = from(")); // Function call
-    }
-
-    #[tokio::test]
-    async fn test_alias_completion_with_space() {
-        let provider = CompletionProvider::new("query test() { alias u =");
-        
-        // Test that space is added when cursor is right after =
-        let completions = provider.get_table_completions_for_alias(true).await;
-        
-        // Check that all completions have a space prefix
-        for completion in &completions {
-            if let Some(insert_text) = &completion.insert_text {
-                assert!(insert_text.starts_with(' '), "Insert text should start with space: '{}'", insert_text);
-            }
-        }
-        
-        // Test that space is NOT added when there's already content after =
-        let completions_no_space = provider.get_table_completions_for_alias(false).await;
-        
-        for completion in &completions_no_space {
-            if let Some(insert_text) = &completion.insert_text {
-                assert!(!insert_text.starts_with(' '), "Insert text should NOT start with space: '{}'", insert_text);
-            }
-        }
-    }
 
     #[tokio::test]
     async fn test_field_completion_with_schema() {
@@ -876,13 +501,216 @@ mod tests {
             .contains("nullable"));
     }
 
+    #[test]
+    fn test_insertable_angle_bracket_detection() {
+        // Test Insertable< pattern detection
+        assert!(is_after_insertable_angle_bracket("mutation insertUser($new: Insertable<"));
+        assert!(is_after_insertable_angle_bracket("$new: Insertable<"));
+        assert!(is_after_insertable_angle_bracket("Insertable<U"));
+        assert!(is_after_insertable_angle_bracket("foo: Insertable< "));
+        
+        // Test non-matching patterns
+        assert!(!is_after_insertable_angle_bracket("Insertable<User>"));
+        assert!(!is_after_insertable_angle_bracket("Insertable"));
+        assert!(!is_after_insertable_angle_bracket("Insert<"));
+        assert!(!is_after_insertable_angle_bracket("Insertable<User>.field"));
+    }
+
     #[tokio::test]
-    async fn test_field_completion_with_alias() {
+    async fn test_insertable_completion_with_existing_bracket() {
+        // Test scenario where user types: Insertable<|>
+        // and the cursor is between < and >
+        let text = "mutation insertUser($new: Insertable<>) {\n  insert(users)\n  .values($new)\n}";
+        let provider = CompletionProvider::with_schema_cache(text, Arc::new(crate::schema_cache::SchemaCache::new()), "file:///test.nsql".to_string());
+        
+        // Position is after < but before >
+        let position = Position {
+            line: 0,
+            character: 37, // Position after "Insertable<"
+        };
+        
+        let completions = provider.get_completions(position).await;
+        
+        // Should have model completions
+        assert!(!completions.is_empty());
+        
+        // Check that Users model doesn't include >
+        let users_model = completions.iter().find(|c| c.label == "Users");
+        assert!(users_model.is_some());
+        
+        let users = users_model.unwrap();
+        
+        // Check that it uses snippet format with cursor positioning
+        assert_eq!(users.insert_text_format, Some(InsertTextFormat::SNIPPET));
+        
+        // Check text edit includes the closing bracket and positions cursor after it
+        if let Some(CompletionTextEdit::Edit(text_edit)) = &users.text_edit {
+            assert_eq!(text_edit.new_text, "Users>$0", "Should include > and position cursor after it");
+            assert_eq!(text_edit.range.end.character, 38, "Should replace up to and including the closing bracket");
+        } else {
+            panic!("Expected text edit");
+        }
+    }
+
+    #[test]
+    fn test_variable_colon_detection() {
+        // Test $variable: pattern detection
+        assert!(is_after_variable_colon("mutation test($name: "));
+        assert!(is_after_variable_colon("$userId: "));
+        assert!(is_after_variable_colon("query foo($id: u"));
+        assert!(is_after_variable_colon("$my_var: Ins"));
+        
+        // Test non-matching patterns
+        assert!(!is_after_variable_colon("$name: string,"));
+        assert!(!is_after_variable_colon("$name: uuid)"));
+        assert!(!is_after_variable_colon("name: "));
+        assert!(!is_after_variable_colon(": string"));
+    }
+
+    #[tokio::test]
+    async fn test_model_completions_for_insertable() {
+        let provider = CompletionProvider::new("");
+        let position = Position { line: 0, character: 37 };
+        let current_line = "mutation insertUser($new: Insertable<";
+        
+        // Test without closing bracket
+        let completions = provider.get_model_completions_for_insertable(false, position, current_line).await;
+        
+        // Should have fallback model names
+        assert!(!completions.is_empty());
+        
+        // Check for Users model
+        let users_model = completions.iter().find(|c| c.label == "Users");
+        assert!(users_model.is_some());
+        
+        let users = users_model.unwrap();
+        assert_eq!(users.kind, Some(CompletionItemKind::CLASS));
+        
+        // Check text edit
+        if let Some(CompletionTextEdit::Edit(text_edit)) = &users.text_edit {
+            assert_eq!(text_edit.new_text, "Users>");
+        } else {
+            panic!("Expected text edit");
+        }
+        
+        // Test with closing bracket
+        let current_line_with_bracket = "mutation insertUser($new: Insertable<>) {";
+        let completions_with_bracket = provider.get_model_completions_for_insertable(true, position, current_line_with_bracket).await;
+        
+        let users_model_with_bracket = completions_with_bracket.iter().find(|c| c.label == "Users");
+        assert!(users_model_with_bracket.is_some());
+        
+        let users_with_bracket = users_model_with_bracket.unwrap();
+        assert_eq!(users_with_bracket.insert_text_format, Some(InsertTextFormat::SNIPPET));
+        
+        if let Some(CompletionTextEdit::Edit(text_edit)) = &users_with_bracket.text_edit {
+            assert_eq!(text_edit.new_text, "Users>$0");
+        } else {
+            panic!("Expected text edit");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_type_completions() {
+        let provider = CompletionProvider::new("");
+        let completions = provider.get_type_completions().await;
+        
+        // Should have Insertable and built-in types
+        assert!(!completions.is_empty());
+        
+        // Check for Insertable type with snippet
+        let insertable = completions.iter().find(|c| c.label == "Insertable");
+        assert!(insertable.is_some());
+        
+        let ins = insertable.unwrap();
+        assert_eq!(ins.kind, Some(CompletionItemKind::INTERFACE));
+        assert_eq!(ins.insert_text, Some("Insertable<$1>$0".to_string()));
+        assert_eq!(ins.insert_text_format, Some(InsertTextFormat::SNIPPET));
+        
+        // Check for built-in types
+        let string_type = completions.iter().find(|c| c.label == "string");
+        assert!(string_type.is_some());
+        
+        let uuid_type = completions.iter().find(|c| c.label == "uuid");
+        assert!(uuid_type.is_some());
+    }
+
+    
+    #[test]
+    fn test_extract_from_tables() {
+        // Simple from clause
+        let text = "query test() { from(users) }";
+        let tables = extract_from_tables(text);
+        assert_eq!(tables, vec!["users"]);
+        
+        
+        // From with join
+        let text = "query test() { from(users.leftJoin(posts, u.id == p.user_id)) }";
+        let tables = extract_from_tables(text);
+        assert_eq!(tables, vec!["users"]);
+    }
+    
+    #[test]
+    fn test_is_table_reference_context() {
+        // In select
+        assert!(is_table_reference_context("query test() { from(users).select(", ""));
+        
+        // In where
+        assert!(is_table_reference_context("query test() { from(users).where(", ""));
+        
+        // In join
+        assert!(is_table_reference_context("query test() { from(users).leftJoin(posts, ", ""));
+        
+        // Not in context
+        assert!(!is_table_reference_context("query test() { ", ""));
+        
+        // Closed context
+        assert!(!is_table_reference_context("query test() { from(users).select(u.name) }", ""));
+    }
+    
+    #[tokio::test]
+    async fn test_table_completions_in_from() {
+        let text = "query test() {\n  from(";
+        let provider = CompletionProvider::new(text);
+        
+        let position = Position {
+            line: 1,
+            character: 7, // After "from("
+        };
+        
+        let completions = provider.get_completions(position).await;
+        
+        // Should have table completions
+        assert!(completions.iter().any(|c| c.label == "users" && c.kind == Some(CompletionItemKind::CLASS)));
+        assert!(completions.iter().any(|c| c.label == "posts" && c.kind == Some(CompletionItemKind::CLASS)));
+    }
+    
+    #[tokio::test]
+    async fn test_table_completions_in_join_method() {
+        let text = "query test() {\n  from(users.leftJoin(";
+        let provider = CompletionProvider::new(text);
+        
+        let position = Position {
+            line: 1,
+            character: 23, // After "from(users.leftJoin("
+        };
+        
+        let completions = provider.get_completions(position).await;
+        
+        // Should have table completions
+        assert!(completions.iter().any(|c| c.label == "users" && c.kind == Some(CompletionItemKind::CLASS)));
+        assert!(completions.iter().any(|c| c.label == "posts" && c.kind == Some(CompletionItemKind::CLASS)));
+        assert!(completions.iter().any(|c| c.label == "orders" && c.kind == Some(CompletionItemKind::CLASS)));
+    }
+    
+    
+    #[tokio::test]
+    async fn test_field_completions_in_join_condition() {
         use crate::schema_cache::SchemaCache;
         use nextsql_core::{BuiltInType, ColumnSchema, DatabaseSchema, TableSchema, Type};
 
         // テスト用のプロジェクトディレクトリを作成
-        let temp_dir = std::env::temp_dir().join("nextsql_test_alias_completion");
+        let temp_dir = std::env::temp_dir().join("nextsql_test_join_field_completion");
         std::fs::create_dir_all(&temp_dir).unwrap();
 
         // next-sql.tomlファイルを作成
@@ -902,9 +730,12 @@ mod tests {
             has_default: true,
             default_value: Some("gen_random_uuid()".to_string()),
         });
-        users_table.add_column(ColumnSchema {
-            name: "email".to_string(),
-            column_type: Type::BuiltIn(BuiltInType::String),
+        
+        // postsテーブルのスキーマを作成
+        let mut posts_table = TableSchema::new("posts".to_string());
+        posts_table.add_column(ColumnSchema {
+            name: "user_id".to_string(),
+            column_type: Type::BuiltIn(BuiltInType::Uuid),
             nullable: false,
             primary_key: false,
             has_default: false,
@@ -914,6 +745,7 @@ mod tests {
         // データベーススキーマを作成
         let mut db_schema = DatabaseSchema::new();
         db_schema.add_table(users_table);
+        db_schema.add_table(posts_table);
 
         // スキーマキャッシュに追加
         schema_cache
@@ -927,16 +759,15 @@ mod tests {
         // Arc<SchemaCache>を作成
         let schema_cache_arc = Arc::new(schema_cache);
 
-        // CompletionProviderを作成（エイリアス使用）
-        let text = "query findUserById($id: uuid) {\n  from(users<u>)\n  .where(u.";
+        // CompletionProviderを作成
+        let text = "query test() {\n  alias u = users\n  alias p = posts\n  from(users.leftJoin(posts, u.";
         let provider =
             CompletionProvider::with_schema_cache(text, Arc::clone(&schema_cache_arc), file_uri);
 
         // カーソル位置を設定（u.の後）
-        // "  .where(u." の長さは11文字
         let position = Position {
-            line: 2,
-            character: 11, // "  .where(u."の長さ
+            line: 3,
+            character: 32, // After "from(users.leftJoin(posts, u."
         };
 
         // 補完を取得
@@ -945,22 +776,14 @@ mod tests {
         // テスト用ファイルをクリーンアップ
         let _ = std::fs::remove_dir_all(&temp_dir);
 
-        // エイリアス経由でもid列が補完候補に含まれていることを確認
-        assert!(
-            !completions.is_empty(),
-            "Completions should not be empty for alias"
-        );
-
-        let id_completion = completions.iter().find(|c| c.label == "id");
-        assert!(
-            id_completion.is_some(),
-            "id column should be in completions for alias u"
-        );
-
-        let email_completion = completions.iter().find(|c| c.label == "email");
-        assert!(
-            email_completion.is_some(),
-            "email column should be in completions for alias u"
-        );
+        // フィールド補完が動作することを確認
+        assert!(!completions.is_empty(), "Should have field completions for alias u in join condition");
+        assert!(completions.iter().any(|c| c.label == "id" && c.kind == Some(CompletionItemKind::FIELD)));
+        
+        // JOINメソッドの補完が出ないことを確認
+        assert!(!completions.iter().any(|c| c.label == "leftJoin" || c.label == "innerJoin"));
     }
+    
+    
+
 }

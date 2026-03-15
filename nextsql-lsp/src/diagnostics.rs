@@ -41,15 +41,14 @@ impl<'a> DiagnosticsProvider<'a> {
             Ok(Ok(_module)) => {
                 eprintln!("DiagnosticsProvider: Parse successful");
                 // パースが成功した場合、型検証を行う（スキーマがある場合のみ）
-                if let Some(_schema_cache) = &self.schema_cache {
+                if let Some(schema_cache) = &self.schema_cache {
                     if let Some(file_uri) = &self.file_uri {
                         eprintln!(
                             "DiagnosticsProvider: Schema cache available, file_uri: {}",
                             file_uri
                         );
-                        // 型検証は一旦スキップして、基本的な診断のみ行う
-                        // TODO: 型検証を有効にする場合は以下のコメントを外す
-                        // diagnostics.extend(self.validate_types(&module, schema_cache, file_uri).await);
+                        // 型検証を有効化
+                        diagnostics.extend(self.validate_types(&_module, schema_cache, file_uri).await);
                     }
                 }
             }
@@ -160,7 +159,6 @@ impl<'a> DiagnosticsProvider<'a> {
         }
     }
 
-    #[allow(dead_code)]
     async fn validate_types(
         &self,
         module: &Module,
@@ -199,7 +197,6 @@ impl<'a> DiagnosticsProvider<'a> {
         diagnostics
     }
 
-    #[allow(dead_code)]
     fn create_diagnostic_from_validation_error(&self, error: ValidationError) -> Diagnostic {
         // For now, we don't have exact positions, so we'll highlight the whole line
         // In a real implementation, we'd track positions during parsing
