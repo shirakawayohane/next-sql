@@ -1,6 +1,7 @@
 /target
 .claude/settings.local.json
-.envschema.sql
+.env
+schema.sql
 test_diagnostics
 test_diagnostics.rs
 test_type_check.nsql
