@@ -251,12 +251,114 @@ fn is_simple_wildcard_returning(returning: &[Column], table_name: &str) -> Optio
 
 // ── Row-field resolution ────────────────────────────────────────────────
 
+/// Extract the inner expression from an aggregate function expression.
+/// Works for both AggregateFunction AST nodes and Call expressions with aggregate names.
+fn extract_aggregate_inner_expr(expr: &Expression) -> Option<&Expression> {
+    match expr {
+        Expression::Atomic(AtomicExpression::Aggregate(af)) => Some(&af.expr),
+        Expression::Atomic(AtomicExpression::Call(call)) => {
+            match call.callee.as_str() {
+                "COUNT" | "SUM" | "AVG" | "MIN" | "MAX" => call.args.first(),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+/// Decompose a PropertyAccess chain into segments, mirroring the SQL gen logic.
+fn decompose_property_chain_for_type(pa: &PropertyAccess) -> Option<Vec<String>> {
+    let mut segments = Vec::new();
+    segments.push(pa.property.clone());
+
+    let mut current = &*pa.target;
+    loop {
+        match current {
+            Expression::Atomic(AtomicExpression::PropertyAccess(inner_pa)) => {
+                segments.push(inner_pa.property.clone());
+                current = &*inner_pa.target;
+            }
+            Expression::Atomic(AtomicExpression::Column(Column::ImplicitTarget(name, _))) => {
+                segments.push(name.clone());
+                break;
+            }
+            Expression::Atomic(AtomicExpression::Column(Column::ExplicitTarget(table, col, _))) => {
+                segments.push(col.clone());
+                segments.push(table.clone());
+                break;
+            }
+            _ => return None,
+        }
+    }
+    segments.reverse();
+    Some(segments)
+}
+
+/// Resolve the type of a PropertyAccess expression by looking up relations.
+/// Returns (rust_type, getter, valtype_wrapper) if resolution succeeds.
+fn resolve_property_access_type(
+    pa: &PropertyAccess,
+    _from_table: &str,
+    schema: &DatabaseSchema,
+    registry: &ValTypeRegistry,
+    rel_registry: &sql_gen::RelationRegistry,
+) -> Option<(String, String, Option<String>)> {
+    let segments = decompose_property_chain_for_type(pa)?;
+    if segments.len() < 3 {
+        return None;
+    }
+    // segments: [table, relation, column] (possibly more for nested)
+    let source_table = &segments[0];
+    let relation_name = &segments[1];
+    let column_name = &segments[2];
+
+    let rel_info = rel_registry.lookup(source_table, relation_name)?;
+    let target_table = &rel_info.returning_table;
+
+    let ts = schema.get_table(target_table)?;
+    let cs = ts.get_column(column_name)?;
+    let typ = effective_type(&cs.column_type, cs.nullable);
+    let field = make_row_field(column_name, target_table, &typ, registry);
+    Some((field.rust_type, field.getter, field.valtype_wrapper))
+}
+
+/// Try to resolve the type of an expression via relation access.
+/// This handles PropertyAccess expressions that resolve through relations.
+fn resolve_expr_type_via_relation(
+    expr: &Expression,
+    from_table: &str,
+    schema: &DatabaseSchema,
+    registry: &ValTypeRegistry,
+    rel_registry: &sql_gen::RelationRegistry,
+) -> Option<(String, String, Option<String>)> {
+    match expr {
+        Expression::Atomic(AtomicExpression::PropertyAccess(pa)) => {
+            resolve_property_access_type(pa, from_table, schema, registry, rel_registry)
+        }
+        Expression::Atomic(AtomicExpression::Column(col)) => {
+            match col {
+                Column::ExplicitTarget(table, column, _) => {
+                    let rf = field_from_schema(table, column, schema, registry)?;
+                    Some((rf.rust_type, rf.getter, rf.valtype_wrapper))
+                }
+                Column::ImplicitTarget(column, _) => {
+                    let rf = field_from_schema(from_table, column, schema, registry)?;
+                    Some((rf.rust_type, rf.getter, rf.valtype_wrapper))
+                }
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
 /// Resolve the list of `RowField`s produced by a select clause.
 fn resolve_select_fields(
     select_exprs: &[SelectExpression],
     from_table: &str,
     schema: &DatabaseSchema,
     registry: &ValTypeRegistry,
+    rel_registry: &sql_gen::RelationRegistry,
 ) -> Vec<RowField> {
     let mut fields = Vec::new();
     let mut col_idx: usize = 0;
@@ -266,7 +368,8 @@ fn resolve_select_fields(
         if let Some(ref alias) = sel.alias {
             let name = alias.clone();
             if let Some(func_type) = infer_aggregate_function_type(&sel.expr) {
-                let typ = aggregate_return_type(&func_type);
+                let inner_expr = extract_aggregate_inner_expr(&sel.expr);
+                let typ = aggregate_return_type_with_schema(&func_type, inner_expr, Some(schema));
                 fields.push(RowField {
                     name,
                     rust_type: nextsql_type_to_rust(&typ),
@@ -274,11 +377,16 @@ fn resolve_select_fields(
                     valtype_wrapper: None,
                 });
             } else {
+                // Try to resolve aliased PropertyAccess via relation
+                let resolved = resolve_expr_type_via_relation(&sel.expr, from_table, schema, registry, rel_registry);
+                let (rust_type, getter, valtype_wrapper) = resolved.unwrap_or_else(|| {
+                    ("String".to_string(), "get_string".to_string(), None)
+                });
                 fields.push(RowField {
                     name,
-                    rust_type: "String".to_string(),
-                    getter: "get_string".to_string(),
-                    valtype_wrapper: None,
+                    rust_type,
+                    getter,
+                    valtype_wrapper,
                 });
             }
             col_idx += 1;
@@ -338,7 +446,7 @@ fn resolve_select_fields(
             }
             // Aggregate expressions get default types
             Expression::Atomic(AtomicExpression::Aggregate(agg)) => {
-                let (name, typ) = aggregate_field_info(agg, col_idx);
+                let (name, typ) = aggregate_field_info(agg, col_idx, Some(schema));
                 fields.push(RowField {
                     name,
                     rust_type: nextsql_type_to_rust(&typ),
@@ -347,14 +455,18 @@ fn resolve_select_fields(
                 });
                 col_idx += 1;
             }
-            // PropertyAccess: use the last property name
+            // PropertyAccess: resolve via relation if possible
             Expression::Atomic(AtomicExpression::PropertyAccess(pa)) => {
                 let name = pa.property.clone();
+                let resolved = resolve_property_access_type(pa, from_table, schema, registry, rel_registry);
+                let (rust_type, getter, valtype_wrapper) = resolved.unwrap_or_else(|| {
+                    ("String".to_string(), "get_string".to_string(), None)
+                });
                 fields.push(RowField {
                     name,
-                    rust_type: "String".to_string(),
-                    getter: "get_string".to_string(),
-                    valtype_wrapper: None,
+                    rust_type,
+                    getter,
+                    valtype_wrapper,
                 });
                 col_idx += 1;
             }
@@ -375,7 +487,8 @@ fn resolve_select_fields(
                 let name = extract_name_from_expr(&sel.expr)
                     .unwrap_or_else(|| format!("col_{}", col_idx));
                 if let Some(func_type) = infer_aggregate_function_type(&sel.expr) {
-                    let typ = aggregate_return_type(&func_type);
+                    let inner_expr = extract_aggregate_inner_expr(&sel.expr);
+                    let typ = aggregate_return_type_with_schema(&func_type, inner_expr, Some(schema));
                     fields.push(RowField {
                         name,
                         rust_type: nextsql_type_to_rust(&typ),
@@ -482,14 +595,15 @@ fn infer_aggregate_function_type(expr: &Expression) -> Option<AggregateFunctionT
 fn resolve_aggregate_clause_fields(
     agg_exprs: &[AggregateExpression],
     _from_table: &str,
-    _schema: &DatabaseSchema,
+    schema: &DatabaseSchema,
 ) -> Vec<RowField> {
     let mut fields = Vec::new();
     for agg in agg_exprs {
         // The alias becomes the field name.
         // Try to infer type from the inner expression.
         if let Some(func_type) = infer_aggregate_function_type(&agg.expr) {
-            let typ = aggregate_return_type(&func_type);
+            let inner_expr = extract_aggregate_inner_expr(&agg.expr);
+            let typ = aggregate_return_type_with_schema(&func_type, inner_expr, Some(schema));
             fields.push(RowField {
                 name: agg.alias.clone(),
                 rust_type: nextsql_type_to_rust(&typ),
@@ -607,10 +721,41 @@ fn fallback_field(name: &str) -> RowField {
     }
 }
 
-fn aggregate_return_type(ft: &AggregateFunctionType) -> Type {
+/// Infer whether an expression involves a float type by inspecting column references
+/// against the schema. Returns true if any column in the expression is f32 or f64.
+fn expr_involves_float(expr: &Expression, schema: &DatabaseSchema) -> bool {
+    match expr {
+        Expression::Atomic(AtomicExpression::Column(col)) => {
+            let (table, column) = match col {
+                Column::ExplicitTarget(t, c, _) => (t.as_str(), c.as_str()),
+                _ => return false,
+            };
+            if let Some(ts) = schema.get_table(table) {
+                if let Some(cs) = ts.get_column(column) {
+                    return matches!(cs.column_type, Type::BuiltIn(BuiltInType::F32) | Type::BuiltIn(BuiltInType::F64));
+                }
+            }
+            false
+        }
+        Expression::Binary { left, right, .. } => {
+            expr_involves_float(left, schema) || expr_involves_float(right, schema)
+        }
+        _ => false,
+    }
+}
+
+fn aggregate_return_type_with_schema(ft: &AggregateFunctionType, inner_expr: Option<&Expression>, schema: Option<&DatabaseSchema>) -> Type {
     match ft {
         AggregateFunctionType::Count => Type::BuiltIn(BuiltInType::I64),
-        AggregateFunctionType::Sum => Type::BuiltIn(BuiltInType::I64),
+        AggregateFunctionType::Sum => {
+            // If the inner expression involves float columns, SUM returns f64
+            if let (Some(expr), Some(s)) = (inner_expr, schema) {
+                if expr_involves_float(expr, s) {
+                    return Type::BuiltIn(BuiltInType::F64);
+                }
+            }
+            Type::BuiltIn(BuiltInType::I64)
+        }
         AggregateFunctionType::Avg => Type::BuiltIn(BuiltInType::F64),
         AggregateFunctionType::Min | AggregateFunctionType::Max => {
             // Without knowing the column type we default to f64
@@ -619,7 +764,7 @@ fn aggregate_return_type(ft: &AggregateFunctionType) -> Type {
     }
 }
 
-fn aggregate_field_info(agg: &AggregateFunction, idx: usize) -> (String, Type) {
+fn aggregate_field_info(agg: &AggregateFunction, idx: usize, schema: Option<&DatabaseSchema>) -> (String, Type) {
     let name = match &agg.function_type {
         AggregateFunctionType::Count => "count",
         AggregateFunctionType::Sum => "sum",
@@ -627,7 +772,7 @@ fn aggregate_field_info(agg: &AggregateFunction, idx: usize) -> (String, Type) {
         AggregateFunctionType::Min => "min",
         AggregateFunctionType::Max => "max",
     };
-    let typ = aggregate_return_type(&agg.function_type);
+    let typ = aggregate_return_type_with_schema(&agg.function_type, Some(&agg.expr), schema);
     (format!("{}_{}", name, idx), typ)
 }
 
@@ -658,7 +803,7 @@ fn emit_params_struct(
 
     // to_params impl – order must match SQL $1, $2, ...
     out.push_str(&format!("impl {} {{\n", struct_name));
-    out.push_str("    fn to_params(&self) -> Vec<&dyn nextsql_backend_rust_runtime::ToSqlParam> {\n");
+    out.push_str("    fn to_params(&self) -> Vec<&dyn super::runtime::ToSqlParam> {\n");
     out.push_str("        vec![");
     for (i, pname) in param_order.iter().enumerate() {
         if i > 0 {
@@ -671,6 +816,73 @@ fn emit_params_struct(
     out.push_str("}\n\n");
 }
 
+/// Information about a Vec<ValType> param that needs unwrapping.
+struct VecValtypeParam {
+    /// The snake_case field name in the Params struct
+    field_name: String,
+    /// The Rust type of the inner value (e.g., "uuid::Uuid")
+    inner_rust_type: String,
+}
+
+/// Check if any argument has type Vec<ValType> and collect info for code generation.
+fn find_vec_valtype_params(args: &[Argument], param_order: &[String], registry: &ValTypeRegistry) -> Vec<VecValtypeParam> {
+    let mut result = Vec::new();
+    let arg_map: HashMap<String, &Argument> = args.iter().map(|a| (a.name.clone(), a)).collect();
+    for pname in param_order {
+        if let Some(arg) = arg_map.get(pname) {
+            if let Type::Array(inner) = &arg.typ {
+                if let Type::UserDefined(name) = inner.as_ref() {
+                    if let Some(base_type) = registry.valtypes.get(name) {
+                        result.push(VecValtypeParam {
+                            field_name: to_snake_case(&arg.name),
+                            inner_rust_type: nextsql_type_to_rust(&Type::BuiltIn(base_type.clone())),
+                        });
+                    }
+                }
+            }
+        }
+    }
+    result
+}
+
+/// Generate the parameter list expression, handling Vec<ValType> conversions.
+/// When there are Vec<ValType> params, generates local variables for the conversions
+/// and returns code that must be placed before the query call + the param refs expression.
+fn generate_params_with_conversions(
+    param_order: &[String],
+    args: &[Argument],
+    registry: &ValTypeRegistry,
+) -> (String, String) {
+    let vec_vt_params = find_vec_valtype_params(args, param_order, registry);
+    if vec_vt_params.is_empty() {
+        return (String::new(), "params.to_params()".to_string());
+    }
+
+    // Generate local conversion variables
+    let mut prelude = String::new();
+    let vt_fields: HashSet<String> = vec_vt_params.iter().map(|v| v.field_name.clone()).collect();
+    for vtp in &vec_vt_params {
+        prelude.push_str(&format!(
+            "    let __{}_inner: Vec<{}> = params.{}.iter().map(|v| v.0).collect();\n",
+            vtp.field_name, vtp.inner_rust_type, vtp.field_name
+        ));
+    }
+
+    // Build the param list inline
+    let mut refs = Vec::new();
+    for pname in param_order {
+        let field = to_snake_case(pname);
+        if vt_fields.contains(&field) {
+            refs.push(format!("&__{}_inner as &dyn super::runtime::ToSqlParam", field));
+        } else {
+            refs.push(format!("&params.{}", field));
+        }
+    }
+
+    let params_expr = format!("vec![{}]", refs.join(", "));
+    (prelude, params_expr)
+}
+
 /// Emit a Row struct + its `from_row` impl.
 fn emit_row_struct(out: &mut String, struct_name: &str, fields: &[RowField]) {
     out.push_str(&format!("pub struct {} {{\n", struct_name));
@@ -680,7 +892,7 @@ fn emit_row_struct(out: &mut String, struct_name: &str, fields: &[RowField]) {
     out.push_str("}\n\n");
 
     out.push_str(&format!("impl {} {{\n", struct_name));
-    out.push_str("    fn from_row(row: &dyn nextsql_backend_rust_runtime::Row) -> Self {\n");
+    out.push_str("    fn from_row(row: &dyn super::runtime::Row) -> Self {\n");
     out.push_str("        Self {\n");
     for (i, f) in fields.iter().enumerate() {
         let getter_expr = if let Some(ref wrapper) = f.valtype_wrapper {
@@ -705,21 +917,32 @@ fn emit_row_struct(out: &mut String, struct_name: &str, fields: &[RowField]) {
 }
 
 /// Emit an async executor function that calls `client.query()` and returns `Vec<Row>`.
+/// If `param_conversion` is Some, it contains (prelude_code, params_expression) for
+/// handling Vec<ValType> conversions. Otherwise uses `params.to_params()`.
 fn emit_query_fn(
     out: &mut String,
     fn_name: &str,
     params_struct: &str,
     row_struct: &str,
     sql: &str,
+    param_conversion: Option<&(String, String)>,
 ) {
     out.push_str(&format!(
-        "pub async fn {}(\n    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),\n    params: &{},\n) -> Result<Vec<{}>, Box<dyn std::error::Error + Send + Sync>> {{\n",
+        "pub async fn {}(\n    client: &(impl super::runtime::Client + ?Sized),\n    params: &{},\n) -> Result<Vec<{}>, Box<dyn std::error::Error + Send + Sync>> {{\n",
         fn_name, params_struct, row_struct
     ));
-    out.push_str(&format!(
-        "    let rows = client.query(\n        \"{}\",\n        &params.to_params(),\n    ).await?;\n",
-        sql.replace('\"', "\\\"")
-    ));
+    if let Some((prelude, params_expr)) = param_conversion {
+        out.push_str(prelude);
+        out.push_str(&format!(
+            "    let rows = client.query(\n        \"{}\",\n        &{},\n    ).await?;\n",
+            sql.replace('\"', "\\\""), params_expr
+        ));
+    } else {
+        out.push_str(&format!(
+            "    let rows = client.query(\n        \"{}\",\n        &params.to_params(),\n    ).await?;\n",
+            sql.replace('\"', "\\\"")
+        ));
+    }
     out.push_str(&format!(
         "    Ok(rows.iter().map(|row| {}::from_row(row)).collect())\n",
         row_struct
@@ -735,7 +958,7 @@ fn emit_query_fn_no_params(
     sql: &str,
 ) {
     out.push_str(&format!(
-        "pub async fn {}(\n    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),\n) -> Result<Vec<{}>, Box<dyn std::error::Error + Send + Sync>> {{\n",
+        "pub async fn {}(\n    client: &(impl super::runtime::Client + ?Sized),\n) -> Result<Vec<{}>, Box<dyn std::error::Error + Send + Sync>> {{\n",
         fn_name, row_struct
     ));
     out.push_str(&format!(
@@ -755,15 +978,24 @@ fn emit_execute_fn(
     fn_name: &str,
     params_struct: &str,
     sql: &str,
+    param_conversion: Option<&(String, String)>,
 ) {
     out.push_str(&format!(
-        "pub async fn {}(\n    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),\n    params: &{},\n) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {{\n",
+        "pub async fn {}(\n    client: &(impl super::runtime::Client + ?Sized),\n    params: &{},\n) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {{\n",
         fn_name, params_struct
     ));
-    out.push_str(&format!(
-        "    let count = client.execute(\n        \"{}\",\n        &params.to_params(),\n    ).await?;\n",
-        sql.replace('\"', "\\\"")
-    ));
+    if let Some((prelude, params_expr)) = param_conversion {
+        out.push_str(prelude);
+        out.push_str(&format!(
+            "    let count = client.execute(\n        \"{}\",\n        &{},\n    ).await?;\n",
+            sql.replace('\"', "\\\""), params_expr
+        ));
+    } else {
+        out.push_str(&format!(
+            "    let count = client.execute(\n        \"{}\",\n        &params.to_params(),\n    ).await?;\n",
+            sql.replace('\"', "\\\"")
+        ));
+    }
     out.push_str("    Ok(count)\n");
     out.push_str("}\n\n");
 }
@@ -775,7 +1007,7 @@ fn emit_execute_fn_no_params(
     sql: &str,
 ) {
     out.push_str(&format!(
-        "pub async fn {}(\n    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),\n) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {{\n",
+        "pub async fn {}(\n    client: &(impl super::runtime::Client + ?Sized),\n) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {{\n",
         fn_name
     ));
     out.push_str(&format!(
@@ -793,8 +1025,9 @@ fn emit_mutation_query_fn(
     params_struct: &str,
     row_struct: &str,
     sql: &str,
+    param_conversion: Option<&(String, String)>,
 ) {
-    emit_query_fn(out, fn_name, params_struct, row_struct, sql);
+    emit_query_fn(out, fn_name, params_struct, row_struct, sql, param_conversion);
 }
 
 // ── Extracting select fields from query clauses ─────────────────────────
@@ -864,7 +1097,7 @@ fn generate_query(out: &mut String, query: &Query, schema: &DatabaseSchema, mode
         };
 
         if let Some(sel) = select_clause {
-            let mut select_fields = resolve_select_fields(sel, &stmt.from.table, schema, registry);
+            let mut select_fields = resolve_select_fields(sel, &stmt.from.table, schema, registry, rel_registry);
             // Replace fallback fields that match aggregate aliases with properly typed versions
             for field in &mut select_fields {
                 if let Some(agg_field) = aggregate_field_map.get(&field.name) {
@@ -922,7 +1155,9 @@ fn generate_query(out: &mut String, query: &Query, schema: &DatabaseSchema, mode
 
     // Executor function
     if has_params {
-        emit_query_fn(out, &fn_name, &params_struct, &effective_row_struct, &gen.sql);
+        let conversion = generate_params_with_conversions(&gen.params, &query.decl.arguments, registry);
+        let conv_ref = if conversion.0.is_empty() { None } else { Some(&conversion) };
+        emit_query_fn(out, &fn_name, &params_struct, &effective_row_struct, &gen.sql, conv_ref);
     } else {
         emit_query_fn_no_params(out, &fn_name, &effective_row_struct, &gen.sql);
     }
@@ -952,6 +1187,11 @@ fn generate_mutation(out: &mut String, mutation: &Mutation, schema: &DatabaseSch
                             );
                         }
 
+                        let conversion = if has_params {
+                            let c = generate_params_with_conversions(&gen.params, &mutation.decl.arguments, registry);
+                            if c.0.is_empty() { None } else { Some(c) }
+                        } else { None };
+
                         if let Some(ref returning) = insert.returning {
                             let use_model = is_simple_wildcard_returning(returning, &insert.into);
                             let effective_row = if let Some(ref tbl) = use_model {
@@ -970,59 +1210,86 @@ fn generate_mutation(out: &mut String, mutation: &Mutation, schema: &DatabaseSch
                                     &params_struct,
                                     &effective_row,
                                     &gen.sql,
+                                    conversion.as_ref(),
                                 );
                             } else {
                                 emit_query_fn_no_params(out, &fn_name, &effective_row, &gen.sql);
                             }
                         } else if has_params {
-                            emit_execute_fn(out, &fn_name, &params_struct, &gen.sql);
+                            emit_execute_fn(out, &fn_name, &params_struct, &gen.sql, conversion.as_ref());
                         } else {
                             emit_execute_fn_no_params(out, &fn_name, &gen.sql);
                         }
                     }
                     MutationStatement::Update(update) => {
-                        let gen = sql_gen::generate_update_sql_with_relations(update, rel_registry);
-                        let has_params = !mutation.decl.arguments.is_empty();
-                        if has_params {
-                            emit_params_struct(
-                                out,
-                                &params_struct,
-                                &mutation.decl.arguments,
-                                &gen.params,
-                                registry,
-                            );
-                        }
+                        // Check if this is an Updatable (dynamic SET) mutation
+                        let updatable_info = find_updatable_param(
+                            &mutation.decl.arguments,
+                            update.set_variable.as_deref(),
+                        );
 
-                        if let Some(ref returning) = update.returning {
-                            let use_model = is_simple_wildcard_returning(returning, &update.target.name);
-                            let effective_row = if let Some(ref tbl) = use_model {
-                                model_tables.insert(tbl.clone());
-                                table_name_to_model_name(tbl)
-                            } else {
-                                let fields = resolve_returning_fields(
-                                    returning,
-                                    &update.target.name,
-                                    schema,
+                        if let Some((updatable_var_name, updatable_table_name)) = updatable_info {
+                            generate_updatable_mutation(
+                                out,
+                                mutation,
+                                update,
+                                &updatable_var_name,
+                                &updatable_table_name,
+                                schema,
+                                model_tables,
+                                registry,
+                                rel_registry,
+                            );
+                        } else {
+                            let gen = sql_gen::generate_update_sql_with_relations(update, rel_registry);
+                            let has_params = !mutation.decl.arguments.is_empty();
+                            if has_params {
+                                emit_params_struct(
+                                    out,
+                                    &params_struct,
+                                    &mutation.decl.arguments,
+                                    &gen.params,
                                     registry,
                                 );
-                                emit_row_struct(out, &row_struct, &fields);
-                                row_struct.clone()
-                            };
-                            if has_params {
-                                emit_mutation_query_fn(
-                                    out,
-                                    &fn_name,
-                                    &params_struct,
-                                    &effective_row,
-                                    &gen.sql,
-                                );
-                            } else {
-                                emit_query_fn_no_params(out, &fn_name, &effective_row, &gen.sql);
                             }
-                        } else if has_params {
-                            emit_execute_fn(out, &fn_name, &params_struct, &gen.sql);
-                        } else {
-                            emit_execute_fn_no_params(out, &fn_name, &gen.sql);
+
+                            let conversion = if has_params {
+                                let c = generate_params_with_conversions(&gen.params, &mutation.decl.arguments, registry);
+                                if c.0.is_empty() { None } else { Some(c) }
+                            } else { None };
+
+                            if let Some(ref returning) = update.returning {
+                                let use_model = is_simple_wildcard_returning(returning, &update.target.name);
+                                let effective_row = if let Some(ref tbl) = use_model {
+                                    model_tables.insert(tbl.clone());
+                                    table_name_to_model_name(tbl)
+                                } else {
+                                    let fields = resolve_returning_fields(
+                                        returning,
+                                        &update.target.name,
+                                        schema,
+                                        registry,
+                                    );
+                                    emit_row_struct(out, &row_struct, &fields);
+                                    row_struct.clone()
+                                };
+                                if has_params {
+                                    emit_mutation_query_fn(
+                                        out,
+                                        &fn_name,
+                                        &params_struct,
+                                        &effective_row,
+                                        &gen.sql,
+                                        conversion.as_ref(),
+                                    );
+                                } else {
+                                    emit_query_fn_no_params(out, &fn_name, &effective_row, &gen.sql);
+                                }
+                            } else if has_params {
+                                emit_execute_fn(out, &fn_name, &params_struct, &gen.sql, conversion.as_ref());
+                            } else {
+                                emit_execute_fn_no_params(out, &fn_name, &gen.sql);
+                            }
                         }
                     }
                     MutationStatement::Delete(delete) => {
@@ -1037,6 +1304,11 @@ fn generate_mutation(out: &mut String, mutation: &Mutation, schema: &DatabaseSch
                                 registry,
                             );
                         }
+
+                        let conversion = if has_params {
+                            let c = generate_params_with_conversions(&gen.params, &mutation.decl.arguments, registry);
+                            if c.0.is_empty() { None } else { Some(c) }
+                        } else { None };
 
                         if let Some(ref returning) = delete.returning {
                             let use_model = is_simple_wildcard_returning(returning, &delete.target.name);
@@ -1060,12 +1332,13 @@ fn generate_mutation(out: &mut String, mutation: &Mutation, schema: &DatabaseSch
                                     &params_struct,
                                     &effective_row,
                                     &gen.sql,
+                                    conversion.as_ref(),
                                 );
                             } else {
                                 emit_query_fn_no_params(out, &fn_name, &effective_row, &gen.sql);
                             }
                         } else if has_params {
-                            emit_execute_fn(out, &fn_name, &params_struct, &gen.sql);
+                            emit_execute_fn(out, &fn_name, &params_struct, &gen.sql, conversion.as_ref());
                         } else {
                             emit_execute_fn_no_params(out, &fn_name, &gen.sql);
                         }
@@ -1073,6 +1346,346 @@ fn generate_mutation(out: &mut String, mutation: &Mutation, schema: &DatabaseSch
                 }
             }
         }
+    }
+}
+
+// ── Updatable (dynamic SET) codegen ─────────────────────────────────────
+
+/// Check if any parameter is `Updatable<table>` and matches the set_variable.
+/// Returns Some((variable_name, table_name)) if found.
+fn find_updatable_param(
+    args: &[Argument],
+    set_variable: Option<&str>,
+) -> Option<(String, String)> {
+    // If there's an explicit set_variable, find the matching Updatable param
+    if let Some(var_name) = set_variable {
+        for arg in args {
+            if arg.name == var_name {
+                if let Type::Utility(UtilityType::Updatable(Updatable(inner))) = &arg.typ {
+                    if let Type::UserDefined(table_name) = inner.as_ref() {
+                        return Some((var_name.to_string(), table_name.clone()));
+                    }
+                }
+            }
+        }
+    }
+    // Also check if any param is Updatable even without set_variable
+    // (for cases where the set clause is a variable reference)
+    for arg in args {
+        if let Type::Utility(UtilityType::Updatable(Updatable(inner))) = &arg.typ {
+            if let Type::UserDefined(table_name) = inner.as_ref() {
+                return Some((arg.name.clone(), table_name.clone()));
+            }
+        }
+    }
+    None
+}
+
+/// Generate the Changes struct, Default impl, Params struct, and dynamic UPDATE function
+/// for an Updatable mutation.
+fn generate_updatable_mutation(
+    out: &mut String,
+    mutation: &Mutation,
+    update: &Update,
+    updatable_var_name: &str,
+    updatable_table_name: &str,
+    schema: &DatabaseSchema,
+    model_tables: &mut HashSet<String>,
+    registry: &ValTypeRegistry,
+    _rel_registry: &sql_gen::RelationRegistry,
+) {
+    let name = &mutation.decl.name;
+    let fn_name = to_snake_case(name);
+    let pascal = to_pascal_case(name);
+    let changes_struct = format!("{}Changes", pascal);
+    let params_struct = format!("{}Params", pascal);
+    let row_struct = format!("{}Row", pascal);
+
+    let table = match schema.get_table(updatable_table_name) {
+        Some(t) => t,
+        None => return, // table not found in schema
+    };
+
+    // Get non-PK columns for the Changes struct
+    let updatable_columns: Vec<&nextsql_core::schema::ColumnSchema> = table
+        .columns
+        .iter()
+        .filter(|c| !c.primary_key)
+        .collect();
+
+    // ── Changes struct ──
+    out.push_str(&format!("pub struct {} {{\n", changes_struct));
+    for col in &updatable_columns {
+        let inner_type = column_to_rust_type(col, &table.name, registry);
+        out.push_str(&format!(
+            "    pub {}: super::runtime::UpdateField<{}>,\n",
+            to_snake_case(&col.name),
+            inner_type,
+        ));
+    }
+    out.push_str("}\n\n");
+
+    // ── Default impl ──
+    out.push_str(&format!("impl Default for {} {{\n", changes_struct));
+    out.push_str("    fn default() -> Self {\n");
+    out.push_str("        Self {\n");
+    for col in &updatable_columns {
+        out.push_str(&format!(
+            "            {}: super::runtime::UpdateField::Unchanged,\n",
+            to_snake_case(&col.name),
+        ));
+    }
+    out.push_str("        }\n");
+    out.push_str("    }\n");
+    out.push_str("}\n\n");
+
+    // ── Params struct ──
+    // Non-updatable args get normal types, the updatable arg gets the Changes struct type.
+    out.push_str(&format!("pub struct {} {{\n", params_struct));
+    for arg in &mutation.decl.arguments {
+        if arg.name == updatable_var_name {
+            out.push_str(&format!(
+                "    pub {}: {},\n",
+                to_snake_case(&arg.name),
+                changes_struct,
+            ));
+        } else {
+            let rust_type = match &arg.typ {
+                Type::UserDefined(name) if registry.is_valtype(name) => name.clone(),
+                other => nextsql_type_to_rust(other),
+            };
+            out.push_str(&format!(
+                "    pub {}: {},\n",
+                to_snake_case(&arg.name),
+                rust_type,
+            ));
+        }
+    }
+    out.push_str("}\n\n");
+
+    // ── Determine return type ──
+    let has_returning = update.returning.is_some();
+    let effective_row = if let Some(ref returning) = update.returning {
+        let use_model = is_simple_wildcard_returning(returning, &update.target.name);
+        if let Some(ref tbl) = use_model {
+            model_tables.insert(tbl.clone());
+            Some(table_name_to_model_name(tbl))
+        } else {
+            let fields = resolve_returning_fields(returning, &update.target.name, schema, registry);
+            emit_row_struct(out, &row_struct, &fields);
+            Some(row_struct.clone())
+        }
+    } else {
+        None
+    };
+
+    // ── Dynamic UPDATE function ──
+    if has_returning {
+        let row_type = effective_row.as_ref().unwrap();
+        out.push_str(&format!(
+            "pub async fn {}(\n    client: &(impl super::runtime::Client + ?Sized),\n    params: &{},\n) -> Result<Vec<{}>, Box<dyn std::error::Error + Send + Sync>> {{\n",
+            fn_name, params_struct, row_type,
+        ));
+    } else {
+        out.push_str(&format!(
+            "pub async fn {}(\n    client: &(impl super::runtime::Client + ?Sized),\n    params: &{},\n) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {{\n",
+            fn_name, params_struct,
+        ));
+    }
+
+    out.push_str("    let mut set_parts: Vec<String> = Vec::new();\n");
+    out.push_str("    let mut bind_params: Vec<&dyn super::runtime::ToSqlParam> = Vec::new();\n");
+    out.push_str("    let mut idx = 1usize;\n\n");
+
+    // Collect non-updatable params that appear in WHERE clause.
+    // We need to determine which arguments are used in the WHERE clause (non-updatable params).
+    let non_updatable_args: Vec<&Argument> = mutation
+        .decl
+        .arguments
+        .iter()
+        .filter(|a| a.name != updatable_var_name)
+        .collect();
+
+    // Bind non-updatable params first and track their indices
+    for arg in &non_updatable_args {
+        let snake_name = to_snake_case(&arg.name);
+        out.push_str(&format!("    bind_params.push(&params.{});\n", snake_name));
+        out.push_str(&format!("    let {}_idx = idx;\n", snake_name));
+        out.push_str("    idx += 1;\n\n");
+    }
+
+    // Dynamic SET fields
+    let updatable_snake = to_snake_case(updatable_var_name);
+    for col in &updatable_columns {
+        let col_snake = to_snake_case(&col.name);
+        out.push_str(&format!(
+            "    if params.{}.{}.is_set() {{\n",
+            updatable_snake, col_snake,
+        ));
+        out.push_str(&format!(
+            "        set_parts.push(format!(\"{} = ${{}}\", idx));\n",
+            col.name,
+        ));
+        out.push_str(&format!(
+            "        bind_params.push(&params.{}.{});\n",
+            updatable_snake, col_snake,
+        ));
+        out.push_str("        idx += 1;\n");
+        out.push_str("    }\n");
+    }
+
+    // Early return if nothing to update
+    out.push_str("\n    if set_parts.is_empty() {\n");
+    if has_returning {
+        out.push_str("        return Ok(Vec::new());\n");
+    } else {
+        out.push_str("        return Ok(0);\n");
+    }
+    out.push_str("    }\n\n");
+
+    // Build the SQL dynamically
+    // Generate the WHERE clause using the same SQL gen logic to get the template
+    let where_sql = if let Some(ref where_clause) = update.where_clause {
+        let mut where_parts = String::new();
+        generate_where_sql_template(&mut where_parts, where_clause, &non_updatable_args);
+        Some(where_parts)
+    } else {
+        None
+    };
+
+    // Build returning columns string
+    let returning_sql = if let Some(ref returning) = update.returning {
+        let cols: Vec<String> = returning.iter().map(|c| format_column_sql(c)).collect();
+        Some(cols.join(", "))
+    } else {
+        None
+    };
+
+    // Emit the format! call
+    let mut format_args = Vec::new();
+    out.push_str("    let sql = format!(\n        \"UPDATE ");
+    out.push_str(&update.target.name);
+    out.push_str(" SET {}");
+
+    if let Some(ref where_sql) = where_sql {
+        out.push_str(&format!(" WHERE {}", where_sql));
+    }
+
+    if let Some(ref ret_sql) = returning_sql {
+        out.push_str(&format!(" RETURNING {}", ret_sql));
+    }
+
+    out.push_str("\",\n        set_parts.join(\", \"),\n");
+
+    // Add format args for WHERE clause placeholders
+    for arg in &non_updatable_args {
+        let snake_name = to_snake_case(&arg.name);
+        format_args.push(format!("        {}_idx", snake_name));
+    }
+    if !format_args.is_empty() {
+        out.push_str(&format_args.join(",\n"));
+        out.push('\n');
+    }
+
+    out.push_str("    );\n");
+
+    // Execute
+    if has_returning {
+        let row_type = effective_row.as_ref().unwrap();
+        out.push_str("    let rows = client.query(&sql, &bind_params).await?;\n");
+        out.push_str(&format!(
+            "    Ok(rows.iter().map(|row| {}::from_row(row)).collect())\n",
+            row_type,
+        ));
+    } else {
+        out.push_str("    let count = client.execute(&sql, &bind_params).await?;\n");
+        out.push_str("    Ok(count)\n");
+    }
+    out.push_str("}\n\n");
+}
+
+/// Generate a Rust type string for a column, respecting nullability and valtype overrides.
+fn column_to_rust_type(
+    col: &nextsql_core::schema::ColumnSchema,
+    table_name: &str,
+    registry: &ValTypeRegistry,
+) -> String {
+    let typ = effective_type(&col.column_type, col.nullable);
+    if let Some((vt_name, _)) = registry.lookup(table_name, &col.name) {
+        match &typ {
+            Type::Optional(_) => format!("Option<{}>", vt_name),
+            _ => vt_name.clone(),
+        }
+    } else {
+        nextsql_type_to_rust(&typ)
+    }
+}
+
+/// Generate a WHERE clause SQL template with `${}` placeholders for format! args.
+/// Each variable reference becomes `${}`  which will be filled by `{var}_idx` at runtime.
+fn generate_where_sql_template(
+    out: &mut String,
+    expr: &Expression,
+    non_updatable_args: &[&Argument],
+) {
+    match expr {
+        Expression::Binary { left, op, right } => {
+            generate_where_sql_template(out, left, non_updatable_args);
+            let op_str = match op {
+                BinaryOp::Equal => " = ",
+                BinaryOp::Unequal => " != ",
+                BinaryOp::LessThan => " < ",
+                BinaryOp::LessThanOrEqual => " <= ",
+                BinaryOp::GreaterThan => " > ",
+                BinaryOp::GreaterThanOrEqual => " >= ",
+                BinaryOp::And => " AND ",
+                BinaryOp::Or => " OR ",
+                BinaryOp::Add => " + ",
+                BinaryOp::Subtract => " - ",
+                BinaryOp::Multiply => " * ",
+                BinaryOp::Divide => " / ",
+                BinaryOp::Remainder => " % ",
+            };
+            out.push_str(op_str);
+            generate_where_sql_template(out, right, non_updatable_args);
+        }
+        Expression::Unary { op, expr } => {
+            match op {
+                UnaryOp::Not => out.push_str("NOT "),
+            }
+            generate_where_sql_template(out, expr, non_updatable_args);
+        }
+        Expression::Atomic(atomic) => {
+            match atomic {
+                AtomicExpression::Column(col) => {
+                    out.push_str(&format_column_sql(col));
+                }
+                AtomicExpression::Variable(_var) => {
+                    // Use ${} placeholder for format! substitution
+                    out.push_str("${}");
+                }
+                AtomicExpression::Literal(lit) => {
+                    match lit {
+                        Literal::Numeric(n) => out.push_str(&n.to_string()),
+                        Literal::String(s) => out.push_str(&format!("'{}'", s)),
+                        Literal::Boolean(b) => out.push_str(if *b { "TRUE" } else { "FALSE" }),
+                        Literal::Null => out.push_str("NULL"),
+                        _ => {}
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+/// Format a Column AST node to SQL string.
+fn format_column_sql(col: &Column) -> String {
+    match col {
+        Column::ExplicitTarget(table, column, _) => format!("{}.{}", table, column),
+        Column::ImplicitTarget(column, _) => column.clone(),
+        Column::WildcardOf(table, _) => format!("{}.*", table),
+        Column::Wildcard(_) => "*".to_string(),
     }
 }
 
@@ -1116,7 +1729,7 @@ pub fn generate_valtype_file(modules: &[&Module]) -> GeneratedRustFile {
     for (name, base_type) in sorted {
         let rust_base = nextsql_type_to_rust(&Type::BuiltIn(base_type.clone()));
         out.push_str(&format!("pub struct {}(pub {});\n\n", name, rust_base));
-        out.push_str(&format!("impl nextsql_backend_rust_runtime::ToSqlParam for {} {{\n", name));
+        out.push_str(&format!("impl super::runtime::ToSqlParam for {} {{\n", name));
         out.push_str("    fn as_any(&self) -> &(dyn std::any::Any + Send + Sync) {\n");
         out.push_str("        &self.0\n");
         out.push_str("    }\n");
@@ -1200,7 +1813,7 @@ fn generate_valtype_structs(out: &mut String, registry: &ValTypeRegistry) {
     for (name, base_type) in valtypes {
         let rust_base = nextsql_type_to_rust(&Type::BuiltIn(base_type.clone()));
         out.push_str(&format!("pub struct {}(pub {});\n\n", name, rust_base));
-        out.push_str(&format!("impl nextsql_backend_rust_runtime::ToSqlParam for {} {{\n", name));
+        out.push_str(&format!("impl super::runtime::ToSqlParam for {} {{\n", name));
         out.push_str("    fn as_any(&self) -> &(dyn std::any::Any + Send + Sync) {\n");
         out.push_str("        &self.0\n");
         out.push_str("    }\n");
@@ -1348,7 +1961,7 @@ mod tests {
         // Verify Params struct
         assert!(result.contains("pub struct FindUserByIdParams {"));
         assert!(result.contains("pub id: uuid::Uuid,"));
-        assert!(result.contains("fn to_params(&self) -> Vec<&dyn nextsql_backend_rust_runtime::ToSqlParam>"));
+        assert!(result.contains("fn to_params(&self) -> Vec<&dyn super::runtime::ToSqlParam>"));
         assert!(result.contains("&self.id"));
 
         // Verify Row struct
@@ -1358,7 +1971,7 @@ mod tests {
         assert!(result.contains("pub email: String,"));
 
         // Verify from_row
-        assert!(result.contains("fn from_row(row: &dyn nextsql_backend_rust_runtime::Row) -> Self"));
+        assert!(result.contains("fn from_row(row: &dyn super::runtime::Row) -> Self"));
         assert!(result.contains("row.get_uuid(0)"));
         assert!(result.contains("row.get_string(1)"));
         assert!(result.contains("row.get_string(2)"));
@@ -1905,7 +2518,7 @@ mod tests {
         // Verify valtype struct is generated
         assert!(result.contains("pub struct UserId(pub uuid::Uuid)"), "missing valtype struct: {}", result);
         // Verify ToSqlParam impl
-        assert!(result.contains("impl nextsql_backend_rust_runtime::ToSqlParam for UserId"), "missing ToSqlParam impl: {}", result);
+        assert!(result.contains("impl super::runtime::ToSqlParam for UserId"), "missing ToSqlParam impl: {}", result);
         // Verify User model uses UserId for id field
         assert!(result.contains("pub id: UserId"), "id should be UserId: {}", result);
         // Verify from_row wraps with UserId
@@ -2050,8 +2663,8 @@ query countOrdersByStatus() {
 
         // COUNT should produce i64
         assert!(content.contains("pub order_count: i64"), "COUNT should produce i64, got:\n{}", content);
-        // SUM should produce i64
-        assert!(content.contains("pub total_amount: i64"), "SUM should produce i64, got:\n{}", content);
+        // SUM over f64 column should produce f64
+        assert!(content.contains("pub total_amount: f64"), "SUM over f64 should produce f64, got:\n{}", content);
         // AVG should produce f64
         assert!(content.contains("pub avg_amount: f64"), "AVG should produce f64, got:\n{}", content);
         // MIN should produce f64
@@ -2060,5 +2673,186 @@ query countOrdersByStatus() {
         assert!(content.contains("pub max_amount: f64"), "MAX should produce f64, got:\n{}", content);
         // status should remain String (from schema)
         assert!(content.contains("pub status: String"), "status should remain String");
+    }
+
+    #[test]
+    fn test_updatable_codegen() {
+        let input = r#"
+            valtype AddressId = uuid for addresses.id
+
+            mutation updateAddress($id: AddressId, $changes: Updatable<addresses>) {
+                update(addresses)
+                .where(addresses.id == $id)
+                .set($changes)
+            }
+        "#;
+        let module = nextsql_core::parser::parse_module(input).unwrap();
+        let mut schema = DatabaseSchema::new();
+        let mut table = TableSchema::new("addresses".to_string());
+        table.add_column(ColumnSchema {
+            name: "id".to_string(),
+            column_type: Type::BuiltIn(BuiltInType::Uuid),
+            nullable: false,
+            primary_key: true,
+            has_default: true,
+            default_value: None,
+        });
+        table.add_column(ColumnSchema {
+            name: "city".to_string(),
+            column_type: Type::BuiltIn(BuiltInType::String),
+            nullable: false,
+            primary_key: false,
+            has_default: false,
+            default_value: None,
+        });
+        table.add_column(ColumnSchema {
+            name: "notes".to_string(),
+            column_type: Type::BuiltIn(BuiltInType::String),
+            nullable: true,
+            primary_key: false,
+            has_default: false,
+            default_value: None,
+        });
+        schema.add_table(table);
+
+        let result = generate_rust_file(&module, &schema);
+        let content = &result.content;
+
+        // Should have UpdateField in the Changes struct
+        assert!(content.contains("UpdateField<String>"), "city should be UpdateField<String>: {}", content);
+        assert!(content.contains("UpdateField<Option<String>>"), "notes should be UpdateField<Option<String>>: {}", content);
+        // Should have Default impl
+        assert!(content.contains("impl Default for"), "Should have Default impl: {}", content);
+        assert!(content.contains("Unchanged"), "Default should use Unchanged: {}", content);
+        // Should have dynamic SQL building
+        assert!(content.contains("set_parts"), "Should build SET parts dynamically: {}", content);
+        assert!(content.contains("is_set()"), "Should check is_set(): {}", content);
+        // Should have Changes struct
+        assert!(content.contains("pub struct UpdateAddressChanges"), "Should have Changes struct: {}", content);
+        // Should have Params struct with changes field
+        assert!(content.contains("pub changes: UpdateAddressChanges"), "Should have changes field in Params: {}", content);
+        // Should have id param with valtype
+        assert!(content.contains("pub id: AddressId"), "Should have id with AddressId type: {}", content);
+        // Should return Result<u64>
+        assert!(content.contains("Result<u64,"), "Should return u64 for non-returning: {}", content);
+    }
+
+    #[test]
+    fn test_updatable_codegen_with_returning() {
+        let input = r#"
+            mutation updateAddress($id: uuid, $changes: Updatable<addresses>) {
+                update(addresses)
+                .where(addresses.id == $id)
+                .set($changes)
+                .returning(addresses.*)
+            }
+        "#;
+        let module = nextsql_core::parser::parse_module(input).unwrap();
+        let mut schema = DatabaseSchema::new();
+        let mut table = TableSchema::new("addresses".to_string());
+        table.add_column(ColumnSchema {
+            name: "id".to_string(),
+            column_type: Type::BuiltIn(BuiltInType::Uuid),
+            nullable: false,
+            primary_key: true,
+            has_default: true,
+            default_value: None,
+        });
+        table.add_column(ColumnSchema {
+            name: "city".to_string(),
+            column_type: Type::BuiltIn(BuiltInType::String),
+            nullable: false,
+            primary_key: false,
+            has_default: false,
+            default_value: None,
+        });
+        schema.add_table(table);
+
+        let result = generate_rust_file(&module, &schema);
+        let content = &result.content;
+
+        // Should have RETURNING with model struct
+        assert!(content.contains("pub struct Addresse {") || content.contains("pub struct Address {"),
+            "Should have model struct for returning: {}", content);
+        // Should return Vec, not u64
+        assert!(content.contains("Result<Vec<"), "Should return Vec for returning: {}", content);
+        // Should use client.query
+        assert!(content.contains("client.query(&sql"), "Should use client.query for returning: {}", content);
+    }
+
+    #[test]
+    fn test_aliased_select_type_from_schema() {
+        // Schema: payees table with expense_id as uuid
+        let mut schema = DatabaseSchema::new();
+        let mut table = TableSchema::new("payees".to_string());
+        table.add_column(ColumnSchema {
+            name: "id".to_string(),
+            column_type: Type::BuiltIn(BuiltInType::Uuid),
+            nullable: false,
+            primary_key: true,
+            has_default: true,
+            default_value: Some("gen_random_uuid()".to_string()),
+        });
+        table.add_column(ColumnSchema {
+            name: "expense_id".to_string(),
+            column_type: Type::BuiltIn(BuiltInType::Uuid),
+            nullable: false,
+            primary_key: false,
+            has_default: false,
+            default_value: None,
+        });
+        schema.add_table(table);
+
+        // query getPayee() {
+        //   from(payees)
+        //   .select(app_id: payees.expense_id)
+        // }
+        let module = Module {
+            toplevels: vec![TopLevel::Query(Query {
+                decl: QueryDecl {
+                    name: "getPayee".to_string(),
+                    arguments: vec![],
+                },
+                body: QueryBody {
+                    statements: vec![QueryStatement::Select(SelectStatement {
+                        from: FromExpr {
+                            table: "payees".to_string(),
+                            joins: vec![],
+                            span: None,
+                        },
+                        clauses: vec![
+                            QueryClause::Select(vec![
+                                SelectExpression {
+                                    expr: Expression::Atomic(AtomicExpression::Column(
+                                        Column::ExplicitTarget(
+                                            "payees".to_string(),
+                                            "expense_id".to_string(),
+                                            None,
+                                        ),
+                                    )),
+                                    alias: Some("app_id".to_string()),
+                                },
+                            ]),
+                        ],
+                        unions: vec![],
+                    })],
+                },
+            })],
+        };
+
+        let result = generate_rust_file(&module, &schema);
+        let content = &result.content;
+
+        // Should have app_id as uuid::Uuid, NOT String
+        assert!(
+            content.contains("pub app_id: uuid::Uuid"),
+            "Aliased column should resolve to uuid::Uuid, not String. Got: {}",
+            content
+        );
+        assert!(
+            !content.contains("pub app_id: String"),
+            "Aliased column should NOT be String. Got: {}",
+            content
+        );
     }
 }

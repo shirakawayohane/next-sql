@@ -137,6 +137,24 @@ pub fn generate(config: &CodegenConfig, schema: &DatabaseSchema) -> CodegenResul
                 }
             }
 
+            // Generate runtime.rs with embedded runtime definitions
+            {
+                let runtime_content = nextsql_backend_rust::runtime_gen::generate_runtime();
+                let runtime_path = config.output_dir.join("runtime.rs");
+                match std::fs::write(&runtime_path, &runtime_content) {
+                    Ok(_) => {
+                        result.generated_files.push(runtime_path);
+                        module_names.push("runtime".to_string());
+                    }
+                    Err(e) => {
+                        result.errors.push(format!(
+                            "Failed to write runtime.rs: {}",
+                            e
+                        ));
+                    }
+                }
+            }
+
             // Generate each module
             for (module_name, module) in &parsed_modules {
                 let generated =

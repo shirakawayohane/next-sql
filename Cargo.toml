@@ -32,8 +32,6 @@ targets = [
 ]
 # The installers to generate for each app
 installers = ["shell", "powershell"]
-# Publish jobs to run in CI
-publish-jobs = ["./publish-crates"]
 # Whether to install an updater program
 install-update-url = "https://github.com/shirakawayohane/next-sql/releases/latest"
 # Path that installers should place binaries in

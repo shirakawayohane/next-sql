@@ -41,22 +41,18 @@ fn test_generated_code_compiles() {
         result.errors
     );
 
-    // Write Cargo.toml with absolute path to runtime crate
-    let runtime_path = project_root().join("nextsql-backend-rust/runtime");
-
-    let cargo_toml = format!(
-        r#"[package]
+    // Write Cargo.toml with dependencies needed by the generated runtime.rs
+    let cargo_toml = r#"[package]
 name = "nextsql-compile-test"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-nextsql-backend-rust-runtime = {{ path = "{}" }}
-uuid = {{ version = "1", features = ["v4"] }}
-chrono = {{ version = "0.4" }}
-"#,
-        runtime_path.display()
-    );
+tokio-postgres = { version = "0.7", features = ["with-uuid-1", "with-chrono-0_4"] }
+bytes = "1"
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4" }
+"#;
 
     std::fs::write(temp_dir.join("Cargo.toml"), cargo_toml).unwrap();
 
