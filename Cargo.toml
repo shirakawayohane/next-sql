@@ -2,6 +2,39 @@
 members = [
     "nextsql-core",
     "nextsql-cli",
-    "nextsql-lsp"
+    "nextsql-lsp",
+    "nextsql-backend-rust",
+    "nextsql-backend-rust/runtime",
+    "nextsql-codegen",
+    "tests/e2e",
 ]
 resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/shirakawayohane/next-sql"
+homepage = "https://github.com/shirakawayohane/next-sql"
+
+# Config for 'cargo dist'
+[workspace.metadata.dist]
+# The preferred cargo-dist version to use in CI
+cargo-dist-version = "0.31.0"
+# CI backends to support
+ci = "github"
+# Target platforms to build for
+targets = [
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+    "x86_64-unknown-linux-gnu",
+    "x86_64-pc-windows-msvc",
+]
+# The installers to generate for each app
+installers = ["shell", "powershell"]
+# Publish jobs to run in CI
+publish-jobs = ["./publish-crates"]
+# Whether to install an updater program
+install-update-url = "https://github.com/shirakawayohane/next-sql/releases/latest"
+# Path that installers should place binaries in
+install-path = "CARGO_HOME"

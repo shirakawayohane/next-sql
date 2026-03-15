@@ -3,7 +3,7 @@
   "displayName": "NextSQL Language Support",
   "description": "Syntax highlighting and language server for NextSQL language",
   "version": "0.1.0",
-  "publisher": "nextsql",
+  "publisher": "instansys",
   "engines": {
     "vscode": "^1.80.0"
   },

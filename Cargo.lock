@@ -691,6 +691,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40ecd4077b5ae9fd2e9e169b102c6c330d0605168eb0e8bf79952b256dbefffd"
 
 [[package]]
+name = "glob"
+version = "0.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0cc23270f6e1808e30a928bdc84dea0b9b4136a8bc82338574f23baf47bbd280"
+
+[[package]]
 name = "hashbrown"
 version = "0.14.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1178,12 +1184,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "nextsql-backend-rust"
+version = "0.1.0"
+dependencies = [
+ "nextsql-backend-rust-runtime",
+ "nextsql-core",
+]
+
+[[package]]
+name = "nextsql-backend-rust-runtime"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "chrono",
+ "tokio-postgres",
+ "uuid",
+]
+
+[[package]]
 name = "nextsql-cli"
 version = "0.1.0"
 dependencies = [
  "chrono",
  "clap",
  "jsonschema",
+ "nextsql-codegen",
  "nextsql-core",
  "serde",
  "serde_json",
@@ -1192,6 +1217,16 @@ dependencies = [
  "tokio",
  "toml",
  "uuid",
+]
+
+[[package]]
+name = "nextsql-codegen"
+version = "0.1.0"
+dependencies = [
+ "glob",
+ "nextsql-backend-rust",
+ "nextsql-core",
+ "serde_json",
 ]
 
 [[package]]
@@ -1205,6 +1240,17 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "uuid",
+]
+
+[[package]]
+name = "nextsql-e2e-tests"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "nextsql-backend-rust-runtime",
+ "tokio",
+ "tokio-postgres",
  "uuid",
 ]
 
@@ -1591,8 +1637,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "613283563cd90e1dfc3518d548caee47e0e725455ed619881f5cf21f36de4b48"
 dependencies = [
  "bytes",
+ "chrono",
  "fallible-iterator",
  "postgres-protocol",
+ "uuid",
 ]
 
 [[package]]
