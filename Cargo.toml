@@ -38,3 +38,8 @@ publish-jobs = ["./publish-crates"]
 install-update-url = "https://github.com/shirakawayohane/next-sql/releases/latest"
 # Path that installers should place binaries in
 install-path = "CARGO_HOME"
+
+# Release build profile used by cargo-dist
+[profile.dist]
+inherits = "release"
+lto = "thin"
