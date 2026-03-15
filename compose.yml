@@ -14,5 +14,16 @@ services:
       - postgres_data:/var/lib/postgresql/data
     restart: unless-stopped
 
+  postgres_test:
+    image: postgres:16
+    container_name: nextsql_postgres_test
+    environment:
+      POSTGRES_DB: nextsql_test
+      POSTGRES_USER: nextsql
+      POSTGRES_PASSWORD: password
+    ports:
+      - "5439:5432"
+    restart: unless-stopped
+
 volumes:
   postgres_data:

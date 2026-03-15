@@ -1,0 +1,11 @@
+[package]
+name = "nextsql-e2e-tests"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+nextsql-backend-rust-runtime = { path = "../../nextsql-backend-rust/runtime" }
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4" }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+tokio-postgres = { version = "0.7", features = ["with-uuid-1", "with-chrono-0_4"] }
