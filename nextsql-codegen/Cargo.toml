@@ -1,0 +1,16 @@
+[package]
+name = "nextsql-codegen"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Code generation orchestrator for NextSQL"
+publish = false
+
+[dependencies]
+nextsql-core = { path = "../nextsql-core" }
+nextsql-backend-rust = { path = "../nextsql-backend-rust" }
+glob = "0.3"
+
+[dev-dependencies]
+serde_json = "1"
