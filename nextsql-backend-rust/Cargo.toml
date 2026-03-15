@@ -1,0 +1,12 @@
+[package]
+name = "nextsql-backend-rust"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Code generation for NextSQL language"
+publish = false
+
+[dependencies]
+nextsql-core = { path = "../nextsql-core" }
+nextsql-backend-rust-runtime = { path = "runtime" }

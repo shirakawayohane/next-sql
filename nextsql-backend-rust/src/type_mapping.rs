@@ -1,0 +1,61 @@
+use nextsql_core::ast::{Type, BuiltInType, UtilityType, Insertable};
+
+pub fn nextsql_type_to_rust(typ: &Type) -> String {
+    match typ {
+        Type::BuiltIn(b) => match b {
+            BuiltInType::I16 => "i16".to_string(),
+            BuiltInType::I32 => "i32".to_string(),
+            BuiltInType::I64 => "i64".to_string(),
+            BuiltInType::F32 => "f32".to_string(),
+            BuiltInType::F64 => "f64".to_string(),
+            BuiltInType::String => "String".to_string(),
+            BuiltInType::Bool => "bool".to_string(),
+            BuiltInType::Uuid => "uuid::Uuid".to_string(),
+            BuiltInType::Timestamp => "chrono::NaiveDateTime".to_string(),
+            BuiltInType::Timestamptz => "chrono::DateTime<chrono::Utc>".to_string(),
+            BuiltInType::Date => "chrono::NaiveDate".to_string(),
+        },
+        Type::Optional(inner) => format!("Option<{}>", nextsql_type_to_rust(inner)),
+        Type::Array(inner) => format!("Vec<{}>", nextsql_type_to_rust(inner)),
+        Type::UserDefined(name) => name.clone(),
+        Type::Utility(u) => match u {
+            UtilityType::Insertable(Insertable(inner)) => nextsql_type_to_rust(inner),
+        },
+    }
+}
+
+/// Map NextSQL type to the tokio_postgres::types::Type for parameter binding
+pub fn nextsql_type_to_tosql_trait(typ: &Type) -> String {
+    // For generated code, we use dyn ToSql, so this is mainly for documentation
+    nextsql_type_to_rust(typ)
+}
+
+/// Map NextSQL type to the Row trait getter method name
+pub fn nextsql_type_to_row_getter(typ: &Type) -> String {
+    match typ {
+        Type::BuiltIn(b) => match b {
+            BuiltInType::I16 => "get_i16".to_string(),
+            BuiltInType::I32 => "get_i32".to_string(),
+            BuiltInType::I64 => "get_i64".to_string(),
+            BuiltInType::F32 => "get_f32".to_string(),
+            BuiltInType::F64 => "get_f64".to_string(),
+            BuiltInType::String => "get_string".to_string(),
+            BuiltInType::Bool => "get_bool".to_string(),
+            BuiltInType::Uuid => "get_uuid".to_string(),
+            BuiltInType::Timestamp => "get_timestamp".to_string(),
+            BuiltInType::Timestamptz => "get_timestamptz".to_string(),
+            BuiltInType::Date => "get_date".to_string(),
+        },
+        Type::Optional(inner) => {
+            let inner_getter = nextsql_type_to_row_getter(inner);
+            // get_i32 -> get_opt_i32
+            inner_getter.replace("get_", "get_opt_")
+        },
+        Type::Array(inner) => {
+            let inner_getter = nextsql_type_to_row_getter(inner);
+            // get_i32 -> get_vec_i32
+            inner_getter.replace("get_", "get_vec_")
+        },
+        _ => "get_string".to_string(), // fallback for user-defined types
+    }
+}
