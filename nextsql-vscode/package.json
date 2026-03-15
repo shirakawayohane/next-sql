@@ -4,6 +4,11 @@
   "description": "Syntax highlighting and language server for NextSQL language",
   "version": "0.1.0",
   "publisher": "instansys",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/shirakawayohane/next-sql"
+  },
   "engines": {
     "vscode": "^1.80.0"
   },
@@ -21,15 +26,25 @@
     "languages": [
       {
         "id": "nextsql",
-        "aliases": ["NextSQL", "nextsql"],
-        "extensions": [".nsql"],
+        "aliases": [
+          "NextSQL",
+          "nextsql"
+        ],
+        "extensions": [
+          ".nsql"
+        ],
         "configuration": "./language-configuration.json"
       },
       {
         "id": "nextsql-toml",
-        "aliases": ["NextSQL Config", "nextsql-toml"],
+        "aliases": [
+          "NextSQL Config",
+          "nextsql-toml"
+        ],
         "extensions": [],
-        "filenames": ["next-sql.toml"]
+        "filenames": [
+          "next-sql.toml"
+        ]
       }
     ],
     "grammars": [
@@ -49,14 +64,19 @@
   "scripts": {
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
-    "watch": "tsc -watch -p ./"
+    "watch": "tsc -watch -p ./",
+    "test": "npm run compile && vscode-test"
   },
   "dependencies": {
     "vscode-languageclient": "^9.0.0"
   },
   "devDependencies": {
-    "@types/vscode": "^1.80.0",
+    "@types/mocha": "^10.0.10",
     "@types/node": "^20.0.0",
+    "@types/vscode": "^1.80.0",
+    "@vscode/test-cli": "^0.0.12",
+    "@vscode/test-electron": "^2.5.2",
+    "mocha": "^11.7.5",
     "typescript": "^5.0.0"
   }
 }
