@@ -28,11 +28,11 @@ query getPostWithFullHierarchy($postId: uuid) {
   .select(
     posts.title,
     posts.content,
-    posts.author.name,
-    posts.author.organization.name,
-    posts.author.organization.parent_org.name,
-    posts.category.name,
-    posts.category.parent_category.name
+    author_name: posts.author.name,
+    organization_name: posts.author.organization.name,
+    parent_org_name: posts.author.organization.parent_org.name,
+    category_name: posts.category.name,
+    parent_category_name: posts.category.parent_category.name
   )
 }
 
@@ -49,9 +49,9 @@ query getPostsByParentOrganization($parentOrgId: uuid) {
   .where(posts.author.organization.parent_org.id == $parentOrgId)
   .select(
     posts.title,
-    posts.author.name,
-    posts.author.organization.name,
-    posts.author.organization.parent_org.name
+    author_name: posts.author.name,
+    organization_name: posts.author.organization.name,
+    parent_org_name: posts.author.organization.parent_org.name
   )
 }
 
@@ -62,13 +62,13 @@ query getDetailedPostInfo($postId: uuid) {
   .select(
     posts.title,
     posts.content,
-    posts.author.name,
-    posts.author.email,
-    posts.author.organization.name,
-    posts.author.organization.parent_org.name,
-    posts.author.organization.parent_org.created_at,
-    posts.category.name,
-    posts.category.parent_category.name,
-    posts.category.parent_category.description
+    author_name: posts.author.name,
+    author_email: posts.author.email,
+    organization_name: posts.author.organization.name,
+    parent_org_name: posts.author.organization.parent_org.name,
+    parent_org_created_at: posts.author.organization.parent_org.created_at,
+    category_name: posts.category.name,
+    parent_category_name: posts.category.parent_category.name,
+    parent_category_description: posts.category.parent_category.description
   )
 }

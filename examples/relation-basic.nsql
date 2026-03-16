@@ -28,9 +28,9 @@ query getCommentDetails($commentId: uuid) {
   .where(comments.id == $commentId)
   .select(
     comments.content,
-    comments.commenter.name,
-    comments.post.title,
-    comments.post.author.name
+    commenter_name: comments.commenter.name,
+    post_title: comments.post.title,
+    author_name: comments.post.author.name
   )
 }
 

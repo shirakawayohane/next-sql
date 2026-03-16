@@ -13,5 +13,5 @@ relation organization for users returning users {
 query usersPosts($id: uuid) {
   from(posts)
   .where(posts.author.organization.name == $id)
-  .select(posts.author.name, posts.author.organization.name, posts.title)
+  .select(author_name: posts.author.name, organization_name: posts.author.organization.name, posts.title)
 }

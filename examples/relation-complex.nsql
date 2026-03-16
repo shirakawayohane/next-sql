@@ -77,11 +77,11 @@ query getThreadedComments($postId: uuid) {
   .select(
     comments.id,
     comments.content,
-    comments.commenter.name,
-    comments.commenter.profile_picture.url,
+    commenter_name: comments.commenter.name,
+    commenter_profile_picture_url: comments.commenter.profile_picture.url,
     comments.reply_count,
-    comments.replied_to.content,              // Will be null for top-level comments
-    comments.replied_to.commenter.name,        // Will be null for top-level comments
+    replied_to_content: comments.replied_to.content,              // Will be null for top-level comments
+    replied_to_commenter_name: comments.replied_to.commenter.name,        // Will be null for top-level comments
     comments.created_at
   )
   .orderBy(comments.created_at)
