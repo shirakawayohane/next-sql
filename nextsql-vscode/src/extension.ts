@@ -76,8 +76,21 @@ export function activate(context: vscode.ExtensionContext) {
     "." // トリガー文字
   );
 
+  // Restart Server コマンド
+  const restartCommand = vscode.commands.registerCommand(
+    "nextsql.restartServer",
+    async () => {
+      if (client) {
+        await client.stop();
+        await client.start();
+        vscode.window.showInformationMessage("NextSQL Language Server restarted.");
+      }
+    }
+  );
+
   // 拡張機能が非アクティブ化されるときにクライアントを停止
   context.subscriptions.push(completionDisposable);
+  context.subscriptions.push(restartCommand);
   context.subscriptions.push({
     dispose: () => {
       if (client) {

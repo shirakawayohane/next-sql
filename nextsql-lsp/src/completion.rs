@@ -669,38 +669,35 @@ mod tests {
     }
     
     #[tokio::test]
-    async fn test_table_completions_in_from() {
+    async fn test_table_completions_in_from_without_schema() {
         let text = "query test() {\n  from(";
         let provider = CompletionProvider::new(text);
-        
+
         let position = Position {
             line: 1,
             character: 7, // After "from("
         };
-        
+
         let completions = provider.get_completions(position).await;
-        
-        // Should have table completions
-        assert!(completions.iter().any(|c| c.label == "users" && c.kind == Some(CompletionItemKind::CLASS)));
-        assert!(completions.iter().any(|c| c.label == "posts" && c.kind == Some(CompletionItemKind::CLASS)));
+
+        // Without schema, no table completions should be returned
+        assert!(completions.is_empty());
     }
-    
+
     #[tokio::test]
-    async fn test_table_completions_in_join_method() {
+    async fn test_table_completions_in_join_method_without_schema() {
         let text = "query test() {\n  from(users.leftJoin(";
         let provider = CompletionProvider::new(text);
-        
+
         let position = Position {
             line: 1,
             character: 23, // After "from(users.leftJoin("
         };
-        
+
         let completions = provider.get_completions(position).await;
-        
-        // Should have table completions
-        assert!(completions.iter().any(|c| c.label == "users" && c.kind == Some(CompletionItemKind::CLASS)));
-        assert!(completions.iter().any(|c| c.label == "posts" && c.kind == Some(CompletionItemKind::CLASS)));
-        assert!(completions.iter().any(|c| c.label == "orders" && c.kind == Some(CompletionItemKind::CLASS)));
+
+        // Without schema, no table completions should be returned
+        assert!(completions.is_empty());
     }
     
     

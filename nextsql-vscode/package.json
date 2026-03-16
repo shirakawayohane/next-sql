@@ -47,6 +47,12 @@
         ]
       }
     ],
+    "commands": [
+      {
+        "command": "nextsql.restartServer",
+        "title": "NextSQL: Restart Language Server"
+      }
+    ],
     "grammars": [
       {
         "language": "nextsql",

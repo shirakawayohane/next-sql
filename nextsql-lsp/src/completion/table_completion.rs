@@ -29,23 +29,6 @@ pub trait TableCompletionProvider {
             }
         }
 
-        // フォールバック: スキーマが利用できない場合の一般的なテーブル名
-        if completions.is_empty() {
-            let common_tables = vec!["users", "posts", "comments", "orders", "products"];
-            for table in common_tables {
-                completions.push(CompletionItem {
-                    label: table.to_string(),
-                    kind: Some(CompletionItemKind::CLASS),
-                    detail: Some(format!("Table: {} (suggestion)", table)),
-                    documentation: Some(Documentation::String(
-                        "Common table name suggestion".to_string(),
-                    )),
-                    insert_text: Some(table.to_string()),
-                    ..Default::default()
-                });
-            }
-        }
-
         completions
     }
 }

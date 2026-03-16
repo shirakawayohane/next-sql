@@ -90,6 +90,8 @@ impl LanguageServer for NextSqlLanguageServer {
             self.validate_toml_document(&params.text_document.uri, &params.text_document.text)
                 .await;
         } else {
+            // .nsqlファイルを開いた時、スキーマが未ロードならロードする
+            self.ensure_schema_loaded(params.text_document.uri.path()).await;
             self.validate_document(&params.text_document.uri, &params.text_document.text)
                 .await;
         }
@@ -169,6 +171,21 @@ impl LanguageServer for NextSqlLanguageServer {
 }
 
 impl NextSqlLanguageServer {
+    /// .nsqlファイルを開いた時に、プロジェクトルートを探してスキーマが未ロードならロードする
+    async fn ensure_schema_loaded(&self, file_path: &str) {
+        let path = std::path::Path::new(file_path);
+        if let Some(project_root) = self.schema_cache.find_project_root(path) {
+            if self.schema_cache.get_schema_for_file(path).await.is_none() {
+                let schema_cache = self.schema_cache.clone();
+                let client = self.client.clone();
+                let root = project_root.clone();
+                tokio::spawn(async move {
+                    Self::load_schema_on_init(root, schema_cache, client).await;
+                });
+            }
+        }
+    }
+
     async fn load_schema_on_init(
         root: std::path::PathBuf,
         schema_cache: std::sync::Arc<SchemaCache>,
