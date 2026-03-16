@@ -10,7 +10,7 @@ impl SchemaLoader {
         let mut schema = DatabaseSchema::new();
 
         let query = r#"
-            SELECT 
+            SELECT
                 c.table_name,
                 c.column_name,
                 c.data_type,
@@ -25,14 +25,15 @@ impl SchemaLoader {
                      AND kcu.column_name = c.column_name
                      AND tc.constraint_type = 'PRIMARY KEY'
                     ), false
-                ) as is_primary_key
+                ) as is_primary_key,
+                c.udt_name
             FROM information_schema.columns c
             WHERE c.table_schema = 'public'
             ORDER BY c.table_name, c.ordinal_position
         "#;
 
         let rows = client.query(query, &[])?;
-        
+
         let mut tables: HashMap<String, TableSchema> = HashMap::new();
 
         for row in rows {
@@ -42,11 +43,12 @@ impl SchemaLoader {
             let is_nullable: String = row.get(3);
             let column_default: Option<String> = row.get(4);
             let is_primary_key: bool = row.get(5);
+            let udt_name: String = row.get(6);
 
             let table = tables.entry(table_name.clone())
                 .or_insert_with(|| TableSchema::new(table_name));
 
-            let column_type = Self::postgres_type_to_nextsql_type(&data_type);
+            let column_type = Self::postgres_type_to_nextsql_type(&data_type, &udt_name);
             
             table.add_column(ColumnSchema {
                 name: column_name,
@@ -65,7 +67,7 @@ impl SchemaLoader {
         Ok(schema)
     }
 
-    fn postgres_type_to_nextsql_type(pg_type: &str) -> Type {
+    fn postgres_type_to_nextsql_type(pg_type: &str, udt_name: &str) -> Type {
         match pg_type {
             "smallint" => Type::BuiltIn(BuiltInType::I16),
             "integer" => Type::BuiltIn(BuiltInType::I32),
@@ -78,6 +80,10 @@ impl SchemaLoader {
             "timestamp without time zone" => Type::BuiltIn(BuiltInType::Timestamp),
             "timestamp with time zone" => Type::BuiltIn(BuiltInType::Timestamptz),
             "date" => Type::BuiltIn(BuiltInType::Date),
+            "ARRAY" => Type::Array(Box::new(Self::postgres_type_to_nextsql_type(
+                &udt_name.trim_start_matches('_'), ""
+            ))),
+            "USER-DEFINED" => Type::UserDefined(udt_name.to_string()),
             _ => Type::UserDefined(pg_type.to_string()),
         }
     }
@@ -98,15 +104,19 @@ mod tests {
     #[test]
     fn test_postgres_type_mapping() {
         assert!(matches!(
-            SchemaLoader::postgres_type_to_nextsql_type("integer"),
+            SchemaLoader::postgres_type_to_nextsql_type("integer", "int4"),
             Type::BuiltIn(BuiltInType::I32)
         ));
         assert!(matches!(
-            SchemaLoader::postgres_type_to_nextsql_type("text"),
+            SchemaLoader::postgres_type_to_nextsql_type("text", "text"),
             Type::BuiltIn(BuiltInType::String)
         ));
         assert!(matches!(
-            SchemaLoader::postgres_type_to_nextsql_type("custom_type"),
+            SchemaLoader::postgres_type_to_nextsql_type("USER-DEFINED", "my_enum"),
+            Type::UserDefined(s) if s == "my_enum"
+        ));
+        assert!(matches!(
+            SchemaLoader::postgres_type_to_nextsql_type("custom_type", "custom_type"),
             Type::UserDefined(s) if s == "custom_type"
         ));
     }

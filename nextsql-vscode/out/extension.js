@@ -10,7 +10,7 @@ function activate(context) {
     console.log("NextSQL extension is being activated");
     console.log("Workspace folders:", vscode.workspace.workspaceFolders?.map((f) => f.uri.fsPath));
     // LSPサーバーのパスを取得
-    const serverCommand = getServerPath();
+    const serverCommand = getServerPath(context);
     console.log("LSP server path:", serverCommand);
     // ファイル存在確認
     const fs = require("fs");
@@ -51,8 +51,19 @@ function activate(context) {
         },
     }, "." // トリガー文字
     );
+    // Restart Server コマンド
+    const restartCommand = vscode.commands.registerCommand("nextsql.restartServer", async () => {
+        if (client) {
+            if (client.isRunning()) {
+                await client.stop();
+            }
+            await client.start();
+            vscode.window.showInformationMessage("NextSQL Language Server restarted.");
+        }
+    });
     // 拡張機能が非アクティブ化されるときにクライアントを停止
     context.subscriptions.push(completionDisposable);
+    context.subscriptions.push(restartCommand);
     context.subscriptions.push({
         dispose: () => {
             if (client) {
@@ -67,33 +78,35 @@ function deactivate() {
     }
     return client.stop();
 }
-function getServerPath() {
-    // 開発時とパッケージ時の両方に対応
-    const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-    if (workspaceRoot) {
-        // プロジェクトルートを探す（Cargo.tomlがあるディレクトリ）
-        let projectRoot = workspaceRoot;
-        // 現在のフォルダまたは親フォルダでCargo.tomlを探す
-        const fs = require("fs");
-        while (projectRoot !== path.dirname(projectRoot)) {
-            if (fs.existsSync(path.join(projectRoot, "Cargo.toml"))) {
-                break;
-            }
-            projectRoot = path.dirname(projectRoot);
-        }
-        // 開発時: プロジェクトルートからLSPバイナリを探す
-        const debugPath = path.join(projectRoot, "target", "debug", "nextsql-lsp");
-        console.log("Checking LSP server paths:");
-        console.log("Debug path:", debugPath);
-        console.log("Project root:", projectRoot);
-        if (fs.existsSync(debugPath)) {
-            console.log("Using debug build");
-            return debugPath;
-        }
-        console.error("LSP server binary not found!");
-        return debugPath;
+function getServerPath(context) {
+    const fs = require("fs");
+    // 設定からパスを取得
+    const configPath = vscode.workspace.getConfiguration("nextsql").get("serverPath");
+    if (configPath && fs.existsSync(configPath)) {
+        console.log("Using configured server path:", configPath);
+        return configPath;
     }
-    // パッケージされた拡張機能の場合
-    return path.join(__dirname, "..", "bin", "nextsql-lsp");
+    // 拡張機能のインストールパスからバイナリを探す
+    const extensionBinPath = path.join(context.extensionPath, "bin", "nextsql-lsp");
+    if (fs.existsSync(extensionBinPath)) {
+        console.log("Using extension bundled server:", extensionBinPath);
+        return extensionBinPath;
+    }
+    // 開発時: 拡張機能のパスから上にCargo.tomlを探す
+    let current = context.extensionPath;
+    while (current !== path.dirname(current)) {
+        if (fs.existsSync(path.join(current, "Cargo.toml"))) {
+            const debugPath = path.join(current, "target", "debug", "nextsql-lsp");
+            if (fs.existsSync(debugPath)) {
+                console.log("Using debug build:", debugPath);
+                return debugPath;
+            }
+            break;
+        }
+        current = path.dirname(current);
+    }
+    // PATHから探す
+    console.log("Falling back to nextsql-lsp from PATH");
+    return "nextsql-lsp";
 }
 //# sourceMappingURL=extension.js.map

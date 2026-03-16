@@ -11,7 +11,7 @@ pub struct OrderItem {
 }
 
 impl OrderItem {
-    fn from_row(row: &dyn nextsql_backend_rust_runtime::Row) -> Self {
+    pub fn from_row(row: &dyn super::runtime::Row) -> Self {
         Self {
             id: row.get_uuid(0),
             order_id: OrderId(row.get_uuid(1)),
@@ -33,7 +33,7 @@ pub struct Order {
 }
 
 impl Order {
-    fn from_row(row: &dyn nextsql_backend_rust_runtime::Row) -> Self {
+    pub fn from_row(row: &dyn super::runtime::Row) -> Self {
         Self {
             id: OrderId(row.get_uuid(0)),
             customer_id: CustomerId(row.get_uuid(1)),
@@ -53,13 +53,13 @@ pub struct CreateOrderParams {
 }
 
 impl CreateOrderParams {
-    fn to_params(&self) -> Vec<&dyn nextsql_backend_rust_runtime::ToSqlParam> {
+    pub fn to_params(&self) -> Vec<&dyn super::runtime::ToSqlParam> {
         vec![&self.customer_id, &self.notes, &self.total_amount]
     }
 }
 
 pub async fn create_order(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl super::runtime::Client + ?Sized),
     params: &CreateOrderParams,
 ) -> Result<Vec<Order>, Box<dyn std::error::Error + Send + Sync>> {
     let rows = client.query(
@@ -77,13 +77,13 @@ pub struct AddOrderItemParams {
 }
 
 impl AddOrderItemParams {
-    fn to_params(&self) -> Vec<&dyn nextsql_backend_rust_runtime::ToSqlParam> {
+    pub fn to_params(&self) -> Vec<&dyn super::runtime::ToSqlParam> {
         vec![&self.order_id, &self.product_id, &self.quantity, &self.unit_price]
     }
 }
 
 pub async fn add_order_item(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl super::runtime::Client + ?Sized),
     params: &AddOrderItemParams,
 ) -> Result<Vec<OrderItem>, Box<dyn std::error::Error + Send + Sync>> {
     let rows = client.query(
@@ -101,13 +101,13 @@ pub struct UpsertOrderItemParams {
 }
 
 impl UpsertOrderItemParams {
-    fn to_params(&self) -> Vec<&dyn nextsql_backend_rust_runtime::ToSqlParam> {
+    pub fn to_params(&self) -> Vec<&dyn super::runtime::ToSqlParam> {
         vec![&self.order_id, &self.product_id, &self.quantity, &self.unit_price]
     }
 }
 
 pub async fn upsert_order_item(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl super::runtime::Client + ?Sized),
     params: &UpsertOrderItemParams,
 ) -> Result<Vec<OrderItem>, Box<dyn std::error::Error + Send + Sync>> {
     let rows = client.query(
@@ -125,13 +125,13 @@ pub struct InsertOrderItemIfNotExistsParams {
 }
 
 impl InsertOrderItemIfNotExistsParams {
-    fn to_params(&self) -> Vec<&dyn nextsql_backend_rust_runtime::ToSqlParam> {
+    pub fn to_params(&self) -> Vec<&dyn super::runtime::ToSqlParam> {
         vec![&self.order_id, &self.product_id, &self.quantity, &self.unit_price]
     }
 }
 
 pub async fn insert_order_item_if_not_exists(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl super::runtime::Client + ?Sized),
     params: &InsertOrderItemIfNotExistsParams,
 ) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
     let count = client.execute(
@@ -147,13 +147,13 @@ pub struct UpdateOrderStatusParams {
 }
 
 impl UpdateOrderStatusParams {
-    fn to_params(&self) -> Vec<&dyn nextsql_backend_rust_runtime::ToSqlParam> {
+    pub fn to_params(&self) -> Vec<&dyn super::runtime::ToSqlParam> {
         vec![&self.status, &self.id]
     }
 }
 
 pub async fn update_order_status(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl super::runtime::Client + ?Sized),
     params: &UpdateOrderStatusParams,
 ) -> Result<Vec<Order>, Box<dyn std::error::Error + Send + Sync>> {
     let rows = client.query(
@@ -168,13 +168,13 @@ pub struct ShipOrderParams {
 }
 
 impl ShipOrderParams {
-    fn to_params(&self) -> Vec<&dyn nextsql_backend_rust_runtime::ToSqlParam> {
+    pub fn to_params(&self) -> Vec<&dyn super::runtime::ToSqlParam> {
         vec![&self.id]
     }
 }
 
 pub async fn ship_order(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl super::runtime::Client + ?Sized),
     params: &ShipOrderParams,
 ) -> Result<Vec<Order>, Box<dyn std::error::Error + Send + Sync>> {
     let rows = client.query(
@@ -189,13 +189,13 @@ pub struct CancelOrderParams {
 }
 
 impl CancelOrderParams {
-    fn to_params(&self) -> Vec<&dyn nextsql_backend_rust_runtime::ToSqlParam> {
+    pub fn to_params(&self) -> Vec<&dyn super::runtime::ToSqlParam> {
         vec![&self.id]
     }
 }
 
 pub async fn cancel_order(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl super::runtime::Client + ?Sized),
     params: &CancelOrderParams,
 ) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
     let count = client.execute(
@@ -210,13 +210,13 @@ pub struct DeleteOrderItemParams {
 }
 
 impl DeleteOrderItemParams {
-    fn to_params(&self) -> Vec<&dyn nextsql_backend_rust_runtime::ToSqlParam> {
+    pub fn to_params(&self) -> Vec<&dyn super::runtime::ToSqlParam> {
         vec![&self.id]
     }
 }
 
 pub async fn delete_order_item(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl super::runtime::Client + ?Sized),
     params: &DeleteOrderItemParams,
 ) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
     let count = client.execute(
@@ -231,7 +231,7 @@ pub struct FindOrderByIdParams {
 }
 
 impl FindOrderByIdParams {
-    fn to_params(&self) -> Vec<&dyn nextsql_backend_rust_runtime::ToSqlParam> {
+    pub fn to_params(&self) -> Vec<&dyn super::runtime::ToSqlParam> {
         vec![&self.id]
     }
 }
@@ -249,7 +249,7 @@ pub struct FindOrderByIdRow {
 }
 
 impl FindOrderByIdRow {
-    fn from_row(row: &dyn nextsql_backend_rust_runtime::Row) -> Self {
+    pub fn from_row(row: &dyn super::runtime::Row) -> Self {
         Self {
             id: OrderId(row.get_uuid(0)),
             customer_id: CustomerId(row.get_uuid(1)),
@@ -265,7 +265,7 @@ impl FindOrderByIdRow {
 }
 
 pub async fn find_order_by_id(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl super::runtime::Client + ?Sized),
     params: &FindOrderByIdParams,
 ) -> Result<Vec<FindOrderByIdRow>, Box<dyn std::error::Error + Send + Sync>> {
     let rows = client.query(
@@ -282,13 +282,13 @@ pub struct FindOrdersByCustomerParams {
 }
 
 impl FindOrdersByCustomerParams {
-    fn to_params(&self) -> Vec<&dyn nextsql_backend_rust_runtime::ToSqlParam> {
+    pub fn to_params(&self) -> Vec<&dyn super::runtime::ToSqlParam> {
         vec![&self.customer_id, &self.limit, &self.offset]
     }
 }
 
 pub async fn find_orders_by_customer(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl super::runtime::Client + ?Sized),
     params: &FindOrdersByCustomerParams,
 ) -> Result<Vec<Order>, Box<dyn std::error::Error + Send + Sync>> {
     let rows = client.query(
@@ -303,7 +303,7 @@ pub struct FindOrderItemsParams {
 }
 
 impl FindOrderItemsParams {
-    fn to_params(&self) -> Vec<&dyn nextsql_backend_rust_runtime::ToSqlParam> {
+    pub fn to_params(&self) -> Vec<&dyn super::runtime::ToSqlParam> {
         vec![&self.order_id]
     }
 }
@@ -319,7 +319,7 @@ pub struct FindOrderItemsRow {
 }
 
 impl FindOrderItemsRow {
-    fn from_row(row: &dyn nextsql_backend_rust_runtime::Row) -> Self {
+    pub fn from_row(row: &dyn super::runtime::Row) -> Self {
         Self {
             id: row.get_uuid(0),
             order_id: OrderId(row.get_uuid(1)),
@@ -333,7 +333,7 @@ impl FindOrderItemsRow {
 }
 
 pub async fn find_order_items(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl super::runtime::Client + ?Sized),
     params: &FindOrderItemsParams,
 ) -> Result<Vec<FindOrderItemsRow>, Box<dyn std::error::Error + Send + Sync>> {
     let rows = client.query(
@@ -350,7 +350,7 @@ pub struct FindRecentOrdersParams {
 }
 
 impl FindRecentOrdersParams {
-    fn to_params(&self) -> Vec<&dyn nextsql_backend_rust_runtime::ToSqlParam> {
+    pub fn to_params(&self) -> Vec<&dyn super::runtime::ToSqlParam> {
         vec![&self.from_date, &self.to_date, &self.statuses]
     }
 }
@@ -367,7 +367,7 @@ pub struct FindRecentOrdersRow {
 }
 
 impl FindRecentOrdersRow {
-    fn from_row(row: &dyn nextsql_backend_rust_runtime::Row) -> Self {
+    pub fn from_row(row: &dyn super::runtime::Row) -> Self {
         Self {
             id: OrderId(row.get_uuid(0)),
             customer_id: CustomerId(row.get_uuid(1)),
@@ -382,7 +382,7 @@ impl FindRecentOrdersRow {
 }
 
 pub async fn find_recent_orders(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl super::runtime::Client + ?Sized),
     params: &FindRecentOrdersParams,
 ) -> Result<Vec<FindRecentOrdersRow>, Box<dyn std::error::Error + Send + Sync>> {
     let rows = client.query(
@@ -399,7 +399,7 @@ pub struct FindAllActiveOrdersRow {
 }
 
 impl FindAllActiveOrdersRow {
-    fn from_row(row: &dyn nextsql_backend_rust_runtime::Row) -> Self {
+    pub fn from_row(row: &dyn super::runtime::Row) -> Self {
         Self {
             id: OrderId(row.get_uuid(0)),
             customer_id: CustomerId(row.get_uuid(1)),
@@ -409,7 +409,7 @@ impl FindAllActiveOrdersRow {
 }
 
 pub async fn find_all_active_orders(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl super::runtime::Client + ?Sized),
 ) -> Result<Vec<FindAllActiveOrdersRow>, Box<dyn std::error::Error + Send + Sync>> {
     let rows = client.query(
         "SELECT orders.id, orders.customer_id, orders.total_amount FROM orders WHERE orders.status = 'pending' UNION SELECT orders.id, orders.customer_id, orders.total_amount FROM orders WHERE orders.status = 'shipped'",
@@ -423,13 +423,13 @@ pub struct FindOrdersWithHighValueItemsParams {
 }
 
 impl FindOrdersWithHighValueItemsParams {
-    fn to_params(&self) -> Vec<&dyn nextsql_backend_rust_runtime::ToSqlParam> {
+    pub fn to_params(&self) -> Vec<&dyn super::runtime::ToSqlParam> {
         vec![&self.min_price]
     }
 }
 
 pub async fn find_orders_with_high_value_items(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl super::runtime::Client + ?Sized),
     params: &FindOrdersWithHighValueItemsParams,
 ) -> Result<Vec<Order>, Box<dyn std::error::Error + Send + Sync>> {
     let rows = client.query(
@@ -444,13 +444,13 @@ pub struct DeleteOrderItemReturningParams {
 }
 
 impl DeleteOrderItemReturningParams {
-    fn to_params(&self) -> Vec<&dyn nextsql_backend_rust_runtime::ToSqlParam> {
+    pub fn to_params(&self) -> Vec<&dyn super::runtime::ToSqlParam> {
         vec![&self.id]
     }
 }
 
 pub async fn delete_order_item_returning(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl super::runtime::Client + ?Sized),
     params: &DeleteOrderItemReturningParams,
 ) -> Result<Vec<OrderItem>, Box<dyn std::error::Error + Send + Sync>> {
     let rows = client.query(

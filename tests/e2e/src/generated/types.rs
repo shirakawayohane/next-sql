@@ -2,7 +2,7 @@
 
 pub struct AddressId(pub uuid::Uuid);
 
-impl nextsql_backend_rust_runtime::ToSqlParam for AddressId {
+impl super::runtime::ToSqlParam for AddressId {
     fn as_any(&self) -> &(dyn std::any::Any + Send + Sync) {
         &self.0
     }
@@ -10,7 +10,7 @@ impl nextsql_backend_rust_runtime::ToSqlParam for AddressId {
 
 pub struct CategoryId(pub uuid::Uuid);
 
-impl nextsql_backend_rust_runtime::ToSqlParam for CategoryId {
+impl super::runtime::ToSqlParam for CategoryId {
     fn as_any(&self) -> &(dyn std::any::Any + Send + Sync) {
         &self.0
     }
@@ -18,7 +18,7 @@ impl nextsql_backend_rust_runtime::ToSqlParam for CategoryId {
 
 pub struct CustomerId(pub uuid::Uuid);
 
-impl nextsql_backend_rust_runtime::ToSqlParam for CustomerId {
+impl super::runtime::ToSqlParam for CustomerId {
     fn as_any(&self) -> &(dyn std::any::Any + Send + Sync) {
         &self.0
     }
@@ -26,7 +26,7 @@ impl nextsql_backend_rust_runtime::ToSqlParam for CustomerId {
 
 pub struct OrderId(pub uuid::Uuid);
 
-impl nextsql_backend_rust_runtime::ToSqlParam for OrderId {
+impl super::runtime::ToSqlParam for OrderId {
     fn as_any(&self) -> &(dyn std::any::Any + Send + Sync) {
         &self.0
     }
@@ -34,7 +34,7 @@ impl nextsql_backend_rust_runtime::ToSqlParam for OrderId {
 
 pub struct ProductId(pub uuid::Uuid);
 
-impl nextsql_backend_rust_runtime::ToSqlParam for ProductId {
+impl super::runtime::ToSqlParam for ProductId {
     fn as_any(&self) -> &(dyn std::any::Any + Send + Sync) {
         &self.0
     }
@@ -42,7 +42,7 @@ impl nextsql_backend_rust_runtime::ToSqlParam for ProductId {
 
 pub struct ReviewId(pub uuid::Uuid);
 
-impl nextsql_backend_rust_runtime::ToSqlParam for ReviewId {
+impl super::runtime::ToSqlParam for ReviewId {
     fn as_any(&self) -> &(dyn std::any::Any + Send + Sync) {
         &self.0
     }

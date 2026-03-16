@@ -380,11 +380,11 @@ impl<'a> TypeValidator<'a> {
                 Expression::Atomic(AtomicExpression::Literal(Literal::Object(obj))) => {
                 // Check for unknown fields
                     let table_columns: HashSet<_> = table.columns.iter().map(|c| &c.name).collect();
-                    for (field_name, _) in &obj.0 {
+                    for (field_name, field_value) in &obj.0 {
                         if !table_columns.contains(field_name) {
                             self.errors.push(ValidationError {
                                 message: format!("Unknown field '{}' in table '{}'", field_name, target),
-                                span: None,
+                                span: Self::extract_span(field_value),
                             });
                         }
                     }
@@ -563,6 +563,17 @@ impl<'a> TypeValidator<'a> {
         }
     }
 
+    fn extract_span(expr: &Expression) -> Option<Span> {
+        match expr {
+            Expression::Atomic(AtomicExpression::Variable(var)) => var.span.clone(),
+            Expression::Atomic(AtomicExpression::Column(Column::ExplicitTarget(_, _, span))) => span.clone(),
+            Expression::Atomic(AtomicExpression::Column(Column::ImplicitTarget(_, span))) => span.clone(),
+            Expression::Atomic(AtomicExpression::Column(Column::WildcardOf(_, span))) => span.clone(),
+            Expression::Atomic(AtomicExpression::Column(Column::Wildcard(span))) => span.clone(),
+            _ => None,
+        }
+    }
+
     fn resolve_to_builtin(&self, typ: &Type) -> Option<BuiltInType> {
         match typ {
             Type::BuiltIn(b) => Some(b.clone()),
@@ -574,6 +585,8 @@ impl<'a> TypeValidator<'a> {
 
     fn types_compatible(&self, actual: &Type, expected: &Type) -> bool {
         match (actual, expected) {
+            // null is compatible with any type
+            (Type::Optional(inner), _) if matches!(inner.as_ref(), Type::UserDefined(n) if n == "null") => true,
             (Type::Optional(inner), expected) => {
                 self.types_compatible(inner, expected)
             }
@@ -581,6 +594,9 @@ impl<'a> TypeValidator<'a> {
                 self.types_compatible(actual, inner)
             }
             (Type::UserDefined(a), Type::UserDefined(e)) => a == e,
+            // PostgreSQL enum types (stored as UserDefined with udt_name) are compatible with String
+            (Type::BuiltIn(BuiltInType::String), Type::UserDefined(_))
+            | (Type::UserDefined(_), Type::BuiltIn(BuiltInType::String)) => true,
             _ => {
                 // Resolve both sides to built-in types and compare
                 if let (Some(a), Some(e)) = (self.resolve_to_builtin(actual), self.resolve_to_builtin(expected)) {

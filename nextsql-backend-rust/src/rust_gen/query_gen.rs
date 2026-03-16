@@ -45,7 +45,9 @@ pub(super) fn generate_query(out: &mut String, query: &Query, schema: &DatabaseS
     // Params struct (skip if no arguments)
     let has_params = !query.decl.arguments.is_empty();
     if has_params {
-        emit_params_struct(out, &params_struct, &query.decl.arguments, &gen.params, registry);
+        // For dynamic queries, use all_params so the struct includes when-clause params too
+        let param_order = if gen.is_dynamic { &gen.all_params } else { &gen.params };
+        emit_params_struct(out, &params_struct, &query.decl.arguments, param_order, registry);
     }
 
     // Determine row fields
@@ -130,7 +132,9 @@ pub(super) fn generate_query(out: &mut String, query: &Query, schema: &DatabaseS
     };
 
     // Executor function
-    if has_params {
+    if gen.is_dynamic && !gen.when_clauses.is_empty() {
+        emit_dynamic_query_fn(out, &fn_name, &params_struct, &effective_row_struct, &gen, &query.decl.arguments, registry);
+    } else if has_params {
         let conversion = generate_params_with_conversions(&gen.params, &query.decl.arguments, registry);
         let conv_ref = if conversion.0.is_empty() { None } else { Some(&conversion) };
         emit_query_fn(out, &fn_name, &params_struct, &effective_row_struct, &gen.sql, conv_ref);

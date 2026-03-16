@@ -53,6 +53,34 @@
         "title": "NextSQL: Restart Language Server"
       }
     ],
+    "configuration": {
+      "title": "NextSQL",
+      "properties": {
+        "nextsql.serverPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the nextsql-lsp binary. If empty, the extension will try to find it automatically."
+        }
+      }
+    },
+    "configurationDefaults": {
+      "editor.tokenColorCustomizations": {
+        "textMateRules": [
+          {
+            "scope": "variable.other.table.nextsql",
+            "settings": {
+              "foreground": "#7EB8DA"
+            }
+          },
+          {
+            "scope": "variable.other.field.nextsql",
+            "settings": {
+              "foreground": "#9CCDE6"
+            }
+          }
+        ]
+      }
+    },
     "grammars": [
       {
         "language": "nextsql",

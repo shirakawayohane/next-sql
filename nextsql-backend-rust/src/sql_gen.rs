@@ -17,15 +17,48 @@ fn builtin_type_to_pg_type(typ: &BuiltInType) -> &'static str {
     }
 }
 
+/// Information about a single `when` clause for dynamic SQL generation.
+#[derive(Debug, Clone)]
+pub struct WhenClauseInfo {
+    /// The variable name used in the condition (e.g., "name_like").
+    /// When this is `Some`, the Rust code checks `params.<var>.is_some()`.
+    pub condition_var: Option<String>,
+    /// The type of inner clause (e.g., "where", "orderBy").
+    pub clause_type: WhenClauseType,
+    /// The SQL fragment for this clause body, with `${}` format placeholders
+    /// for parameter indices that will be filled at runtime.
+    pub clause_sql: String,
+    /// Variable names used inside this clause body (in order).
+    pub params_in_clause: Vec<String>,
+}
+
+/// The type of clause inside a `when`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum WhenClauseType {
+    Where,
+    OrderBy,
+    Limit,
+    Other,
+}
+
 /// Result of SQL generation - contains the SQL string and parameter mapping
 #[derive(Debug)]
 pub struct GeneratedSql {
     /// The SQL string with $1, $2, ... placeholders
     pub sql: String,
-    /// Ordered list of parameter variable names (without $ prefix)
+    /// Ordered list of parameter variable names (without $ prefix).
+    /// For dynamic queries, this only contains static (non-when) params.
     pub params: Vec<String>,
     /// Whether this query has dynamic (when) clauses
     pub is_dynamic: bool,
+    /// Information about each `when` clause for dynamic code generation.
+    pub when_clauses: Vec<WhenClauseInfo>,
+    /// All parameter variable names (static + when), in declaration order.
+    /// Used to generate the Params struct with all fields.
+    pub all_params: Vec<String>,
+    /// The static WHERE clause SQL (without "WHERE " prefix), if any.
+    /// Used by dynamic queries to always include the static condition.
+    pub static_where_sql: Option<String>,
 }
 
 /// Information about a single relation definition.
@@ -94,10 +127,14 @@ pub fn generate_select_sql_with_relations(
 ) -> GeneratedSql {
     let mut ctx = SqlGenContext::new(relations);
     let sql = ctx.gen_select(stmt);
+    let all_params = ctx.all_params_ordered();
     GeneratedSql {
         sql,
         params: ctx.params,
         is_dynamic: ctx.is_dynamic,
+        when_clauses: ctx.when_clauses,
+        all_params,
+        static_where_sql: ctx.static_where_sql,
     }
 }
 
@@ -113,10 +150,14 @@ pub fn generate_insert_sql_with_relations(
 ) -> GeneratedSql {
     let mut ctx = SqlGenContext::new(relations);
     let sql = ctx.gen_insert(insert);
+    let all_params = ctx.all_params_ordered();
     GeneratedSql {
         sql,
         params: ctx.params,
         is_dynamic: ctx.is_dynamic,
+        when_clauses: ctx.when_clauses,
+        all_params,
+        static_where_sql: ctx.static_where_sql,
     }
 }
 
@@ -132,10 +173,14 @@ pub fn generate_update_sql_with_relations(
 ) -> GeneratedSql {
     let mut ctx = SqlGenContext::new(relations);
     let sql = ctx.gen_update(update);
+    let all_params = ctx.all_params_ordered();
     GeneratedSql {
         sql,
         params: ctx.params,
         is_dynamic: ctx.is_dynamic,
+        when_clauses: ctx.when_clauses,
+        all_params,
+        static_where_sql: ctx.static_where_sql,
     }
 }
 
@@ -151,10 +196,14 @@ pub fn generate_delete_sql_with_relations(
 ) -> GeneratedSql {
     let mut ctx = SqlGenContext::new(relations);
     let sql = ctx.gen_delete(delete);
+    let all_params = ctx.all_params_ordered();
     GeneratedSql {
         sql,
         params: ctx.params,
         is_dynamic: ctx.is_dynamic,
+        when_clauses: ctx.when_clauses,
+        all_params,
+        static_where_sql: ctx.static_where_sql,
     }
 }
 
@@ -174,6 +223,10 @@ struct SqlGenContext<'a> {
     /// the joined table. This allows subsequent accesses to the same relation
     /// to use the correct alias.
     relation_alias_map: HashMap<String, String>,
+    /// Collected when clause info for dynamic SQL generation.
+    when_clauses: Vec<WhenClauseInfo>,
+    /// Static WHERE clause SQL (set during gen_select for dynamic queries).
+    static_where_sql: Option<String>,
 }
 
 impl<'a> SqlGenContext<'a> {
@@ -187,7 +240,24 @@ impl<'a> SqlGenContext<'a> {
             injected_join_keys: HashSet::new(),
             table_alias_counts: HashMap::new(),
             relation_alias_map: HashMap::new(),
+            when_clauses: Vec::new(),
+            static_where_sql: None,
         }
+    }
+
+    /// Return all params in order: static params first, then when-clause params.
+    /// Deduplicates while preserving first-seen order.
+    fn all_params_ordered(&self) -> Vec<String> {
+        let mut result = self.params.clone();
+        let mut seen: HashSet<String> = result.iter().cloned().collect();
+        for wc in &self.when_clauses {
+            for p in &wc.params_in_clause {
+                if seen.insert(p.clone()) {
+                    result.push(p.clone());
+                }
+            }
+        }
+        result
     }
 
     fn add_param(&mut self, name: &str) -> String {
@@ -199,10 +269,115 @@ impl<'a> SqlGenContext<'a> {
         format!("${}", self.param_counter)
     }
 
+    /// Extract the condition variable name from a when condition expression.
+    /// Handles patterns like:
+    ///   - `$var != null` -> Some("var")
+    ///   - `$var.isNotNull()` -> Some("var")
+    ///   - Complex expressions -> None (falls back to always-include)
+    fn extract_condition_var(expr: &Expression) -> Option<String> {
+        match expr {
+            // $var != null
+            Expression::Binary { left, op: BinaryOp::Unequal, right } => {
+                // Check left is variable, right is null (or vice versa)
+                if let Expression::Atomic(AtomicExpression::Variable(var)) = left.as_ref() {
+                    if matches!(right.as_ref(), Expression::Atomic(AtomicExpression::Literal(Literal::Null))) {
+                        return Some(var.name.clone());
+                    }
+                }
+                if let Expression::Atomic(AtomicExpression::Variable(var)) = right.as_ref() {
+                    if matches!(left.as_ref(), Expression::Atomic(AtomicExpression::Literal(Literal::Null))) {
+                        return Some(var.name.clone());
+                    }
+                }
+                None
+            }
+            // $var.isNotNull()
+            Expression::Atomic(AtomicExpression::MethodCall(mc)) => {
+                if mc.method == "isNotNull" {
+                    if let Expression::Atomic(AtomicExpression::Variable(var)) = mc.target.as_ref() {
+                        return Some(var.name.clone());
+                    }
+                }
+                None
+            }
+            _ => None,
+        }
+    }
+
+    /// Generate the SQL fragment for a when-clause body.
+    /// Returns (clause_type, sql_fragment, params_used).
+    /// The sql_fragment uses `${}` placeholders for parameter positions
+    /// that will be filled at runtime with dynamic indices.
+    fn gen_when_clause_body(&mut self, clause: &QueryClause) -> (WhenClauseType, String, Vec<String>) {
+        // Use a sub-context to generate the SQL without polluting the main params.
+        let mut sub_ctx = SqlGenContext::new(self.relation_registry);
+        // Copy injected join state so relation resolution works
+        sub_ctx.injected_join_keys = self.injected_join_keys.clone();
+        sub_ctx.table_alias_counts = self.table_alias_counts.clone();
+        sub_ctx.relation_alias_map = self.relation_alias_map.clone();
+
+        match clause {
+            QueryClause::Where(expr) => {
+                let sql = sub_ctx.gen_expr(expr);
+                // Replace $N placeholders with ${} for format! substitution
+                let params = sub_ctx.params.clone();
+                let mut template = sql;
+                // Replace $N with ${} in reverse order to avoid replacing $1 inside $10
+                for i in (1..=params.len()).rev() {
+                    template = template.replace(
+                        &format!("${}", i),
+                        "${}",
+                    );
+                }
+                // Merge any injected joins back
+                for join in sub_ctx.injected_joins {
+                    if !self.injected_join_keys.contains(&join) {
+                        self.injected_joins.push(join);
+                    }
+                }
+                (WhenClauseType::Where, template, params)
+            }
+            QueryClause::OrderBy(exprs) => {
+                let ob: Vec<String> = exprs
+                    .iter()
+                    .map(|e| {
+                        let expr_sql = sub_ctx.gen_expr(&e.expr);
+                        match &e.direction {
+                            Some(OrderDirection::Asc) => format!("{} ASC", expr_sql),
+                            Some(OrderDirection::Desc) => format!("{} DESC", expr_sql),
+                            None => expr_sql,
+                        }
+                    })
+                    .collect();
+                let sql = ob.join(", ");
+                let params = sub_ctx.params.clone();
+                let mut template = sql;
+                for i in (1..=params.len()).rev() {
+                    template = template.replace(&format!("${}", i), "${}");
+                }
+                (WhenClauseType::OrderBy, template, params)
+            }
+            QueryClause::Limit(expr) => {
+                let sql = sub_ctx.gen_expr(expr);
+                let params = sub_ctx.params.clone();
+                let mut template = sql;
+                for i in (1..=params.len()).rev() {
+                    template = template.replace(&format!("${}", i), "${}");
+                }
+                (WhenClauseType::Limit, template, params)
+            }
+            _ => {
+                // Fallback for other clause types
+                (WhenClauseType::Other, String::new(), Vec::new())
+            }
+        }
+    }
+
     /// Walk an expression tree and register all variables as params
     /// without generating SQL output. This ensures that variables inside
     /// when-clause conditions and bodies (which may be overwritten by
     /// subsequent clauses) are still tracked.
+    #[allow(dead_code)]
     fn collect_params_from_expr(&mut self, expr: &Expression) {
         match expr {
             Expression::Binary { left, right, .. } => {
@@ -218,6 +393,7 @@ impl<'a> SqlGenContext<'a> {
         }
     }
 
+    #[allow(dead_code)]
     fn collect_params_from_atomic(&mut self, atomic: &AtomicExpression) {
         match atomic {
             AtomicExpression::Variable(var) => {
@@ -272,6 +448,7 @@ impl<'a> SqlGenContext<'a> {
     }
 
     /// Collect params from all expressions within a select statement.
+    #[allow(dead_code)]
     fn collect_params_from_select(&mut self, stmt: &SelectStatement) {
         for clause in &stmt.clauses {
             self.collect_params_from_clause(clause);
@@ -282,6 +459,7 @@ impl<'a> SqlGenContext<'a> {
     }
 
     /// Collect params from a query clause.
+    #[allow(dead_code)]
     fn collect_params_from_clause(&mut self, clause: &QueryClause) {
         match clause {
             QueryClause::Select(exprs) => {
@@ -819,6 +997,10 @@ impl<'a> SqlGenContext<'a> {
         // before assembling, so that all relation JOINs are collected first.
         let where_sql = where_clause.map(|cond| {
             let w = self.gen_expr(cond);
+            // For dynamic queries, save the static WHERE condition separately.
+            if self.is_dynamic {
+                self.static_where_sql = Some(w.clone());
+            }
             format!("WHERE {}", w)
         });
 
@@ -967,28 +1149,22 @@ impl<'a> SqlGenContext<'a> {
             }
             QueryClause::When(when_clause) => {
                 self.is_dynamic = true;
-                // Eagerly collect params from both the condition and the body
-                // BEFORE processing the inner clause. This ensures that even
-                // if a subsequent When clause overwrites the slot (e.g.,
-                // multiple When clauses each providing a Where), the params
-                // from all clauses are still registered.
-                self.collect_params_from_expr(&when_clause.condition);
-                self.collect_params_from_clause(&when_clause.clause);
-                // Process the inner clause as well (emit it inline for now)
-                self.process_clause(
-                    &when_clause.clause,
-                    select_exprs,
-                    where_clause,
-                    group_by,
-                    having,
-                    order_by,
-                    limit,
-                    offset,
-                    is_distinct,
-                    extra_joins,
-                    aggregate_exprs,
-                    has_for_update,
-                );
+                // Extract the condition variable name from the when condition.
+                let condition_var = Self::extract_condition_var(&when_clause.condition);
+
+                // Generate the SQL fragment for the inner clause body using
+                // a separate sub-context so params are tracked independently.
+                let (clause_type, clause_sql, params_in_clause) =
+                    self.gen_when_clause_body(&when_clause.clause);
+
+                self.when_clauses.push(WhenClauseInfo {
+                    condition_var,
+                    clause_type,
+                    clause_sql,
+                    params_in_clause,
+                });
+                // Do NOT process the inner clause into the regular slots -
+                // that was the bug causing overwriting.
             }
         }
     }
@@ -2003,8 +2179,15 @@ mod tests {
         };
         let result = generate_select_sql(&stmt);
         assert!(result.is_dynamic);
-        assert!(result.sql.contains("WHERE"));
-        assert!(result.params.contains(&"name".to_string()), "params should contain 'name', got: {:?}", result.params);
+        // When clauses should NOT be in the static SQL
+        assert!(!result.sql.contains("WHERE"), "static SQL should not contain WHERE for when-only queries");
+        // Params should be in when_clauses, not in the static params
+        assert!(result.params.is_empty(), "static params should be empty, got: {:?}", result.params);
+        assert_eq!(result.when_clauses.len(), 1);
+        assert!(result.when_clauses[0].params_in_clause.contains(&"name".to_string()));
+        assert_eq!(result.when_clauses[0].condition_var, Some("name".to_string()));
+        // all_params should contain the when-clause params
+        assert!(result.all_params.contains(&"name".to_string()), "all_params should contain 'name', got: {:?}", result.all_params);
     }
 
     #[test]
@@ -2035,9 +2218,13 @@ mod tests {
         };
         let result = generate_select_sql(&stmt);
         assert!(result.is_dynamic);
-        // Both params should be registered
-        assert!(result.params.contains(&"name".to_string()), "params should contain 'name', got: {:?}", result.params);
-        assert!(result.params.contains(&"age".to_string()), "params should contain 'age', got: {:?}", result.params);
+        // Both when clauses should be captured
+        assert_eq!(result.when_clauses.len(), 2);
+        assert!(result.when_clauses[0].params_in_clause.contains(&"name".to_string()));
+        assert!(result.when_clauses[1].params_in_clause.contains(&"age".to_string()));
+        // all_params should contain both
+        assert!(result.all_params.contains(&"name".to_string()), "all_params should contain 'name', got: {:?}", result.all_params);
+        assert!(result.all_params.contains(&"age".to_string()), "all_params should contain 'age', got: {:?}", result.all_params);
     }
 
     // ── INSERT tests ────────────────────────────────────────────────────

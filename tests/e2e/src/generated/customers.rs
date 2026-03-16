@@ -12,7 +12,7 @@ pub struct Customer {
 }
 
 impl Customer {
-    fn from_row(row: &dyn nextsql_backend_rust_runtime::Row) -> Self {
+    pub fn from_row(row: &dyn super::runtime::Row) -> Self {
         Self {
             id: CustomerId(row.get_uuid(0)),
             email: row.get_string(1),
@@ -29,13 +29,13 @@ pub struct FindCustomerByIdParams {
 }
 
 impl FindCustomerByIdParams {
-    fn to_params(&self) -> Vec<&dyn nextsql_backend_rust_runtime::ToSqlParam> {
+    pub fn to_params(&self) -> Vec<&dyn super::runtime::ToSqlParam> {
         vec![&self.id]
     }
 }
 
 pub async fn find_customer_by_id(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl super::runtime::Client + ?Sized),
     params: &FindCustomerByIdParams,
 ) -> Result<Vec<Customer>, Box<dyn std::error::Error + Send + Sync>> {
     let rows = client.query(
@@ -52,19 +52,53 @@ pub struct SearchCustomersParams {
 }
 
 impl SearchCustomersParams {
-    fn to_params(&self) -> Vec<&dyn nextsql_backend_rust_runtime::ToSqlParam> {
+    pub fn to_params(&self) -> Vec<&dyn super::runtime::ToSqlParam> {
         vec![&self.name_like, &self.email_like, &self.is_active]
     }
 }
 
+#[allow(unused_assignments)]
 pub async fn search_customers(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl super::runtime::Client + ?Sized),
     params: &SearchCustomersParams,
 ) -> Result<Vec<Customer>, Box<dyn std::error::Error + Send + Sync>> {
-    let rows = client.query(
-        "SELECT customers.* FROM customers WHERE customers.is_active = $3 ORDER BY customers.name ASC",
-        &params.to_params(),
-    ).await?;
+    let mut bind_params: Vec<&dyn super::runtime::ToSqlParam> = Vec::new();
+    let mut idx = 1usize;
+
+    let mut conditions: Vec<String> = Vec::new();
+    if params.name_like.is_some() {
+        conditions.push(format!("upper(customers.name) LIKE ${}", idx));
+        bind_params.push(&params.name_like);
+        idx += 1;
+    }
+    if params.email_like.is_some() {
+        conditions.push(format!("customers.email LIKE ${}", idx));
+        bind_params.push(&params.email_like);
+        idx += 1;
+    }
+    if params.is_active.is_some() {
+        conditions.push(format!("customers.is_active = ${}", idx));
+        bind_params.push(&params.is_active);
+        idx += 1;
+    }
+
+    // Build WHERE clause
+    let where_clause = {
+        let mut parts: Vec<String> = Vec::new();
+        parts.extend(conditions);
+        if parts.is_empty() {
+            String::new()
+        } else {
+            format!(" WHERE {}", parts.join(" AND "))
+        }
+    };
+
+    let sql = format!(
+        "{}{} ORDER BY customers.name ASC",
+        "SELECT customers.* FROM customers",
+        where_clause,
+    );
+    let rows = client.query(&sql, &bind_params).await?;
     Ok(rows.iter().map(|row| Customer::from_row(row)).collect())
 }
 
@@ -74,13 +108,13 @@ pub struct ListCustomersParams {
 }
 
 impl ListCustomersParams {
-    fn to_params(&self) -> Vec<&dyn nextsql_backend_rust_runtime::ToSqlParam> {
+    pub fn to_params(&self) -> Vec<&dyn super::runtime::ToSqlParam> {
         vec![&self.limit, &self.offset]
     }
 }
 
 pub async fn list_customers(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl super::runtime::Client + ?Sized),
     params: &ListCustomersParams,
 ) -> Result<Vec<Customer>, Box<dyn std::error::Error + Send + Sync>> {
     let rows = client.query(
@@ -95,7 +129,7 @@ pub struct HasActiveOrdersParams {
 }
 
 impl HasActiveOrdersParams {
-    fn to_params(&self) -> Vec<&dyn nextsql_backend_rust_runtime::ToSqlParam> {
+    pub fn to_params(&self) -> Vec<&dyn super::runtime::ToSqlParam> {
         vec![&self.customer_id]
     }
 }
@@ -105,7 +139,7 @@ pub struct HasActiveOrdersRow {
 }
 
 impl HasActiveOrdersRow {
-    fn from_row(row: &dyn nextsql_backend_rust_runtime::Row) -> Self {
+    pub fn from_row(row: &dyn super::runtime::Row) -> Self {
         Self {
             id: CustomerId(row.get_uuid(0)),
         }
@@ -113,7 +147,7 @@ impl HasActiveOrdersRow {
 }
 
 pub async fn has_active_orders(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl super::runtime::Client + ?Sized),
     params: &HasActiveOrdersParams,
 ) -> Result<Vec<HasActiveOrdersRow>, Box<dyn std::error::Error + Send + Sync>> {
     let rows = client.query(
@@ -128,13 +162,13 @@ pub struct FindCustomerByEmailParams {
 }
 
 impl FindCustomerByEmailParams {
-    fn to_params(&self) -> Vec<&dyn nextsql_backend_rust_runtime::ToSqlParam> {
+    pub fn to_params(&self) -> Vec<&dyn super::runtime::ToSqlParam> {
         vec![&self.email]
     }
 }
 
 pub async fn find_customer_by_email(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl super::runtime::Client + ?Sized),
     params: &FindCustomerByEmailParams,
 ) -> Result<Vec<Customer>, Box<dyn std::error::Error + Send + Sync>> {
     let rows = client.query(
@@ -151,13 +185,13 @@ pub struct CreateCustomerParams {
 }
 
 impl CreateCustomerParams {
-    fn to_params(&self) -> Vec<&dyn nextsql_backend_rust_runtime::ToSqlParam> {
+    pub fn to_params(&self) -> Vec<&dyn super::runtime::ToSqlParam> {
         vec![&self.email, &self.name, &self.phone]
     }
 }
 
 pub async fn create_customer(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl super::runtime::Client + ?Sized),
     params: &CreateCustomerParams,
 ) -> Result<Vec<Customer>, Box<dyn std::error::Error + Send + Sync>> {
     let rows = client.query(
@@ -175,13 +209,13 @@ pub struct UpdateCustomerParams {
 }
 
 impl UpdateCustomerParams {
-    fn to_params(&self) -> Vec<&dyn nextsql_backend_rust_runtime::ToSqlParam> {
+    pub fn to_params(&self) -> Vec<&dyn super::runtime::ToSqlParam> {
         vec![&self.name, &self.email, &self.phone, &self.id]
     }
 }
 
 pub async fn update_customer(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl super::runtime::Client + ?Sized),
     params: &UpdateCustomerParams,
 ) -> Result<Vec<Customer>, Box<dyn std::error::Error + Send + Sync>> {
     let rows = client.query(
@@ -196,13 +230,13 @@ pub struct DeactivateCustomerParams {
 }
 
 impl DeactivateCustomerParams {
-    fn to_params(&self) -> Vec<&dyn nextsql_backend_rust_runtime::ToSqlParam> {
+    pub fn to_params(&self) -> Vec<&dyn super::runtime::ToSqlParam> {
         vec![&self.id]
     }
 }
 
 pub async fn deactivate_customer(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl super::runtime::Client + ?Sized),
     params: &DeactivateCustomerParams,
 ) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
     let count = client.execute(

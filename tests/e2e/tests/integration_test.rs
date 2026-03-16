@@ -1,4 +1,4 @@
-use nextsql_backend_rust_runtime::tokio_postgres_impl::PgClient;
+use nextsql_e2e_tests::generated::runtime::PgClient;
 use nextsql_e2e_tests::generated::*;
 
 async fn setup() -> PgClient {
@@ -514,18 +514,8 @@ async fn test_search_customers_dynamic_filter() {
     .await
     .unwrap();
 
-    // BUG: The generated SQL for search_customers only uses $3 (is_active) but still
-    // binds $1 (name_like) and $2 (email_like) as parameters. When these are None,
-    // PostgreSQL cannot determine the data type of parameter $1.
-    // The `when` clause conditions for name_like and email_like are not emitted in the SQL.
-    // This is a code generation bug: dynamic WHERE (when clause) conditions are dropped.
-    //
-    // Expected SQL should be something like:
-    //   WHERE ($1 IS NULL OR customers.name LIKE $1)
-    //     AND ($2 IS NULL OR customers.email LIKE $2)
-    //     AND ($3 IS NULL OR customers.is_active = $3)
-    // Actual SQL: SELECT customers.* FROM customers WHERE customers.is_active = $3 ORDER BY ...
-    let result = customers::search_customers(
+    // Filter by is_active only -> should return Alice Smith and Alice Wonder
+    let active = customers::search_customers(
         &client,
         &customers::SearchCustomersParams {
             name_like: None,
@@ -533,12 +523,117 @@ async fn test_search_customers_dynamic_filter() {
             is_active: Some(true),
         },
     )
-    .await;
-    assert!(
-        result.is_err(),
-        "BUG: search_customers should fail because generated SQL drops when-clause conditions \
-         but still binds unused parameters, causing PostgreSQL to reject the query"
-    );
+    .await
+    .unwrap();
+    assert_eq!(active.len(), 2);
+    assert!(active.iter().all(|c| c.is_active));
+
+    // No filters -> should return all 3
+    let all_result = customers::search_customers(
+        &client,
+        &customers::SearchCustomersParams {
+            name_like: None,
+            email_like: None,
+            is_active: None,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(all_result.len(), 3);
+
+    // Filter by name_like -> should return both Alices (upper() LIKE is used)
+    let alices = customers::search_customers(
+        &client,
+        &customers::SearchCustomersParams {
+            name_like: Some("%ALICE%".to_string()),
+            email_like: None,
+            is_active: None,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(alices.len(), 2);
+
+    // Combine name_like + is_active -> "Bob" is inactive, filter for active only
+    let active_bobs = customers::search_customers(
+        &client,
+        &customers::SearchCustomersParams {
+            name_like: Some("%BOB%".to_string()),
+            email_like: None,
+            is_active: Some(true),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(active_bobs.len(), 0); // Bob is deactivated
+}
+
+#[tokio::test]
+async fn test_dynamic_product_search() {
+    let client = setup().await;
+    let inner = client.inner();
+
+    let cat_row = inner
+        .query_one(
+            "INSERT INTO categories (name, sort_order) VALUES ('SearchCat', 1) RETURNING id",
+            &[],
+        )
+        .await
+        .unwrap();
+    let cat_id: uuid::Uuid = cat_row.get(0);
+
+    for (name, price) in [("Laptop", 999.0_f64), ("Mouse", 25.0_f64), ("Keyboard", 75.0_f64), ("Monitor", 300.0_f64)] {
+        inner
+            .execute(
+                "INSERT INTO products (category_id, name, price, stock) VALUES ($1, $2, $3, 10)",
+                &[&cat_id, &name, &price],
+            )
+            .await
+            .unwrap();
+    }
+
+    // Filter by price range only
+    let mid_range = products::search_products(
+        &client,
+        &products::SearchProductsParams {
+            min_price: Some(50.0),
+            max_price: Some(500.0),
+            category_ids: None,
+            name_like: None,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(mid_range.len(), 2); // Keyboard (75) and Monitor (300)
+
+    // Filter by name only
+    let laptops = products::search_products(
+        &client,
+        &products::SearchProductsParams {
+            min_price: None,
+            max_price: None,
+            category_ids: None,
+            name_like: Some("%Lap%".to_string()),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(laptops.len(), 1);
+    assert_eq!(laptops[0].name, "Laptop");
+
+    // No filters -> all active products
+    let all = products::search_products(
+        &client,
+        &products::SearchProductsParams {
+            min_price: None,
+            max_price: None,
+            category_ids: None,
+            name_like: None,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(all.len(), 4);
 }
 
 #[tokio::test]

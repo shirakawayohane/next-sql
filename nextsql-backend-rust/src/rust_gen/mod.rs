@@ -301,7 +301,7 @@ mod tests {
         // Verify Params struct
         assert!(result.contains("pub struct FindUserByIdParams {"));
         assert!(result.contains("pub id: uuid::Uuid,"));
-        assert!(result.contains("fn to_params(&self) -> Vec<&dyn super::runtime::ToSqlParam>"));
+        assert!(result.contains("pub fn to_params(&self) -> Vec<&dyn super::runtime::ToSqlParam>"));
         assert!(result.contains("&self.id"));
 
         // Verify Row struct
@@ -311,7 +311,7 @@ mod tests {
         assert!(result.contains("pub email: String,"));
 
         // Verify from_row
-        assert!(result.contains("fn from_row(row: &dyn super::runtime::Row) -> Self"));
+        assert!(result.contains("pub fn from_row(row: &dyn super::runtime::Row) -> Self"));
         assert!(result.contains("row.get_uuid(0)"));
         assert!(result.contains("row.get_string(1)"));
         assert!(result.contains("row.get_string(2)"));
@@ -812,7 +812,9 @@ mod tests {
         assert_eq!(table_name_to_model_name("users"), "User");
         assert_eq!(table_name_to_model_name("posts"), "Post");
         assert_eq!(table_name_to_model_name("application_headers"), "ApplicationHeader");
-        assert_eq!(table_name_to_model_name("statuses"), "Statuse");
+        assert_eq!(table_name_to_model_name("statuses"), "Status");
+        assert_eq!(table_name_to_model_name("addresses"), "Address");
+        assert_eq!(table_name_to_model_name("businesses"), "Business");
     }
 
     #[test]
@@ -821,6 +823,14 @@ mod tests {
         assert_eq!(singularize("posts"), "post");
         assert_eq!(singularize("s"), "s");
         assert_eq!(singularize("data"), "data");
+        // -es endings
+        assert_eq!(singularize("addresses"), "address");
+        assert_eq!(singularize("statuses"), "status");
+        assert_eq!(singularize("businesses"), "business");
+        assert_eq!(singularize("boxes"), "box");
+        assert_eq!(singularize("watches"), "watch");
+        assert_eq!(singularize("crashes"), "crash");
+        assert_eq!(singularize("buzzes"), "buzz");
     }
 
     #[test]

@@ -483,7 +483,7 @@ fn handle_setup_claude_command() -> Result<(), Box<dyn std::error::Error>> {
     let skill_dir = PathBuf::from(".claude/skills/learn-next-sql");
     std::fs::create_dir_all(&skill_dir)?;
 
-    let skill_content = include_str!("../../.claude/skills/learn-next-sql/SKILL.md");
+    let skill_content = include_str!(concat!(env!("OUT_DIR"), "/skill.md"));
     let skill_path = skill_dir.join("SKILL.md");
 
     std::fs::write(&skill_path, skill_content)?;

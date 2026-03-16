@@ -29,9 +29,26 @@ pub(super) fn to_pascal_case(s: &str) -> String {
 
 // ── Singularize / model-struct helpers ───────────────────────────────────
 
-/// Simple singularization: strip trailing 's'.
+/// Simple singularization: strip trailing 's' or 'es' as appropriate.
 pub(super) fn singularize(name: &str) -> String {
-    if name.ends_with('s') && name.len() > 2 {
+    if name.len() <= 2 {
+        return name.to_string();
+    }
+    // Words ending in -sses (e.g., "addresses", "businesses") -> strip "es"
+    // Words ending in -shes (e.g., "crashes") -> strip "es"
+    // Words ending in -ches (e.g., "watches") -> strip "es"
+    // Words ending in -xes (e.g., "boxes") -> strip "es"
+    // Words ending in -zes (e.g., "buzzes") -> strip "es"
+    // Words ending in -ses (e.g., "statuses") -> strip "es"
+    if name.ends_with("sses")
+        || name.ends_with("shes")
+        || name.ends_with("ches")
+        || name.ends_with("xes")
+        || name.ends_with("zes")
+        || name.ends_with("ses")
+    {
+        name[..name.len() - 2].to_string()
+    } else if name.ends_with('s') {
         name[..name.len() - 1].to_string()
     } else {
         name.to_string()

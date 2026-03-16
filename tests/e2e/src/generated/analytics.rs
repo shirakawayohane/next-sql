@@ -8,7 +8,7 @@ pub struct CountOrdersByStatusRow {
 }
 
 impl CountOrdersByStatusRow {
-    fn from_row(row: &dyn nextsql_backend_rust_runtime::Row) -> Self {
+    pub fn from_row(row: &dyn super::runtime::Row) -> Self {
         Self {
             status: row.get_string(0),
             order_count: row.get_i64(1),
@@ -17,7 +17,7 @@ impl CountOrdersByStatusRow {
 }
 
 pub async fn count_orders_by_status(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl super::runtime::Client + ?Sized),
 ) -> Result<Vec<CountOrdersByStatusRow>, Box<dyn std::error::Error + Send + Sync>> {
     let rows = client.query(
         "SELECT orders.status, COUNT(orders.id) AS order_count FROM orders GROUP BY orders.status",
@@ -33,7 +33,7 @@ pub struct SalesByCategoryRow {
 }
 
 impl SalesByCategoryRow {
-    fn from_row(row: &dyn nextsql_backend_rust_runtime::Row) -> Self {
+    pub fn from_row(row: &dyn super::runtime::Row) -> Self {
         Self {
             category_id: CategoryId(row.get_uuid(0)),
             total_revenue: row.get_f64(1),
@@ -43,7 +43,7 @@ impl SalesByCategoryRow {
 }
 
 pub async fn sales_by_category(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl super::runtime::Client + ?Sized),
 ) -> Result<Vec<SalesByCategoryRow>, Box<dyn std::error::Error + Send + Sync>> {
     let rows = client.query(
         "SELECT products.category_id, SUM(order_items.unit_price * order_items.quantity) AS total_revenue, COUNT(order_items.id) AS total_items FROM order_items INNER JOIN products ON order_items.product_id = products.id GROUP BY products.category_id ORDER BY total_revenue DESC",
@@ -57,7 +57,7 @@ pub struct TopCustomersParams {
 }
 
 impl TopCustomersParams {
-    fn to_params(&self) -> Vec<&dyn nextsql_backend_rust_runtime::ToSqlParam> {
+    pub fn to_params(&self) -> Vec<&dyn super::runtime::ToSqlParam> {
         vec![&self.min_orders]
     }
 }
@@ -69,7 +69,7 @@ pub struct TopCustomersRow {
 }
 
 impl TopCustomersRow {
-    fn from_row(row: &dyn nextsql_backend_rust_runtime::Row) -> Self {
+    pub fn from_row(row: &dyn super::runtime::Row) -> Self {
         Self {
             customer_id: CustomerId(row.get_uuid(0)),
             order_count: row.get_i64(1),
@@ -79,7 +79,7 @@ impl TopCustomersRow {
 }
 
 pub async fn top_customers(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl super::runtime::Client + ?Sized),
     params: &TopCustomersParams,
 ) -> Result<Vec<TopCustomersRow>, Box<dyn std::error::Error + Send + Sync>> {
     let rows = client.query(
@@ -96,7 +96,7 @@ pub struct AverageRatingByProductRow {
 }
 
 impl AverageRatingByProductRow {
-    fn from_row(row: &dyn nextsql_backend_rust_runtime::Row) -> Self {
+    pub fn from_row(row: &dyn super::runtime::Row) -> Self {
         Self {
             product_id: ProductId(row.get_uuid(0)),
             avg_rating: row.get_f64(1),
@@ -106,7 +106,7 @@ impl AverageRatingByProductRow {
 }
 
 pub async fn average_rating_by_product(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl super::runtime::Client + ?Sized),
 ) -> Result<Vec<AverageRatingByProductRow>, Box<dyn std::error::Error + Send + Sync>> {
     let rows = client.query(
         "SELECT reviews.product_id, AVG(reviews.rating) AS avg_rating, COUNT(reviews.id) AS review_count FROM reviews GROUP BY reviews.product_id HAVING COUNT(reviews.id) > 0 ORDER BY avg_rating DESC",
@@ -122,7 +122,7 @@ pub struct CustomerSpendingRow {
 }
 
 impl CustomerSpendingRow {
-    fn from_row(row: &dyn nextsql_backend_rust_runtime::Row) -> Self {
+    pub fn from_row(row: &dyn super::runtime::Row) -> Self {
         Self {
             customer_id: CustomerId(row.get_uuid(0)),
             total: row.get_f64(1),
@@ -132,7 +132,7 @@ impl CustomerSpendingRow {
 }
 
 pub async fn customer_spending(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl super::runtime::Client + ?Sized),
 ) -> Result<Vec<CustomerSpendingRow>, Box<dyn std::error::Error + Send + Sync>> {
     let rows = client.query(
         "SELECT orders.customer_id, SUM(order_items.unit_price * order_items.quantity) AS total, COUNT(order_items.id) AS item_count FROM orders INNER JOIN order_items ON orders.id = order_items.order_id WHERE orders.status != 'cancelled' GROUP BY orders.customer_id ORDER BY total DESC LIMIT 100",
@@ -149,7 +149,7 @@ pub struct PriceRangeByCategoryRow {
 }
 
 impl PriceRangeByCategoryRow {
-    fn from_row(row: &dyn nextsql_backend_rust_runtime::Row) -> Self {
+    pub fn from_row(row: &dyn super::runtime::Row) -> Self {
         Self {
             category_id: CategoryId(row.get_uuid(0)),
             min_price: row.get_f64(1),
@@ -160,7 +160,7 @@ impl PriceRangeByCategoryRow {
 }
 
 pub async fn price_range_by_category(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl super::runtime::Client + ?Sized),
 ) -> Result<Vec<PriceRangeByCategoryRow>, Box<dyn std::error::Error + Send + Sync>> {
     let rows = client.query(
         "SELECT products.category_id, MIN(products.price) AS min_price, MAX(products.price) AS max_price, COUNT(products.id) AS product_count FROM products WHERE products.is_active = TRUE GROUP BY products.category_id",
@@ -174,7 +174,7 @@ pub struct ActiveCustomerCountRow {
 }
 
 impl ActiveCustomerCountRow {
-    fn from_row(row: &dyn nextsql_backend_rust_runtime::Row) -> Self {
+    pub fn from_row(row: &dyn super::runtime::Row) -> Self {
         Self {
             total: row.get_i64(0),
         }
@@ -182,7 +182,7 @@ impl ActiveCustomerCountRow {
 }
 
 pub async fn active_customer_count(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl super::runtime::Client + ?Sized),
 ) -> Result<Vec<ActiveCustomerCountRow>, Box<dyn std::error::Error + Send + Sync>> {
     let rows = client.query(
         "SELECT COUNT(customers.id) AS total FROM customers WHERE customers.is_active = TRUE",
@@ -196,7 +196,7 @@ pub struct HighValueCustomersParams {
 }
 
 impl HighValueCustomersParams {
-    fn to_params(&self) -> Vec<&dyn nextsql_backend_rust_runtime::ToSqlParam> {
+    pub fn to_params(&self) -> Vec<&dyn super::runtime::ToSqlParam> {
         vec![&self.min_total]
     }
 }
@@ -208,7 +208,7 @@ pub struct HighValueCustomersRow {
 }
 
 impl HighValueCustomersRow {
-    fn from_row(row: &dyn nextsql_backend_rust_runtime::Row) -> Self {
+    pub fn from_row(row: &dyn super::runtime::Row) -> Self {
         Self {
             customer_id: CustomerId(row.get_uuid(0)),
             total_spent: row.get_f64(1),
@@ -218,7 +218,7 @@ impl HighValueCustomersRow {
 }
 
 pub async fn high_value_customers(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl super::runtime::Client + ?Sized),
     params: &HighValueCustomersParams,
 ) -> Result<Vec<HighValueCustomersRow>, Box<dyn std::error::Error + Send + Sync>> {
     let rows = client.query(

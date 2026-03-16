@@ -14,7 +14,7 @@ pub struct Product {
 }
 
 impl Product {
-    fn from_row(row: &dyn nextsql_backend_rust_runtime::Row) -> Self {
+    pub fn from_row(row: &dyn super::runtime::Row) -> Self {
         Self {
             id: ProductId(row.get_uuid(0)),
             category_id: CategoryId(row.get_uuid(1)),
@@ -33,7 +33,7 @@ pub struct FindProductByIdParams {
 }
 
 impl FindProductByIdParams {
-    fn to_params(&self) -> Vec<&dyn nextsql_backend_rust_runtime::ToSqlParam> {
+    pub fn to_params(&self) -> Vec<&dyn super::runtime::ToSqlParam> {
         vec![&self.id]
     }
 }
@@ -51,7 +51,7 @@ pub struct FindProductByIdRow {
 }
 
 impl FindProductByIdRow {
-    fn from_row(row: &dyn nextsql_backend_rust_runtime::Row) -> Self {
+    pub fn from_row(row: &dyn super::runtime::Row) -> Self {
         Self {
             id: ProductId(row.get_uuid(0)),
             category_id: CategoryId(row.get_uuid(1)),
@@ -67,7 +67,7 @@ impl FindProductByIdRow {
 }
 
 pub async fn find_product_by_id(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl super::runtime::Client + ?Sized),
     params: &FindProductByIdParams,
 ) -> Result<Vec<FindProductByIdRow>, Box<dyn std::error::Error + Send + Sync>> {
     let rows = client.query(
@@ -82,13 +82,13 @@ pub struct FindProductsByCategoryParams {
 }
 
 impl FindProductsByCategoryParams {
-    fn to_params(&self) -> Vec<&dyn nextsql_backend_rust_runtime::ToSqlParam> {
+    pub fn to_params(&self) -> Vec<&dyn super::runtime::ToSqlParam> {
         vec![&self.category_id]
     }
 }
 
 pub async fn find_products_by_category(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl super::runtime::Client + ?Sized),
     params: &FindProductsByCategoryParams,
 ) -> Result<Vec<Product>, Box<dyn std::error::Error + Send + Sync>> {
     let rows = client.query(
@@ -103,19 +103,19 @@ pub struct FindProductsByIdsParams {
 }
 
 impl FindProductsByIdsParams {
-    fn to_params(&self) -> Vec<&dyn nextsql_backend_rust_runtime::ToSqlParam> {
+    pub fn to_params(&self) -> Vec<&dyn super::runtime::ToSqlParam> {
         vec![&self.ids]
     }
 }
 
 pub async fn find_products_by_ids(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl super::runtime::Client + ?Sized),
     params: &FindProductsByIdsParams,
 ) -> Result<Vec<Product>, Box<dyn std::error::Error + Send + Sync>> {
-    let __ids_inner: Vec<uuid::Uuid> = params.ids.iter().map(|v| v.0).collect();
+    let __ids_inner: Vec<uuid::Uuid> = params.ids.iter().map(|v| v.0.clone()).collect();
     let rows = client.query(
         "SELECT products.* FROM products WHERE products.id = ANY($1)",
-        &vec![&__ids_inner as &dyn nextsql_backend_rust_runtime::ToSqlParam],
+        &vec![&__ids_inner as &dyn super::runtime::ToSqlParam],
     ).await?;
     Ok(rows.iter().map(|row| Product::from_row(row)).collect())
 }
@@ -128,19 +128,59 @@ pub struct SearchProductsParams {
 }
 
 impl SearchProductsParams {
-    fn to_params(&self) -> Vec<&dyn nextsql_backend_rust_runtime::ToSqlParam> {
+    pub fn to_params(&self) -> Vec<&dyn super::runtime::ToSqlParam> {
         vec![&self.min_price, &self.max_price, &self.category_ids, &self.name_like]
     }
 }
 
+#[allow(unused_assignments)]
 pub async fn search_products(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl super::runtime::Client + ?Sized),
     params: &SearchProductsParams,
 ) -> Result<Vec<Product>, Box<dyn std::error::Error + Send + Sync>> {
-    let rows = client.query(
-        "SELECT products.* FROM products WHERE products.name LIKE $4 ORDER BY products.price ASC, products.name ASC",
-        &params.to_params(),
-    ).await?;
+    let mut bind_params: Vec<&dyn super::runtime::ToSqlParam> = Vec::new();
+    let mut idx = 1usize;
+
+    let mut conditions: Vec<String> = Vec::new();
+    if params.min_price.is_some() {
+        conditions.push(format!("products.price >= ${}", idx));
+        bind_params.push(&params.min_price);
+        idx += 1;
+    }
+    if params.max_price.is_some() {
+        conditions.push(format!("products.price <= ${}", idx));
+        bind_params.push(&params.max_price);
+        idx += 1;
+    }
+    if params.category_ids.is_some() {
+        conditions.push(format!("products.category_id = ANY(${})", idx));
+        bind_params.push(&params.category_ids);
+        idx += 1;
+    }
+    if params.name_like.is_some() {
+        conditions.push(format!("products.name LIKE ${}", idx));
+        bind_params.push(&params.name_like);
+        idx += 1;
+    }
+
+    // Build WHERE clause
+    let where_clause = {
+        let mut parts: Vec<String> = Vec::new();
+        parts.push("products.is_active = TRUE".to_string());
+        parts.extend(conditions);
+        if parts.is_empty() {
+            String::new()
+        } else {
+            format!(" WHERE {}", parts.join(" AND "))
+        }
+    };
+
+    let sql = format!(
+        "{}{} ORDER BY products.price ASC, products.name ASC",
+        "SELECT products.* FROM products",
+        where_clause,
+    );
+    let rows = client.query(&sql, &bind_params).await?;
     Ok(rows.iter().map(|row| Product::from_row(row)).collect())
 }
 
@@ -151,7 +191,7 @@ pub struct FindProductsWithCategoryRow {
 }
 
 impl FindProductsWithCategoryRow {
-    fn from_row(row: &dyn nextsql_backend_rust_runtime::Row) -> Self {
+    pub fn from_row(row: &dyn super::runtime::Row) -> Self {
         Self {
             name: row.get_string(0),
             price: row.get_f64(1),
@@ -161,7 +201,7 @@ impl FindProductsWithCategoryRow {
 }
 
 pub async fn find_products_with_category(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl super::runtime::Client + ?Sized),
 ) -> Result<Vec<FindProductsWithCategoryRow>, Box<dyn std::error::Error + Send + Sync>> {
     let rows = client.query(
         "SELECT products.name, products.price, categories.name AS category_name FROM products INNER JOIN categories ON categories.id = products.category_id WHERE products.is_active = TRUE ORDER BY products.name ASC",
@@ -175,7 +215,7 @@ pub struct FindDistinctCategoryIdsRow {
 }
 
 impl FindDistinctCategoryIdsRow {
-    fn from_row(row: &dyn nextsql_backend_rust_runtime::Row) -> Self {
+    pub fn from_row(row: &dyn super::runtime::Row) -> Self {
         Self {
             category_id: CategoryId(row.get_uuid(0)),
         }
@@ -183,7 +223,7 @@ impl FindDistinctCategoryIdsRow {
 }
 
 pub async fn find_distinct_category_ids(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl super::runtime::Client + ?Sized),
 ) -> Result<Vec<FindDistinctCategoryIdsRow>, Box<dyn std::error::Error + Send + Sync>> {
     let rows = client.query(
         "SELECT DISTINCT products.category_id FROM products WHERE products.is_active = TRUE",
@@ -198,7 +238,7 @@ pub struct FindProductsWithNullDescriptionRow {
 }
 
 impl FindProductsWithNullDescriptionRow {
-    fn from_row(row: &dyn nextsql_backend_rust_runtime::Row) -> Self {
+    pub fn from_row(row: &dyn super::runtime::Row) -> Self {
         Self {
             id: ProductId(row.get_uuid(0)),
             name: row.get_string(1),
@@ -207,7 +247,7 @@ impl FindProductsWithNullDescriptionRow {
 }
 
 pub async fn find_products_with_null_description(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl super::runtime::Client + ?Sized),
 ) -> Result<Vec<FindProductsWithNullDescriptionRow>, Box<dyn std::error::Error + Send + Sync>> {
     let rows = client.query(
         "SELECT products.id, products.name FROM products WHERE products.description IS NULL",
@@ -222,13 +262,13 @@ pub struct FindProductsInPriceRangeParams {
 }
 
 impl FindProductsInPriceRangeParams {
-    fn to_params(&self) -> Vec<&dyn nextsql_backend_rust_runtime::ToSqlParam> {
+    pub fn to_params(&self) -> Vec<&dyn super::runtime::ToSqlParam> {
         vec![&self.min, &self.max]
     }
 }
 
 pub async fn find_products_in_price_range(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl super::runtime::Client + ?Sized),
     params: &FindProductsInPriceRangeParams,
 ) -> Result<Vec<Product>, Box<dyn std::error::Error + Send + Sync>> {
     let rows = client.query(
@@ -245,7 +285,7 @@ pub struct FindProductsWithDescriptionRow {
 }
 
 impl FindProductsWithDescriptionRow {
-    fn from_row(row: &dyn nextsql_backend_rust_runtime::Row) -> Self {
+    pub fn from_row(row: &dyn super::runtime::Row) -> Self {
         Self {
             id: ProductId(row.get_uuid(0)),
             name: row.get_string(1),
@@ -255,7 +295,7 @@ impl FindProductsWithDescriptionRow {
 }
 
 pub async fn find_products_with_description(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl super::runtime::Client + ?Sized),
 ) -> Result<Vec<FindProductsWithDescriptionRow>, Box<dyn std::error::Error + Send + Sync>> {
     let rows = client.query(
         "SELECT products.id, products.name, products.description FROM products WHERE products.description IS NOT NULL AND (products.is_active = TRUE)",
@@ -269,7 +309,7 @@ pub struct FindLowStockProductsParams {
 }
 
 impl FindLowStockProductsParams {
-    fn to_params(&self) -> Vec<&dyn nextsql_backend_rust_runtime::ToSqlParam> {
+    pub fn to_params(&self) -> Vec<&dyn super::runtime::ToSqlParam> {
         vec![&self.threshold]
     }
 }
@@ -281,7 +321,7 @@ pub struct FindLowStockProductsRow {
 }
 
 impl FindLowStockProductsRow {
-    fn from_row(row: &dyn nextsql_backend_rust_runtime::Row) -> Self {
+    pub fn from_row(row: &dyn super::runtime::Row) -> Self {
         Self {
             id: ProductId(row.get_uuid(0)),
             name: row.get_string(1),
@@ -291,7 +331,7 @@ impl FindLowStockProductsRow {
 }
 
 pub async fn find_low_stock_products(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl super::runtime::Client + ?Sized),
     params: &FindLowStockProductsParams,
 ) -> Result<Vec<FindLowStockProductsRow>, Box<dyn std::error::Error + Send + Sync>> {
     let rows = client.query(

@@ -12,7 +12,7 @@ pub struct Review {
 }
 
 impl Review {
-    fn from_row(row: &dyn nextsql_backend_rust_runtime::Row) -> Self {
+    pub fn from_row(row: &dyn super::runtime::Row) -> Self {
         Self {
             id: ReviewId(row.get_uuid(0)),
             product_id: ProductId(row.get_uuid(1)),
@@ -29,7 +29,7 @@ pub struct FindProductReviewsParams {
 }
 
 impl FindProductReviewsParams {
-    fn to_params(&self) -> Vec<&dyn nextsql_backend_rust_runtime::ToSqlParam> {
+    pub fn to_params(&self) -> Vec<&dyn super::runtime::ToSqlParam> {
         vec![&self.product_id]
     }
 }
@@ -45,7 +45,7 @@ pub struct FindProductReviewsRow {
 }
 
 impl FindProductReviewsRow {
-    fn from_row(row: &dyn nextsql_backend_rust_runtime::Row) -> Self {
+    pub fn from_row(row: &dyn super::runtime::Row) -> Self {
         Self {
             id: ReviewId(row.get_uuid(0)),
             product_id: ProductId(row.get_uuid(1)),
@@ -59,7 +59,7 @@ impl FindProductReviewsRow {
 }
 
 pub async fn find_product_reviews(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl super::runtime::Client + ?Sized),
     params: &FindProductReviewsParams,
 ) -> Result<Vec<FindProductReviewsRow>, Box<dyn std::error::Error + Send + Sync>> {
     let rows = client.query(
@@ -74,7 +74,7 @@ pub struct FindHighRatedReviewsParams {
 }
 
 impl FindHighRatedReviewsParams {
-    fn to_params(&self) -> Vec<&dyn nextsql_backend_rust_runtime::ToSqlParam> {
+    pub fn to_params(&self) -> Vec<&dyn super::runtime::ToSqlParam> {
         vec![&self.min_rating]
     }
 }
@@ -91,7 +91,7 @@ pub struct FindHighRatedReviewsRow {
 }
 
 impl FindHighRatedReviewsRow {
-    fn from_row(row: &dyn nextsql_backend_rust_runtime::Row) -> Self {
+    pub fn from_row(row: &dyn super::runtime::Row) -> Self {
         Self {
             id: ReviewId(row.get_uuid(0)),
             product_id: ProductId(row.get_uuid(1)),
@@ -106,7 +106,7 @@ impl FindHighRatedReviewsRow {
 }
 
 pub async fn find_high_rated_reviews(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl super::runtime::Client + ?Sized),
     params: &FindHighRatedReviewsParams,
 ) -> Result<Vec<FindHighRatedReviewsRow>, Box<dyn std::error::Error + Send + Sync>> {
     let rows = client.query(
@@ -122,13 +122,13 @@ pub struct FindReviewsByRatingRangeParams {
 }
 
 impl FindReviewsByRatingRangeParams {
-    fn to_params(&self) -> Vec<&dyn nextsql_backend_rust_runtime::ToSqlParam> {
+    pub fn to_params(&self) -> Vec<&dyn super::runtime::ToSqlParam> {
         vec![&self.min, &self.max]
     }
 }
 
 pub async fn find_reviews_by_rating_range(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl super::runtime::Client + ?Sized),
     params: &FindReviewsByRatingRangeParams,
 ) -> Result<Vec<Review>, Box<dyn std::error::Error + Send + Sync>> {
     let rows = client.query(
@@ -143,7 +143,7 @@ pub struct FindCustomerReviewsParams {
 }
 
 impl FindCustomerReviewsParams {
-    fn to_params(&self) -> Vec<&dyn nextsql_backend_rust_runtime::ToSqlParam> {
+    pub fn to_params(&self) -> Vec<&dyn super::runtime::ToSqlParam> {
         vec![&self.customer_id]
     }
 }
@@ -159,7 +159,7 @@ pub struct FindCustomerReviewsRow {
 }
 
 impl FindCustomerReviewsRow {
-    fn from_row(row: &dyn nextsql_backend_rust_runtime::Row) -> Self {
+    pub fn from_row(row: &dyn super::runtime::Row) -> Self {
         Self {
             id: ReviewId(row.get_uuid(0)),
             product_id: ProductId(row.get_uuid(1)),
@@ -173,7 +173,7 @@ impl FindCustomerReviewsRow {
 }
 
 pub async fn find_customer_reviews(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl super::runtime::Client + ?Sized),
     params: &FindCustomerReviewsParams,
 ) -> Result<Vec<FindCustomerReviewsRow>, Box<dyn std::error::Error + Send + Sync>> {
     let rows = client.query(
@@ -191,13 +191,13 @@ pub struct CreateReviewParams {
 }
 
 impl CreateReviewParams {
-    fn to_params(&self) -> Vec<&dyn nextsql_backend_rust_runtime::ToSqlParam> {
+    pub fn to_params(&self) -> Vec<&dyn super::runtime::ToSqlParam> {
         vec![&self.comment, &self.customer_id, &self.product_id, &self.rating]
     }
 }
 
 pub async fn create_review(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl super::runtime::Client + ?Sized),
     params: &CreateReviewParams,
 ) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
     let count = client.execute(
@@ -212,13 +212,13 @@ pub struct DeleteReviewParams {
 }
 
 impl DeleteReviewParams {
-    fn to_params(&self) -> Vec<&dyn nextsql_backend_rust_runtime::ToSqlParam> {
+    pub fn to_params(&self) -> Vec<&dyn super::runtime::ToSqlParam> {
         vec![&self.id]
     }
 }
 
 pub async fn delete_review(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl super::runtime::Client + ?Sized),
     params: &DeleteReviewParams,
 ) -> Result<Vec<Review>, Box<dyn std::error::Error + Send + Sync>> {
     let rows = client.query(
@@ -235,13 +235,13 @@ pub struct UpdateReviewParams {
 }
 
 impl UpdateReviewParams {
-    fn to_params(&self) -> Vec<&dyn nextsql_backend_rust_runtime::ToSqlParam> {
+    pub fn to_params(&self) -> Vec<&dyn super::runtime::ToSqlParam> {
         vec![&self.rating, &self.comment, &self.id]
     }
 }
 
 pub async fn update_review(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl super::runtime::Client + ?Sized),
     params: &UpdateReviewParams,
 ) -> Result<Vec<Review>, Box<dyn std::error::Error + Send + Sync>> {
     let rows = client.query(
@@ -256,7 +256,7 @@ pub struct FindReviewsWithoutCommentsParams {
 }
 
 impl FindReviewsWithoutCommentsParams {
-    fn to_params(&self) -> Vec<&dyn nextsql_backend_rust_runtime::ToSqlParam> {
+    pub fn to_params(&self) -> Vec<&dyn super::runtime::ToSqlParam> {
         vec![&self.product_id]
     }
 }
@@ -268,7 +268,7 @@ pub struct FindReviewsWithoutCommentsRow {
 }
 
 impl FindReviewsWithoutCommentsRow {
-    fn from_row(row: &dyn nextsql_backend_rust_runtime::Row) -> Self {
+    pub fn from_row(row: &dyn super::runtime::Row) -> Self {
         Self {
             id: ReviewId(row.get_uuid(0)),
             rating: row.get_i32(1),
@@ -278,7 +278,7 @@ impl FindReviewsWithoutCommentsRow {
 }
 
 pub async fn find_reviews_without_comments(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl super::runtime::Client + ?Sized),
     params: &FindReviewsWithoutCommentsParams,
 ) -> Result<Vec<FindReviewsWithoutCommentsRow>, Box<dyn std::error::Error + Send + Sync>> {
     let rows = client.query(
