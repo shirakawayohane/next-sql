@@ -609,9 +609,10 @@ impl<'a> TypeValidator<'a> {
     }
 
     fn is_numeric_builtin_type(&self, builtin: &BuiltInType) -> bool {
-        matches!(builtin, 
-            BuiltInType::I16 | BuiltInType::I32 | BuiltInType::I64 | 
-            BuiltInType::F32 | BuiltInType::F64
+        matches!(builtin,
+            BuiltInType::I16 | BuiltInType::I32 | BuiltInType::I64 |
+            BuiltInType::F32 | BuiltInType::F64 |
+            BuiltInType::Numeric | BuiltInType::Decimal
         )
     }
 

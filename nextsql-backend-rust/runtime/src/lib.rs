@@ -45,6 +45,8 @@ pub trait Row: Send {
     fn get_timestamp(&self, idx: usize) -> chrono::NaiveDateTime;
     fn get_timestamptz(&self, idx: usize) -> chrono::DateTime<chrono::Utc>;
     fn get_date(&self, idx: usize) -> chrono::NaiveDate;
+    fn get_decimal(&self, idx: usize) -> rust_decimal::Decimal;
+    fn get_json(&self, idx: usize) -> serde_json::Value;
 
     // Optional variants for nullable columns
     fn get_opt_i16(&self, idx: usize) -> Option<i16>;
@@ -58,6 +60,8 @@ pub trait Row: Send {
     fn get_opt_timestamp(&self, idx: usize) -> Option<chrono::NaiveDateTime>;
     fn get_opt_timestamptz(&self, idx: usize) -> Option<chrono::DateTime<chrono::Utc>>;
     fn get_opt_date(&self, idx: usize) -> Option<chrono::NaiveDate>;
+    fn get_opt_decimal(&self, idx: usize) -> Option<rust_decimal::Decimal>;
+    fn get_opt_json(&self, idx: usize) -> Option<serde_json::Value>;
 
     // Array variants
     fn get_vec_i16(&self, idx: usize) -> Vec<i16>;

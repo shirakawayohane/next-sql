@@ -53,6 +53,7 @@ impl LanguageServer for NextSqlLanguageServer {
                     all_commit_characters: None,
                     completion_item: None,
                 }),
+                definition_provider: Some(OneOf::Left(true)),
                 ..ServerCapabilities::default()
             },
             ..Default::default()
@@ -140,6 +141,53 @@ impl LanguageServer for NextSqlLanguageServer {
         }
     }
 
+    async fn goto_definition(
+        &self,
+        params: GotoDefinitionParams,
+    ) -> Result<Option<GotoDefinitionResponse>> {
+        let uri = params.text_document_position_params.text_document.uri.to_string();
+        let position = params.text_document_position_params.position;
+
+        let document_map = self.document_map.read().await;
+        let text = match document_map.get(&uri) {
+            Some(t) => t.clone(),
+            None => return Ok(None),
+        };
+        drop(document_map);
+
+        // Get the word at cursor position
+        let table_name = match Self::get_table_name_at_position(&text, position) {
+            Some(name) => name,
+            None => return Ok(None),
+        };
+
+        // Check if it's a known table in the schema
+        let file_path = params.text_document_position_params.text_document.uri.path().to_string();
+        let schema = match self.schema_cache.get_schema_for_file(std::path::Path::new(&file_path)).await {
+            Some(s) => s,
+            None => return Ok(None),
+        };
+
+        if !schema.tables.contains_key(&table_name) {
+            return Ok(None);
+        }
+
+        // Generate the virtual schema document and find the table's line
+        let (_, table_lines) = Self::generate_schema_document(&schema);
+        let line = table_lines.get(&table_name).copied().unwrap_or(0);
+
+        let target_uri = Url::parse("nextsql-schema:///schema.nsql").unwrap();
+        let target_range = Range {
+            start: Position { line, character: 0 },
+            end: Position { line, character: 0 },
+        };
+
+        Ok(Some(GotoDefinitionResponse::Scalar(Location {
+            uri: target_uri,
+            range: target_range,
+        })))
+    }
+
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
         eprintln!("LSP: completion handler called");
         let uri = params.text_document_position.text_document.uri.to_string();
@@ -169,6 +217,128 @@ impl LanguageServer for NextSqlLanguageServer {
 }
 
 impl NextSqlLanguageServer {
+    /// カスタムリクエスト: 仮想スキーマドキュメントの内容を返す
+    async fn get_schema_document(&self, params: serde_json::Value) -> Result<serde_json::Value> {
+        // params から file_path を取得してプロジェクトを特定する
+        let file_path = params
+            .get("filePath")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+
+        let schema = if !file_path.is_empty() {
+            self.schema_cache
+                .get_schema_for_file(std::path::Path::new(file_path))
+                .await
+        } else {
+            // file_path がない場合、キャッシュ内の最初のスキーマを使う
+            let schemas = self.schema_cache.schemas_write().await;
+            schemas.values().next().cloned()
+        };
+
+        match schema {
+            Some(schema) => {
+                let (doc, _) = Self::generate_schema_document(&schema);
+                Ok(serde_json::json!({ "content": doc }))
+            }
+            None => Ok(serde_json::json!({ "content": "// No schema loaded\n" })),
+        }
+    }
+
+    /// カーソル位置のテーブル名を取得する
+    fn get_table_name_at_position(text: &str, position: Position) -> Option<String> {
+        let lines: Vec<&str> = text.lines().collect();
+        let line = lines.get(position.line as usize)?;
+        let char_pos = position.character as usize;
+
+        if char_pos > line.len() {
+            return None;
+        }
+
+        // Find word boundaries around cursor - table names are identifiers (alphanumeric + underscore)
+        let bytes = line.as_bytes();
+        let mut start = char_pos;
+        let mut end = char_pos;
+
+        while start > 0 && (bytes[start - 1].is_ascii_alphanumeric() || bytes[start - 1] == b'_') {
+            start -= 1;
+        }
+        while end < bytes.len() && (bytes[end].is_ascii_alphanumeric() || bytes[end] == b'_') {
+            end += 1;
+        }
+
+        if start == end {
+            return None;
+        }
+
+        let word = &line[start..end];
+        Some(word.to_string())
+    }
+
+    /// スキーマ情報からNextSQL風の仮想ドキュメントを生成する
+    /// 戻り値: (ドキュメントテキスト, テーブル名→行番号のマップ)
+    fn generate_schema_document(schema: &nextsql_core::DatabaseSchema) -> (String, HashMap<String, u32>) {
+        let mut doc = String::new();
+        let mut table_lines: HashMap<String, u32> = HashMap::new();
+        let mut current_line: u32 = 0;
+
+        doc.push_str("// NextSQL Database Schema (auto-generated)\n");
+        current_line += 1;
+
+        // Sort tables by name for consistent ordering
+        let mut table_names: Vec<&String> = schema.tables.keys().collect();
+        table_names.sort();
+
+        for (i, table_name) in table_names.iter().enumerate() {
+            if i > 0 {
+                doc.push('\n');
+                current_line += 1;
+            }
+
+            let table = &schema.tables[*table_name];
+            table_lines.insert(table_name.to_string(), current_line);
+
+            doc.push_str(&format!("table {} {{\n", table_name));
+            current_line += 1;
+
+            for column in &table.columns {
+                let type_str = if column.nullable {
+                    format!("{}?", column.column_type)
+                } else {
+                    format!("{}", column.column_type)
+                };
+
+                let mut annotations = Vec::new();
+                if column.primary_key {
+                    annotations.push("primary_key".to_string());
+                }
+                if column.has_default {
+                    if let Some(ref default_val) = column.default_value {
+                        annotations.push(format!("default: {}", default_val));
+                    } else {
+                        annotations.push("default".to_string());
+                    }
+                }
+
+                if annotations.is_empty() {
+                    doc.push_str(&format!("    {}: {}\n", column.name, type_str));
+                } else {
+                    doc.push_str(&format!(
+                        "    {}: {} // {}\n",
+                        column.name,
+                        type_str,
+                        annotations.join(", ")
+                    ));
+                }
+                current_line += 1;
+            }
+
+            doc.push_str("}\n");
+            current_line += 1;
+        }
+
+        (doc, table_lines)
+    }
+
     /// .nsqlファイルを開いた時に、プロジェクトルートを探してスキーマが未ロードならロードする
     async fn ensure_schema_loaded(&self, file_path: &str) {
         let path = std::path::Path::new(file_path);
@@ -594,6 +764,8 @@ async fn main() {
     let stdin = tokio::io::stdin();
     let stdout = tokio::io::stdout();
 
-    let (service, socket) = LspService::new(|client| NextSqlLanguageServer::new(client));
+    let (service, socket) = LspService::build(|client| NextSqlLanguageServer::new(client))
+        .custom_method("nextsql/getSchemaDocument", NextSqlLanguageServer::get_schema_document)
+        .finish();
     Server::new(stdin, stdout, socket).serve(service).await;
 }

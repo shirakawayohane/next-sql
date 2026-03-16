@@ -9,6 +9,40 @@ import {
 
 let client: LanguageClient;
 
+const SCHEMA_SCHEME = "nextsql-schema";
+
+class NextSqlSchemaProvider implements vscode.TextDocumentContentProvider {
+  private _onDidChange = new vscode.EventEmitter<vscode.Uri>();
+  readonly onDidChange = this._onDidChange.event;
+
+  refresh(uri: vscode.Uri): void {
+    this._onDidChange.fire(uri);
+  }
+
+  async provideTextDocumentContent(
+    _uri: vscode.Uri,
+    _token: vscode.CancellationToken
+  ): Promise<string> {
+    if (!client || !client.isRunning()) {
+      return "// Language server is not running\n";
+    }
+
+    // Get the active .nsql file path to identify the project
+    const activeEditor = vscode.window.activeTextEditor;
+    const filePath = activeEditor?.document.uri.fsPath ?? "";
+
+    try {
+      const result = await client.sendRequest<{ content: string }>(
+        "nextsql/getSchemaDocument",
+        { filePath }
+      );
+      return result.content;
+    } catch (e) {
+      return `// Failed to load schema: ${e}\n`;
+    }
+  }
+}
+
 export function activate(context: vscode.ExtensionContext) {
   console.log("NextSQL extension is being activated");
   console.log(
@@ -42,6 +76,23 @@ export function activate(context: vscode.ExtensionContext) {
         "**/{*.nsql,next-sql.toml}"
       ),
     },
+    middleware: {
+      provideDefinition: async (document, position, token, next) => {
+        const result = await next(document, position, token);
+        if (!result) return result;
+
+        // nextsql-schema URIの場合、仮想ドキュメントを開いてlanguage設定する
+        const locations = Array.isArray(result) ? result : [result];
+        for (const loc of locations) {
+          const uri = "targetUri" in loc ? loc.targetUri : ("uri" in loc ? loc.uri : undefined);
+          if (uri && uri.scheme === SCHEMA_SCHEME) {
+            const doc = await vscode.workspace.openTextDocument(uri);
+            await vscode.languages.setTextDocumentLanguage(doc, "nextsql");
+          }
+        }
+        return result;
+      },
+    },
   };
 
   console.log("Client options:", JSON.stringify(clientOptions, null, 2));
@@ -52,6 +103,30 @@ export function activate(context: vscode.ExtensionContext) {
     "NextSQL Language Server",
     serverOptions,
     clientOptions
+  );
+
+  // 仮想スキーマドキュメントプロバイダーの登録
+  const schemaProvider = new NextSqlSchemaProvider();
+  const providerDisposable = vscode.workspace.registerTextDocumentContentProvider(
+    SCHEMA_SCHEME,
+    schemaProvider
+  );
+  context.subscriptions.push(providerDisposable);
+
+  // スキーマキャッシュ無効化時にプロバイダーを更新
+  const schemaUri = vscode.Uri.parse(`${SCHEMA_SCHEME}:///schema.nsql`);
+  const configWatcher = vscode.workspace.createFileSystemWatcher("**/next-sql.toml");
+  configWatcher.onDidChange(() => schemaProvider.refresh(schemaUri));
+  context.subscriptions.push(configWatcher);
+
+  // スキーマビューアーを開くコマンド
+  const openSchemaCommand = vscode.commands.registerCommand(
+    "nextsql.openSchema",
+    async () => {
+      const doc = await vscode.workspace.openTextDocument(schemaUri);
+      await vscode.window.showTextDocument(doc, { preview: true });
+      await vscode.languages.setTextDocumentLanguage(doc, "nextsql");
+    }
   );
 
   // クライアントを開始
@@ -93,6 +168,7 @@ export function activate(context: vscode.ExtensionContext) {
   // 拡張機能が非アクティブ化されるときにクライアントを停止
   context.subscriptions.push(completionDisposable);
   context.subscriptions.push(restartCommand);
+  context.subscriptions.push(openSchemaCommand);
   context.subscriptions.push({
     dispose: () => {
       if (client) {

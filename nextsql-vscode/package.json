@@ -51,6 +51,10 @@
       {
         "command": "nextsql.restartServer",
         "title": "NextSQL: Restart Language Server"
+      },
+      {
+        "command": "nextsql.openSchema",
+        "title": "NextSQL: Open Database Schema"
       }
     ],
     "configuration": {

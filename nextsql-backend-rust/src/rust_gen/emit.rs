@@ -7,6 +7,22 @@ use super::RowField;
 use super::valtype::ValTypeRegistry;
 use super::naming::to_snake_case;
 
+/// Resolve the Rust type for a parameter, handling ValType wrappers in Array and Optional.
+fn resolve_param_rust_type(typ: &Type, registry: &ValTypeRegistry) -> String {
+    match typ {
+        Type::UserDefined(name) if registry.is_valtype(name) => name.clone(),
+        Type::Array(inner) => {
+            let inner_type = resolve_param_rust_type(inner, registry);
+            format!("Vec<{}>", inner_type)
+        }
+        Type::Optional(inner) => {
+            let inner_type = resolve_param_rust_type(inner, registry);
+            format!("Option<{}>", inner_type)
+        }
+        other => nextsql_type_to_rust(other),
+    }
+}
+
 /// Emit a Params struct + its `to_params` impl.
 pub(super) fn emit_params_struct(
     out: &mut String,
@@ -18,10 +34,7 @@ pub(super) fn emit_params_struct(
     // Struct definition
     out.push_str(&format!("pub struct {} {{\n", struct_name));
     for arg in args {
-        let rust_type = match &arg.typ {
-            Type::UserDefined(name) if registry.is_valtype(name) => name.clone(),
-            other => nextsql_type_to_rust(other),
-        };
+        let rust_type = resolve_param_rust_type(&arg.typ, registry);
         out.push_str(&format!(
             "    pub {}: {},\n",
             to_snake_case(&arg.name),

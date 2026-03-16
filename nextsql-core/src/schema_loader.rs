@@ -80,6 +80,8 @@ impl SchemaLoader {
             "timestamp without time zone" => Type::BuiltIn(BuiltInType::Timestamp),
             "timestamp with time zone" => Type::BuiltIn(BuiltInType::Timestamptz),
             "date" => Type::BuiltIn(BuiltInType::Date),
+            "numeric" | "decimal" => Type::BuiltIn(BuiltInType::Decimal),
+            "jsonb" | "json" => Type::BuiltIn(BuiltInType::Json),
             "ARRAY" => Type::Array(Box::new(Self::postgres_type_to_nextsql_type(
                 &udt_name.trim_start_matches('_'), ""
             ))),

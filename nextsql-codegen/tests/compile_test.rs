@@ -48,10 +48,12 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-tokio-postgres = { version = "0.7", features = ["with-uuid-1", "with-chrono-0_4"] }
+tokio-postgres = { version = "0.7", features = ["with-uuid-1", "with-chrono-0_4", "with-serde_json-1"] }
 bytes = "1"
 uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4" }
+rust_decimal = { version = "1", features = ["db-tokio-postgres"] }
+serde_json = "1"
 "#;
 
     std::fs::write(temp_dir.join("Cargo.toml"), cargo_toml).unwrap();
