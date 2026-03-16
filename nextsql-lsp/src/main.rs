@@ -92,8 +92,7 @@ impl LanguageServer for NextSqlLanguageServer {
         } else {
             // .nsqlファイルを開いた時、スキーマが未ロードならロードする
             self.ensure_schema_loaded(params.text_document.uri.path()).await;
-            self.validate_document(&params.text_document.uri, &params.text_document.text)
-                .await;
+            self.validate_all_project_files(params.text_document.uri.path()).await;
         }
     }
 
@@ -136,8 +135,7 @@ impl LanguageServer for NextSqlLanguageServer {
                 self.validate_toml_document(&params.text_document.uri, &text)
                     .await;
             } else {
-                self.validate_document(&params.text_document.uri, &text)
-                    .await;
+                self.validate_all_project_files(params.text_document.uri.path()).await;
             }
         }
     }
@@ -182,6 +180,42 @@ impl NextSqlLanguageServer {
                 tokio::spawn(async move {
                     Self::load_schema_on_init(root, schema_cache, client).await;
                 });
+            }
+        }
+    }
+
+    /// プロジェクト内の全.nsqlファイルの診断を実行する
+    async fn validate_all_project_files(&self, file_path: &str) {
+        let path = std::path::Path::new(file_path);
+        let project_root = match self.schema_cache.find_project_root(path) {
+            Some(root) => root,
+            None => return,
+        };
+
+        let pattern = format!("{}/**/*.nsql", project_root.display());
+        let entries: Vec<_> = glob::glob(&pattern)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .collect();
+
+        for entry in entries {
+            let uri_string = format!("file://{}", entry.display());
+            // document_mapに既にあればそのテキストを使う、なければファイルから読む
+            let text = {
+                let doc_map = self.document_map.read().await;
+                if let Some(text) = doc_map.get(&uri_string) {
+                    text.clone()
+                } else {
+                    match std::fs::read_to_string(&entry) {
+                        Ok(t) => t,
+                        Err(_) => continue,
+                    }
+                }
+            };
+
+            if let Ok(uri) = Url::parse(&uri_string) {
+                self.validate_document(&uri, &text).await;
             }
         }
     }

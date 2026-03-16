@@ -44,66 +44,122 @@ pub(super) fn emit_params_struct(
     out.push_str("}\n\n");
 }
 
-/// Information about a Vec<ValType> param that needs unwrapping.
-pub(super) struct VecValtypeParam {
+/// Kind of valtype unwrapping needed for a parameter.
+enum ValtypeParamKind {
+    /// Vec<ValType> -> Vec<Inner>
+    Vec,
+    /// Option<ValType> -> Option<Inner>
+    Optional,
+    /// ValType -> Inner (pass .0 directly)
+    Plain,
+}
+
+/// Information about a ValType param that needs unwrapping.
+pub(super) struct ValtypeParam {
     /// The snake_case field name in the Params struct
     field_name: String,
     /// The Rust type of the inner value (e.g., "uuid::Uuid")
     inner_rust_type: String,
+    /// What kind of unwrapping is needed
+    kind: ValtypeParamKind,
 }
 
-/// Check if any argument has type Vec<ValType> and collect info for code generation.
-pub(super) fn find_vec_valtype_params(args: &[Argument], param_order: &[String], registry: &ValTypeRegistry) -> Vec<VecValtypeParam> {
+/// Check if any argument uses a ValType and collect info for code generation.
+pub(super) fn find_valtype_params(args: &[Argument], param_order: &[String], registry: &ValTypeRegistry) -> Vec<ValtypeParam> {
     let mut result = Vec::new();
     let arg_map: HashMap<String, &Argument> = args.iter().map(|a| (a.name.clone(), a)).collect();
     for pname in param_order {
         if let Some(arg) = arg_map.get(pname) {
-            if let Type::Array(inner) = &arg.typ {
-                if let Type::UserDefined(name) = inner.as_ref() {
+            match &arg.typ {
+                Type::Array(inner) => {
+                    if let Type::UserDefined(name) = inner.as_ref() {
+                        if let Some(base_type) = registry.valtypes.get(name) {
+                            result.push(ValtypeParam {
+                                field_name: to_snake_case(&arg.name),
+                                inner_rust_type: nextsql_type_to_rust(&Type::BuiltIn(base_type.clone())),
+                                kind: ValtypeParamKind::Vec,
+                            });
+                        }
+                    }
+                }
+                Type::Optional(inner) => {
+                    if let Type::UserDefined(name) = inner.as_ref() {
+                        if let Some(base_type) = registry.valtypes.get(name) {
+                            result.push(ValtypeParam {
+                                field_name: to_snake_case(&arg.name),
+                                inner_rust_type: nextsql_type_to_rust(&Type::BuiltIn(base_type.clone())),
+                                kind: ValtypeParamKind::Optional,
+                            });
+                        }
+                    }
+                }
+                Type::UserDefined(name) => {
                     if let Some(base_type) = registry.valtypes.get(name) {
-                        result.push(VecValtypeParam {
+                        result.push(ValtypeParam {
                             field_name: to_snake_case(&arg.name),
                             inner_rust_type: nextsql_type_to_rust(&Type::BuiltIn(base_type.clone())),
+                            kind: ValtypeParamKind::Plain,
                         });
                     }
                 }
+                _ => {}
             }
         }
     }
     result
 }
 
-/// Generate the parameter list expression, handling Vec<ValType> conversions.
-/// When there are Vec<ValType> params, generates local variables for the conversions
+/// Generate the parameter list expression, handling ValType conversions.
+/// When there are ValType params, generates local variables for the conversions
 /// and returns code that must be placed before the query call + the param refs expression.
 pub(super) fn generate_params_with_conversions(
     param_order: &[String],
     args: &[Argument],
     registry: &ValTypeRegistry,
 ) -> (String, String) {
-    let vec_vt_params = find_vec_valtype_params(args, param_order, registry);
-    if vec_vt_params.is_empty() {
+    let vt_params = find_valtype_params(args, param_order, registry);
+    if vt_params.is_empty() {
         return (String::new(), "params.to_params()".to_string());
     }
 
     // Generate local conversion variables
     let mut prelude = String::new();
-    let vt_fields: HashSet<String> = vec_vt_params.iter().map(|v| v.field_name.clone()).collect();
-    for vtp in &vec_vt_params {
-        prelude.push_str(&format!(
-            "    let __{}_inner: Vec<{}> = params.{}.iter().map(|v| v.0).collect();\n",
-            vtp.field_name, vtp.inner_rust_type, vtp.field_name
-        ));
+    let vt_fields: HashSet<String> = vt_params.iter().map(|v| v.field_name.clone()).collect();
+    for vtp in &vt_params {
+        match vtp.kind {
+            ValtypeParamKind::Vec => {
+                prelude.push_str(&format!(
+                    "    let __{}_inner: Vec<{}> = params.{}.iter().map(|v| v.0.clone()).collect();\n",
+                    vtp.field_name, vtp.inner_rust_type, vtp.field_name
+                ));
+            }
+            ValtypeParamKind::Optional => {
+                prelude.push_str(&format!(
+                    "    let __{}_inner: Option<{}> = params.{}.as_ref().map(|v| v.0.clone());\n",
+                    vtp.field_name, vtp.inner_rust_type, vtp.field_name
+                ));
+            }
+            ValtypeParamKind::Plain => {
+                // No prelude needed, we reference .0 inline
+            }
+        }
     }
 
     // Build the param list inline
     let mut refs = Vec::new();
     for pname in param_order {
         let field = to_snake_case(pname);
-        if vt_fields.contains(&field) {
-            refs.push(format!("&__{}_inner as &dyn super::runtime::ToSqlParam", field));
+        if let Some(vtp) = vt_params.iter().find(|v| v.field_name == field) {
+            match vtp.kind {
+                ValtypeParamKind::Vec | ValtypeParamKind::Optional => {
+                    refs.push(format!("&__{}_inner as &dyn super::runtime::ToSqlParam", field));
+                }
+                ValtypeParamKind::Plain => {
+                    refs.push(format!("&params.{}.0 as &dyn super::runtime::ToSqlParam", field));
+                }
+            }
         } else {
-            refs.push(format!("&params.{}", field));
+            refs.push(format!("&params.{} as &dyn super::runtime::ToSqlParam", field));
         }
     }
 

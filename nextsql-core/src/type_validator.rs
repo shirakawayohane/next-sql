@@ -22,6 +22,7 @@ pub struct TypeValidator<'a> {
     valid_tables: HashSet<String>,  // 有効なテーブル名
     errors: Vec<ValidationError>,
     relations: HashMap<String, RelationInfo>,  // relation name -> relation info
+    valtypes: HashMap<String, BuiltInType>,  // valtype name -> base type
 }
 
 impl<'a> TypeValidator<'a> {
@@ -38,7 +39,12 @@ impl<'a> TypeValidator<'a> {
             valid_tables,
             errors: Vec::new(),
             relations: HashMap::new(),
+            valtypes: HashMap::new(),
         }
+    }
+
+    pub fn register_valtype(&mut self, name: String, base_type: BuiltInType) {
+        self.valtypes.insert(name, base_type);
     }
 
     pub fn validate_module(&mut self, module: &Module) -> Vec<ValidationError> {
@@ -52,6 +58,13 @@ impl<'a> TypeValidator<'a> {
             self.valid_tables.insert(table_name.clone());
         }
         
+        // Collect valtype definitions (keep externally registered ones)
+        for toplevel in &module.toplevels {
+            if let crate::ast::TopLevel::ValType(vt) = toplevel {
+                self.valtypes.insert(vt.name.clone(), vt.base_type.clone());
+            }
+        }
+
         // First pass: collect all function signatures, variables, and relations
         for toplevel in &module.toplevels {
             match toplevel {
@@ -510,7 +523,7 @@ impl<'a> TypeValidator<'a> {
                                 "Type mismatch for field '{}': expected {:?}, but variable ${} has type {:?}",
                                 field_name, expected_type, var.name, var_type
                             ),
-                            span: None,
+                            span: var.span.clone(),
                         });
                     }
                 }
@@ -550,14 +563,17 @@ impl<'a> TypeValidator<'a> {
         }
     }
 
+    fn resolve_to_builtin(&self, typ: &Type) -> Option<BuiltInType> {
+        match typ {
+            Type::BuiltIn(b) => Some(b.clone()),
+            Type::UserDefined(name) => self.valtypes.get(name).cloned(),
+            Type::Optional(inner) => self.resolve_to_builtin(inner),
+            _ => None,
+        }
+    }
+
     fn types_compatible(&self, actual: &Type, expected: &Type) -> bool {
         match (actual, expected) {
-            (Type::BuiltIn(a), Type::BuiltIn(e)) => {
-                // Basic type compatibility
-                a == e || 
-                // Allow numeric conversions
-                (self.is_numeric_builtin_type(a) && self.is_numeric_builtin_type(e))
-            }
             (Type::Optional(inner), expected) => {
                 self.types_compatible(inner, expected)
             }
@@ -565,7 +581,14 @@ impl<'a> TypeValidator<'a> {
                 self.types_compatible(actual, inner)
             }
             (Type::UserDefined(a), Type::UserDefined(e)) => a == e,
-            _ => false,
+            _ => {
+                // Resolve both sides to built-in types and compare
+                if let (Some(a), Some(e)) = (self.resolve_to_builtin(actual), self.resolve_to_builtin(expected)) {
+                    a == e || (self.is_numeric_builtin_type(&a) && self.is_numeric_builtin_type(&e))
+                } else {
+                    false
+                }
+            }
         }
     }
 

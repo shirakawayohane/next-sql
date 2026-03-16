@@ -184,8 +184,37 @@ impl<'a> DiagnosticsProvider<'a> {
             }
         };
 
+        // Collect valtype definitions from all .nsql files in the project
+        let mut all_valtypes = Vec::new();
+        if let Some(project_root) = schema_cache.find_project_root(path) {
+            if let Ok(entries) = glob::glob(&format!("{}/**/*.nsql", project_root.display())) {
+                for entry in entries.flatten() {
+                    if entry == path {
+                        continue; // Skip current file, already parsed
+                    }
+                    if let Ok(content) = std::fs::read_to_string(&entry) {
+                        if let Ok(other_module) = std::panic::catch_unwind(
+                            std::panic::AssertUnwindSafe(|| parse_module(&content))
+                        ) {
+                            if let Ok(other_module) = other_module {
+                                for toplevel in &other_module.toplevels {
+                                    if let nextsql_core::ast::TopLevel::ValType(vt) = toplevel {
+                                        all_valtypes.push((vt.name.clone(), vt.base_type.clone()));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         // Create type validator
         let mut validator = TypeValidator::new(&schema);
+        // Register external valtypes before validation
+        for (name, base_type) in all_valtypes {
+            validator.register_valtype(name, base_type);
+        }
         let validation_errors = validator.validate_module(module);
 
         // Convert validation errors to diagnostics

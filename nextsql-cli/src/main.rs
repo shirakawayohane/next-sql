@@ -59,6 +59,8 @@ enum Commands {
         #[arg(default_value = "next-sql.toml")]
         config: PathBuf,
     },
+    /// Set up Claude Code skill for NextSQL
+    SetupClaude,
 }
 
 #[derive(Subcommand)]
@@ -204,6 +206,12 @@ async fn main() {
         }
         Commands::ValidateConfig { config } => {
             if let Err(e) = handle_validate_config_command(config) {
+                eprintln!("Error: {}", e);
+                std::process::exit(1);
+            }
+        }
+        Commands::SetupClaude => {
+            if let Err(e) = handle_setup_claude_command() {
                 eprintln!("Error: {}", e);
                 std::process::exit(1);
             }
@@ -468,6 +476,19 @@ fn handle_generate_command(
         "Successfully generated {} files",
         result.generated_files.len()
     );
+    Ok(())
+}
+
+fn handle_setup_claude_command() -> Result<(), Box<dyn std::error::Error>> {
+    let skill_dir = PathBuf::from(".claude/skills/learn-next-sql");
+    std::fs::create_dir_all(&skill_dir)?;
+
+    let skill_content = include_str!("../../.claude/skills/learn-next-sql/SKILL.md");
+    let skill_path = skill_dir.join("SKILL.md");
+
+    std::fs::write(&skill_path, skill_content)?;
+    println!("Created {}", skill_path.display());
+
     Ok(())
 }
 
