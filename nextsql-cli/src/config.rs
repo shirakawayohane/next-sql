@@ -32,6 +32,11 @@ pub struct FilesConfig {
 pub struct TargetConfig {
     pub target_language: String,
     pub target_directory: String,
+    /// Package name for the generated project manifest (e.g. Cargo.toml for Rust,
+    /// package.json for TypeScript). If set, a manifest will be generated with the
+    /// necessary dependencies and lint suppression for generated code.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub package_name: Option<String>,
 }
 
 impl Default for NextSqlConfig {
@@ -43,7 +48,8 @@ impl Default for NextSqlConfig {
             },
             target: TargetConfig {
                 target_language: "rust".to_string(),
-                target_directory: "../generated".to_string(),
+                target_directory: ".".to_string(),
+                package_name: None,
             },
             codegen: None,
         }
@@ -159,7 +165,8 @@ mod tests {
             },
             target: TargetConfig {
                 target_language: "rust".to_string(),
-                target_directory: "../generated".to_string(),
+                target_directory: ".".to_string(),
+                package_name: None,
             },
             codegen: None,
         };
@@ -176,7 +183,8 @@ mod tests {
             },
             target: TargetConfig {
                 target_language: "invalid_language".to_string(),
-                target_directory: "../generated".to_string(),
+                target_directory: ".".to_string(),
+                package_name: None,
             },
             codegen: None,
         };
@@ -236,7 +244,8 @@ target_directory = "../generated"
             },
             target: TargetConfig {
                 target_language: "rust".to_string(),
-                target_directory: "../generated".to_string(),
+                target_directory: ".".to_string(),
+                package_name: None,
             },
             codegen: None,
         };
@@ -250,7 +259,8 @@ target_directory = "../generated"
             },
             target: TargetConfig {
                 target_language: "invalid".to_string(),
-                target_directory: "../generated".to_string(),
+                target_directory: ".".to_string(),
+                package_name: None,
             },
             codegen: None,
         };

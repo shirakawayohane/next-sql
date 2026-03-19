@@ -46,9 +46,14 @@
         },
         "target_directory": {
           "type": "string",
-          "description": "Output directory for generated code",
-          "default": "../generated",
-          "examples": ["../generated", "./generated", "../my-project-entities"]
+          "description": "Crate root directory (relative to the source directory). Generated code is placed in {target_directory}/src/, and Cargo.toml at {target_directory}/Cargo.toml.",
+          "default": ".",
+          "examples": [".", "../my-crate", "../generated-entities"]
+        },
+        "package_name": {
+          "type": "string",
+          "description": "If set, a project manifest (Cargo.toml for Rust) will be generated with this package name, including lint suppression for generated code.",
+          "examples": ["my-generated-queries"]
         }
       },
       "required": ["target_language", "target_directory"],

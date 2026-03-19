@@ -27,6 +27,7 @@ fn run_codegen(test_name: &str) -> (nextsql_codegen::CodegenResult, PathBuf) {
         backend: "rust".to_string(),
         insert_params_pattern: None,
         update_params_pattern: None,
+        package_name: None,
     };
 
     let result = generate(&config, &schema);
@@ -41,7 +42,7 @@ fn test_sample_ec_project_generates_successfully() {
         "Generation errors: {:?}",
         result.errors
     );
-    // 5 .nsql files (analytics, customers, orders, products, reviews) + types.rs + mod.rs = 7
+    // 5 .nsql files (analytics, customers, orders, products, reviews) + types.rs + lib.rs = 7
     assert!(
         result.generated_files.len() >= 7,
         "Expected at least 7 files, got {}",
@@ -352,7 +353,7 @@ fn test_mod_rs_has_all_modules() {
     let (result, output_dir) = run_codegen("mod");
     assert!(result.errors.is_empty(), "Errors: {:?}", result.errors);
 
-    let content = std::fs::read_to_string(output_dir.join("mod.rs")).unwrap();
+    let content = std::fs::read_to_string(output_dir.join("lib.rs")).unwrap();
 
     assert!(content.contains("pub mod types;"), "Should export types (shared valtypes)");
     assert!(content.contains("pub mod analytics;"), "Should export analytics");

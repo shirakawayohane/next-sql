@@ -437,12 +437,12 @@ async fn handle_migration_command(
 
 fn handle_generate_command(
     source: PathBuf,
-    output: PathBuf,
+    _output: PathBuf,
     backend: String,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let db_schema = resolve_schema(&source)?;
 
-    // Load config for naming patterns
+    // Load config for naming patterns and target_directory
     let nsql_config_path = source.join("next-sql.toml");
     let nsql_config = if nsql_config_path.exists() {
         config::NextSqlConfig::load_from_file(&nsql_config_path).ok()
@@ -450,9 +450,18 @@ fn handle_generate_command(
         None
     };
 
+    // Compute crate_root and output_dir from target_directory config.
+    // target_directory means "crate root" relative to the source directory.
+    // Generated .rs files go into {crate_root}/src/.
+    let target_directory = nsql_config
+        .as_ref()
+        .map(|c| c.target.target_directory.as_str())
+        .unwrap_or(".");
+    let output_dir = source.join(target_directory).join("src");
+
     let config = nextsql_codegen::CodegenConfig {
         source_dir: source,
-        output_dir: output,
+        output_dir,
         backend,
         insert_params_pattern: nsql_config.as_ref()
             .and_then(|c| c.codegen.as_ref())
@@ -460,6 +469,8 @@ fn handle_generate_command(
         update_params_pattern: nsql_config.as_ref()
             .and_then(|c| c.codegen.as_ref())
             .and_then(|c| c.update_params.clone()),
+        package_name: nsql_config.as_ref()
+            .and_then(|c| c.target.package_name.clone()),
     };
 
     let result = nextsql_codegen::generate(&config, &db_schema);
@@ -483,11 +494,12 @@ fn handle_generate_command(
 }
 
 /// Resolve the schema for a given source directory.
-/// Priority: database connection from next-sql.toml > empty schema
+/// Priority: database connection from next-sql.toml > schema.json file > empty schema
 fn resolve_schema(
     source: &Path,
 ) -> Result<nextsql_core::schema::DatabaseSchema, Box<dyn std::error::Error>> {
     use nextsql_core::schema::DatabaseSchema;
+    use nextsql_core::SchemaLoader;
 
     // Find project root by walking up from source dir looking for next-sql.toml
     let source_abs = std::fs::canonicalize(source).unwrap_or_else(|_| source.to_path_buf());
@@ -506,6 +518,24 @@ fn resolve_schema(
                             eprintln!("Warning: could not load schema from database: {}", e);
                         }
                     }
+                }
+            }
+        }
+
+        // Fallback: try loading from schema.json in the project root
+        let schema_json_path = root.join("schema.json");
+        if schema_json_path.exists() {
+            match std::fs::read_to_string(&schema_json_path) {
+                Ok(json_str) => match SchemaLoader::load_from_json(&json_str) {
+                    Ok(schema) => {
+                        return Ok(schema);
+                    }
+                    Err(e) => {
+                        eprintln!("Warning: could not parse schema.json: {}", e);
+                    }
+                },
+                Err(e) => {
+                    eprintln!("Warning: could not read schema.json: {}", e);
                 }
             }
         }
