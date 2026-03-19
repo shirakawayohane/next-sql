@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <linearGradient id="cyl" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#3A7CA5"/>
+      <stop offset="100%" style="stop-color:#2A5A6E"/>
+    </linearGradient>
+  </defs>
+  <!-- Database cylinder body -->
+  <path d="M32 45v38c0 0 0 14 32 14s32-14 32-14V45" fill="url(#cyl)" stroke="#7EB8DA" stroke-width="2.5"/>
+  <!-- Database cylinder top ellipse -->
+  <ellipse cx="64" cy="45" rx="32" ry="14" fill="#3A7CA5" stroke="#7EB8DA" stroke-width="2.5"/>
+  <!-- Highlight on top -->
+  <ellipse cx="64" cy="43" rx="24" ry="8" fill="#4A8CB5" opacity="0.4"/>
+  <!-- Middle ring -->
+  <path d="M32 64c0 0 0 14 32 14s32-14 32-14" fill="none" stroke="#7EB8DA" stroke-width="1.5" opacity="0.4"/>
+  <!-- N text -->
+  <text x="64" y="82" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-weight="bold" font-size="36" fill="#CEEAF5" letter-spacing="1">N</text>
+</svg>

@@ -22,6 +22,7 @@
     "query",
     "syntax"
   ],
+  "icon": "icons/extension-icon.png",
   "contributes": {
     "languages": [
       {
@@ -85,6 +86,13 @@
         ]
       }
     },
+    "iconThemes": [
+      {
+        "id": "nextsql-icons",
+        "label": "NextSQL File Icons",
+        "path": "./icons/nsql-icon-theme.json"
+      }
+    ],
     "grammars": [
       {
         "language": "nextsql",

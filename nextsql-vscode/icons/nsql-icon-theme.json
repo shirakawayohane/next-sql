@@ -1,0 +1,13 @@
+{
+  "iconDefinitions": {
+    "nsql": {
+      "iconPath": "./nsql-icon.svg"
+    }
+  },
+  "languageIds": {
+    "nextsql": "nsql"
+  },
+  "fileExtensions": {
+    "nsql": "nsql"
+  }
+}
