@@ -299,7 +299,78 @@ impl PgClient {
     }
 }
 
+impl PgClient {
+    /// Begin a new transaction.
+    pub async fn transaction(&mut self) -> Result<PgTransaction<'_>, tokio_postgres::Error> {
+        let tx = self.inner.transaction().await?;
+        Ok(PgTransaction { inner: tx })
+    }
+}
+
 impl Client for PgClient {
+    type Error = tokio_postgres::Error;
+    type Row = PgRow;
+
+    fn query(
+        &self,
+        sql: &str,
+        params: &[&dyn ToSqlParam],
+    ) -> impl std::future::Future<Output = Result<Vec<Self::Row>, Self::Error>> + Send {
+        let owned_params = convert_params(params);
+        let sql = sql.to_owned();
+        let client = &self.inner;
+        async move {
+            let param_refs: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> =
+                owned_params.iter().map(|p| p as &(dyn tokio_postgres::types::ToSql + Sync)).collect();
+            let rows = client.query(&sql, &param_refs).await?;
+            Ok(rows.into_iter().map(PgRow).collect())
+        }
+    }
+
+    fn execute(
+        &self,
+        sql: &str,
+        params: &[&dyn ToSqlParam],
+    ) -> impl std::future::Future<Output = Result<u64, Self::Error>> + Send {
+        let owned_params = convert_params(params);
+        let sql = sql.to_owned();
+        let client = &self.inner;
+        async move {
+            let param_refs: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> =
+                owned_params.iter().map(|p| p as &(dyn tokio_postgres::types::ToSql + Sync)).collect();
+            client.execute(&sql, &param_refs).await
+        }
+    }
+}
+
+// ---- Transaction wrapper ----
+
+/// A wrapper around `tokio_postgres::Transaction` implementing the NextSQL `Client` trait.
+/// Supports nested transactions (savepoints) and commit/rollback.
+/// Drop without calling `commit()` will rollback the transaction.
+pub struct PgTransaction<'a> {
+    inner: tokio_postgres::Transaction<'a>,
+}
+
+impl<'a> PgTransaction<'a> {
+    /// Commit this transaction.
+    pub async fn commit(self) -> Result<(), tokio_postgres::Error> {
+        self.inner.commit().await
+    }
+
+    /// Rollback this transaction.
+    pub async fn rollback(self) -> Result<(), tokio_postgres::Error> {
+        self.inner.rollback().await
+    }
+
+    /// Begin a nested transaction (savepoint).
+    pub async fn transaction(&mut self) -> Result<PgTransaction<'_>, tokio_postgres::Error> {
+        let tx = self.inner.transaction().await?;
+        Ok(PgTransaction { inner: tx })
+    }
+}
+
+impl Client for PgTransaction<'_> {
     type Error = tokio_postgres::Error;
     type Row = PgRow;
 

@@ -83,19 +83,6 @@ impl<'a> CompletionProvider<'a> {
         let before_cursor = &current_line[..byte_position.min(current_line.len())];
         let after_cursor = &current_line[byte_position.min(current_line.len())..];
         
-        // Collect all text up to the current position to find aliases
-        let text_before_position = if position.line > 0 {
-            let mut full_text = String::new();
-            for i in 0..position.line as usize {
-                full_text.push_str(lines[i]);
-                full_text.push('\n');
-            }
-            full_text.push_str(before_cursor);
-            full_text
-        } else {
-            before_cursor.to_string()
-        };
-        
         eprintln!("LSP: Text before cursor: '{}'", before_cursor);
         eprintln!("LSP: Text after cursor: '{}'", after_cursor);
 
@@ -201,7 +188,7 @@ impl<'a> ModelCompletionProvider for CompletionProvider<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use context::{extract_from_tables, extract_table_before_dot, is_table_reference_context};
+    use context::extract_table_before_dot;
 
     #[test]
     fn test_query_method_completion() {
@@ -631,39 +618,6 @@ mod tests {
         assert!(uuid_type.is_some());
     }
 
-    
-    #[test]
-    fn test_extract_from_tables() {
-        // Simple from clause
-        let text = "query test() { from(users) }";
-        let tables = extract_from_tables(text);
-        assert_eq!(tables, vec!["users"]);
-        
-        
-        // From with join
-        let text = "query test() { from(users.leftJoin(posts, u.id == p.user_id)) }";
-        let tables = extract_from_tables(text);
-        assert_eq!(tables, vec!["users"]);
-    }
-    
-    #[test]
-    fn test_is_table_reference_context() {
-        // In select
-        assert!(is_table_reference_context("query test() { from(users).select(", ""));
-        
-        // In where
-        assert!(is_table_reference_context("query test() { from(users).where(", ""));
-        
-        // In join
-        assert!(is_table_reference_context("query test() { from(users).leftJoin(posts, ", ""));
-        
-        // Not in context
-        assert!(!is_table_reference_context("query test() { ", ""));
-        
-        // Closed context
-        assert!(!is_table_reference_context("query test() { from(users).select(u.name) }", ""));
-    }
-    
     #[tokio::test]
     async fn test_table_completions_in_from_without_schema() {
         let text = "query test() {\n  from(";
