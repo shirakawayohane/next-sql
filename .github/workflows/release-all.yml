@@ -66,6 +66,11 @@ jobs:
         run: |
           sed -i 's/^version = "${{ steps.version.outputs.current }}"/version = "${{ steps.version.outputs.new }}"/' Cargo.toml
 
+      - name: Update Cargo.lock
+        run: |
+          rustup default stable
+          cargo update --workspace
+
       - name: Bump VSCode extension version
         working-directory: nextsql-vscode
         run: |
