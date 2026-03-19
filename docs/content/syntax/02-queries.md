@@ -131,15 +131,3 @@ Acquires a row-level lock.
 .forUpdate()
 ```
 
-## Table Aliases
-
-Use `alias` for shorter references in complex queries:
-
-```nsql
-query example() {
-  alias u = users
-  alias p = posts
-  from(users.innerJoin(posts, u.id == p.user_id))
-  .select(u.name, p.title)
-}
-```

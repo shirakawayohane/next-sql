@@ -43,20 +43,6 @@ query getOrderDetails($orderId: uuid) {
 }
 ```
 
-### With Aliases
-
-```nsql
-query example() {
-  alias u = users
-  alias p = posts
-  alias c = comments
-  from(users
-    .innerJoin(posts, u.id == p.user_id)
-    .leftJoin(comments, p.id == c.post_id))
-  .select(u.name, p.title, c.content)
-}
-```
-
 ### JOIN vs Relations
 
 Use **explicit JOINs** when:

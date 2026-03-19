@@ -48,6 +48,7 @@ $values    // can hold arrays
 | `*` | Multiplication |
 | `/` | Division |
 | `%` | Modulo |
+| `^` | Power |
 
 ```nsql
 .aggregate(total: SUM(order_items.price * order_items.quantity))
