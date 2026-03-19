@@ -5,6 +5,7 @@ use crate::sql_gen;
 use crate::type_mapping::nextsql_type_to_rust;
 
 use super::RowField;
+use super::NamingConfig;
 use super::valtype::ValTypeRegistry;
 use super::naming::{to_snake_case, to_pascal_case, table_name_to_model_name};
 use super::type_resolve::*;
@@ -143,7 +144,7 @@ pub(super) fn generate_query(out: &mut String, query: &Query, schema: &DatabaseS
     }
 }
 
-pub(super) fn generate_mutation(out: &mut String, mutation: &Mutation, schema: &DatabaseSchema, model_tables: &mut HashSet<String>, registry: &ValTypeRegistry, rel_registry: &sql_gen::RelationRegistry) {
+pub(super) fn generate_mutation(out: &mut String, mutation: &Mutation, schema: &DatabaseSchema, model_tables: &mut HashSet<String>, registry: &ValTypeRegistry, rel_registry: &sql_gen::RelationRegistry, naming: &NamingConfig) {
     let name = &mutation.decl.name;
     let fn_name = to_snake_case(name);
     let pascal = to_pascal_case(name);
@@ -155,6 +156,16 @@ pub(super) fn generate_mutation(out: &mut String, mutation: &Mutation, schema: &
             MutationBodyItem::Mutation(stmt) => {
                 match stmt {
                     MutationStatement::Insert(insert) => {
+                        // Check if this is an Insertable<T> mutation
+                        let insertable_info = find_insertable_param(&mutation.decl.arguments);
+                        if let Some((var_name, table_name)) = insertable_info {
+                            generate_insertable_mutation(
+                                out, mutation, insert, &var_name, &table_name,
+                                schema, model_tables, registry, rel_registry, naming,
+                            );
+                            continue;
+                        }
+
                         let gen = sql_gen::generate_insert_sql_with_relations(insert, rel_registry);
                         let has_params = !mutation.decl.arguments.is_empty();
                         if has_params {
@@ -173,13 +184,13 @@ pub(super) fn generate_mutation(out: &mut String, mutation: &Mutation, schema: &
                         } else { None };
 
                         if let Some(ref returning) = insert.returning {
-                            let use_model = is_simple_wildcard_returning(returning, &insert.into);
+                            let use_model = is_simple_wildcard_returning(returning, &insert.into.name);
                             let effective_row = if let Some(ref tbl) = use_model {
                                 model_tables.insert(tbl.clone());
                                 table_name_to_model_name(tbl)
                             } else {
                                 let fields =
-                                    resolve_returning_fields(returning, &insert.into, schema, registry);
+                                    resolve_returning_fields(returning, &insert.into.name, schema, registry);
                                 emit_row_struct(out, &row_struct, &fields);
                                 row_struct.clone()
                             };
@@ -202,7 +213,7 @@ pub(super) fn generate_mutation(out: &mut String, mutation: &Mutation, schema: &
                         }
                     }
                     MutationStatement::Update(update) => {
-                        // Check if this is an Updatable (dynamic SET) mutation
+                        // Check if this is a ChangeSet (dynamic SET) mutation
                         let updatable_info = find_updatable_param(
                             &mutation.decl.arguments,
                             update.set_variable.as_deref(),
@@ -219,6 +230,7 @@ pub(super) fn generate_mutation(out: &mut String, mutation: &Mutation, schema: &
                                 model_tables,
                                 registry,
                                 rel_registry,
+                                naming,
                             );
                         } else {
                             let gen = sql_gen::generate_update_sql_with_relations(update, rel_registry);
@@ -329,19 +341,288 @@ pub(super) fn generate_mutation(out: &mut String, mutation: &Mutation, schema: &
     }
 }
 
-// ── Updatable (dynamic SET) codegen ─────────────────────────────────────
+// ── Insertable (dynamic INSERT) codegen ─────────────────────────────────
 
-/// Check if any parameter is `Updatable<table>` and matches the set_variable.
+/// Check if any parameter is `Insertable<table>`.
+/// Returns Some((variable_name, table_name)) if found.
+pub(super) fn find_insertable_param(args: &[Argument]) -> Option<(String, String)> {
+    for arg in args {
+        if let Type::Utility(UtilityType::Insertable(Insertable(inner))) = &arg.typ {
+            if let Type::UserDefined(table_name) = inner.as_ref() {
+                return Some((arg.name.clone(), table_name.clone()));
+            }
+        }
+    }
+    None
+}
+
+/// Generate the Insertable params struct, builder, and dynamic INSERT function.
+pub(super) fn generate_insertable_mutation(
+    out: &mut String,
+    mutation: &Mutation,
+    insert: &Insert,
+    insertable_var_name: &str,
+    insertable_table_name: &str,
+    schema: &DatabaseSchema,
+    model_tables: &mut HashSet<String>,
+    registry: &ValTypeRegistry,
+    _rel_registry: &sql_gen::RelationRegistry,
+    naming: &NamingConfig,
+) {
+    let name = &mutation.decl.name;
+    let fn_name = to_snake_case(name);
+    let pascal = to_pascal_case(name);
+    let row_struct = format!("{}Row", pascal);
+
+    let table = match schema.get_table(insertable_table_name) {
+        Some(t) => t,
+        None => return,
+    };
+
+    let table_pascal = table_name_to_model_name(insertable_table_name);
+    let insertable_struct = naming.insert_struct_name(&table_pascal);
+
+    // Determine insertable columns (exclude auto-generated PKs)
+    let insertable_columns: Vec<&nextsql_core::schema::ColumnSchema> = table
+        .columns
+        .iter()
+        .filter(|c| !(c.primary_key && c.has_default))
+        .collect();
+
+    // ── Insertable struct ──
+    out.push_str(&format!("pub struct {} {{\n", insertable_struct));
+    for col in &insertable_columns {
+        let base_type = column_to_rust_type(col, &table.name, registry);
+        // Fields with defaults or nullable get Option<T>
+        let is_optional = col.nullable || col.has_default;
+        if is_optional {
+            // If column_to_rust_type already wrapped in Option (nullable), use as-is
+            // Otherwise wrap in Option
+            if base_type.starts_with("Option<") {
+                out.push_str(&format!("    pub {}: {},\n", to_snake_case(&col.name), base_type));
+            } else {
+                out.push_str(&format!("    pub {}: Option<{}>,\n", to_snake_case(&col.name), base_type));
+            }
+        } else {
+            out.push_str(&format!("    pub {}: {},\n", to_snake_case(&col.name), base_type));
+        }
+    }
+    out.push_str("}\n\n");
+
+    // ── Builder struct ──
+    let builder_struct = format!("{}Builder", insertable_struct);
+    out.push_str(&format!("pub struct {} {{\n", builder_struct));
+    for col in &insertable_columns {
+        let base_type = column_to_rust_type(col, &table.name, registry);
+        // All builder fields are Option
+        if base_type.starts_with("Option<") {
+            // For nullable fields, the builder stores Option<Option<T>>
+            // but we simplify: builder stores the same type as struct
+            out.push_str(&format!("    {}: {},\n", to_snake_case(&col.name), base_type));
+        } else {
+            out.push_str(&format!("    {}: Option<{}>,\n", to_snake_case(&col.name), base_type));
+        }
+    }
+    out.push_str("}\n\n");
+
+    // ── builder() constructor ──
+    out.push_str(&format!("impl {} {{\n", insertable_struct));
+    out.push_str(&format!("    pub fn builder() -> {} {{\n", builder_struct));
+    out.push_str(&format!("        {} {{\n", builder_struct));
+    for col in &insertable_columns {
+        out.push_str(&format!("            {}: None,\n", to_snake_case(&col.name)));
+    }
+    out.push_str("        }\n");
+    out.push_str("    }\n");
+    out.push_str("}\n\n");
+
+    // ── Builder impl with setter methods ──
+    out.push_str(&format!("impl {} {{\n", builder_struct));
+    for col in &insertable_columns {
+        let col_snake = to_snake_case(&col.name);
+        let base_type = column_to_rust_type(col, &table.name, registry);
+        // Setter takes the inner value (not Option)
+        let inner_type = if base_type.starts_with("Option<") {
+            // For nullable fields, setter takes the inner type
+            base_type[7..base_type.len()-1].to_string()
+        } else {
+            base_type.clone()
+        };
+        out.push_str(&format!(
+            "    pub fn {}(mut self, value: {}) -> Self {{\n        self.{} = Some(value);\n        self\n    }}\n",
+            col_snake, inner_type, col_snake,
+        ));
+    }
+
+    // ── build() method ──
+    out.push_str(&format!("    pub fn build(self) -> Result<{}, String> {{\n", insertable_struct));
+    out.push_str(&format!("        Ok({} {{\n", insertable_struct));
+    for col in &insertable_columns {
+        let col_snake = to_snake_case(&col.name);
+        let base_type = column_to_rust_type(col, &table.name, registry);
+        let is_optional = col.nullable || col.has_default;
+        if is_optional {
+            if base_type.starts_with("Option<") {
+                // nullable field: builder's None → None, Some(v) → Some(v)
+                out.push_str(&format!("            {}: self.{},\n", col_snake, col_snake));
+            } else {
+                // has_default but not nullable: builder's Option becomes struct's Option
+                out.push_str(&format!("            {}: self.{},\n", col_snake, col_snake));
+            }
+        } else {
+            // Required field: must be set
+            out.push_str(&format!(
+                "            {}: self.{}.ok_or_else(|| \"{} is required\".to_string())?,\n",
+                col_snake, col_snake, col_snake,
+            ));
+        }
+    }
+    out.push_str("        })\n");
+    out.push_str("    }\n");
+    out.push_str("}\n\n");
+
+    // ── Params struct ──
+    // If there are other params besides the insertable, create a wrapper
+    let other_args: Vec<&Argument> = mutation.decl.arguments.iter()
+        .filter(|a| a.name != insertable_var_name)
+        .collect();
+    let params_struct = format!("{}Params", pascal);
+    let has_other_params = !other_args.is_empty();
+
+    if has_other_params {
+        out.push_str(&format!("pub struct {} {{\n", params_struct));
+        for arg in &mutation.decl.arguments {
+            if arg.name == insertable_var_name {
+                out.push_str(&format!(
+                    "    pub {}: {},\n",
+                    to_snake_case(&arg.name), insertable_struct,
+                ));
+            } else {
+                let rust_type = match &arg.typ {
+                    Type::UserDefined(name) if registry.is_valtype(name) => name.clone(),
+                    other => nextsql_type_to_rust(other),
+                };
+                out.push_str(&format!(
+                    "    pub {}: {},\n",
+                    to_snake_case(&arg.name), rust_type,
+                ));
+            }
+        }
+        out.push_str("}\n\n");
+    }
+
+    // ── Determine return type ──
+    let has_returning = insert.returning.is_some();
+    let effective_row = if let Some(ref returning) = insert.returning {
+        let use_model = is_simple_wildcard_returning(returning, &insert.into.name);
+        if let Some(ref tbl) = use_model {
+            model_tables.insert(tbl.clone());
+            Some(table_name_to_model_name(tbl))
+        } else {
+            let fields = resolve_returning_fields(returning, &insert.into.name, schema, registry);
+            emit_row_struct(out, &row_struct, &fields);
+            Some(row_struct.clone())
+        }
+    } else {
+        None
+    };
+
+    // ── Dynamic INSERT function ──
+    let actual_params_struct = if has_other_params { &params_struct } else { &insertable_struct };
+    let insertable_access = if has_other_params {
+        format!("params.{}", to_snake_case(insertable_var_name))
+    } else {
+        "params".to_string()
+    };
+
+    if has_returning {
+        let row_type = effective_row.as_ref().unwrap();
+        out.push_str(&format!(
+            "pub async fn {}(\n    client: &(impl super::runtime::Client + ?Sized),\n    params: &{},\n) -> Result<Vec<{}>, Box<dyn std::error::Error + Send + Sync>> {{\n",
+            fn_name, actual_params_struct, row_type,
+        ));
+    } else {
+        out.push_str(&format!(
+            "pub async fn {}(\n    client: &(impl super::runtime::Client + ?Sized),\n    params: &{},\n) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {{\n",
+            fn_name, actual_params_struct,
+        ));
+    }
+
+    // Build columns and params dynamically
+    out.push_str("    let mut columns: Vec<&str> = Vec::new();\n");
+    out.push_str("    let mut bind_params: Vec<&dyn super::runtime::ToSqlParam> = Vec::new();\n\n");
+
+    for col in &insertable_columns {
+        let col_snake = to_snake_case(&col.name);
+        let is_optional = col.nullable || col.has_default;
+        if is_optional {
+            out.push_str(&format!(
+                "    if let Some(ref v) = {}.{} {{\n",
+                insertable_access, col_snake,
+            ));
+            out.push_str(&format!("        columns.push(\"{}\");\n", col.name));
+            out.push_str("        bind_params.push(v);\n");
+            out.push_str("    }\n");
+        } else {
+            out.push_str(&format!("    columns.push(\"{}\");\n", col.name));
+            out.push_str(&format!(
+                "    bind_params.push(&{}.{});\n",
+                insertable_access, col_snake,
+            ));
+        }
+    }
+
+    // Build SQL
+    out.push_str("\n    let placeholders: Vec<String> = (1..=bind_params.len()).map(|i| format!(\"${}\", i)).collect();\n");
+
+    // Build the returning clause
+    let returning_sql = if let Some(ref returning) = insert.returning {
+        let cols: Vec<String> = returning.iter().map(|c| format_column_sql(c)).collect();
+        Some(cols.join(", "))
+    } else {
+        None
+    };
+
+    if let Some(ref ret_sql) = returning_sql {
+        out.push_str(&format!(
+            "    let sql = format!(\"INSERT INTO {} ({{}}) VALUES ({{}}) RETURNING {}\", columns.join(\", \"), placeholders.join(\", \"));\n",
+            insertable_table_name, ret_sql,
+        ));
+    } else {
+        out.push_str(&format!(
+            "    let sql = format!(\"INSERT INTO {} ({{}}) VALUES ({{}})\", columns.join(\", \"), placeholders.join(\", \"));\n",
+            insertable_table_name,
+        ));
+    }
+
+    // Execute
+    if has_returning {
+        let row_type = effective_row.as_ref().unwrap();
+        out.push_str("    let rows = client.query(&sql, &bind_params).await?;\n");
+        out.push_str(&format!(
+            "    Ok(rows.iter().map(|row| {}::from_row(row)).collect())\n",
+            row_type,
+        ));
+    } else {
+        out.push_str("    let count = client.execute(&sql, &bind_params).await?;\n");
+        out.push_str("    Ok(count)\n");
+    }
+    out.push_str("}\n\n");
+}
+
+// ── ChangeSet (dynamic SET) codegen ─────────────────────────────────────
+
+/// Check if any parameter is `ChangeSet<table>` and matches the set_variable.
 /// Returns Some((variable_name, table_name)) if found.
 pub(super) fn find_updatable_param(
     args: &[Argument],
     set_variable: Option<&str>,
 ) -> Option<(String, String)> {
-    // If there's an explicit set_variable, find the matching Updatable param
+    // If there's an explicit set_variable, find the matching ChangeSet param
     if let Some(var_name) = set_variable {
         for arg in args {
             if arg.name == var_name {
-                if let Type::Utility(UtilityType::Updatable(Updatable(inner))) = &arg.typ {
+                if let Type::Utility(UtilityType::ChangeSet(ChangeSet(inner))) = &arg.typ {
                     if let Type::UserDefined(table_name) = inner.as_ref() {
                         return Some((var_name.to_string(), table_name.clone()));
                     }
@@ -349,10 +630,9 @@ pub(super) fn find_updatable_param(
             }
         }
     }
-    // Also check if any param is Updatable even without set_variable
-    // (for cases where the set clause is a variable reference)
+    // Also check if any param is ChangeSet even without set_variable
     for arg in args {
-        if let Type::Utility(UtilityType::Updatable(Updatable(inner))) = &arg.typ {
+        if let Type::Utility(UtilityType::ChangeSet(ChangeSet(inner))) = &arg.typ {
             if let Type::UserDefined(table_name) = inner.as_ref() {
                 return Some((arg.name.clone(), table_name.clone()));
             }
@@ -362,7 +642,7 @@ pub(super) fn find_updatable_param(
 }
 
 /// Generate the Changes struct, Default impl, Params struct, and dynamic UPDATE function
-/// for an Updatable mutation.
+/// for a ChangeSet mutation.
 pub(super) fn generate_updatable_mutation(
     out: &mut String,
     mutation: &Mutation,
@@ -373,13 +653,16 @@ pub(super) fn generate_updatable_mutation(
     model_tables: &mut HashSet<String>,
     registry: &ValTypeRegistry,
     _rel_registry: &sql_gen::RelationRegistry,
+    naming: &NamingConfig,
 ) {
     let name = &mutation.decl.name;
     let fn_name = to_snake_case(name);
     let pascal = to_pascal_case(name);
-    let changes_struct = format!("{}Changes", pascal);
-    let params_struct = format!("{}Params", pascal);
     let row_struct = format!("{}Row", pascal);
+
+    let table_pascal = table_name_to_model_name(updatable_table_name);
+    let changes_struct = naming.update_struct_name(&table_pascal);
+    let params_struct = format!("{}Params", pascal);
 
     let table = match schema.get_table(updatable_table_name) {
         Some(t) => t,

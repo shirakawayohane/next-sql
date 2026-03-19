@@ -9,6 +9,10 @@ pub struct CodegenConfig {
     pub output_dir: PathBuf,
     /// Target backend (currently only "rust")
     pub backend: String,
+    /// Naming pattern for insert param structs (e.g. "Insert{Table}Params")
+    pub insert_params_pattern: Option<String>,
+    /// Naming pattern for update changeset structs (e.g. "Update{Table}Params")
+    pub update_params_pattern: Option<String>,
 }
 
 pub struct CodegenResult {
@@ -16,16 +20,232 @@ pub struct CodegenResult {
     pub errors: Vec<String>,
 }
 
+/// A single diagnostic from the check process.
+#[derive(Debug, Clone)]
+pub struct CheckDiagnostic {
+    /// The file that produced this diagnostic.
+    pub file: PathBuf,
+    /// Line number (1-based), if available.
+    pub line: Option<usize>,
+    /// Column number (1-based), if available.
+    pub column: Option<usize>,
+    /// The error message.
+    pub message: String,
+    /// The source of the diagnostic (e.g. "parse", "type-check").
+    pub source: DiagnosticSource,
+}
+
+#[derive(Debug, Clone)]
+pub enum DiagnosticSource {
+    Parse,
+    TypeCheck,
+    Io,
+}
+
+pub struct CheckResult {
+    pub diagnostics: Vec<CheckDiagnostic>,
+    pub files_checked: usize,
+}
+
+impl CheckResult {
+    pub fn has_errors(&self) -> bool {
+        !self.diagnostics.is_empty()
+    }
+}
+
+/// Check (validate) all .nsql files without generating code.
+/// Returns diagnostics for any parse or type errors found.
+pub fn check(config: &CheckConfig, schema: &DatabaseSchema) -> CheckResult {
+    let mut result = CheckResult {
+        diagnostics: Vec::new(),
+        files_checked: 0,
+    };
+
+    let nsql_files = find_nsql_files(&config.source_dir);
+
+    // Read types.nsql content if it exists
+    let types_path = config.source_dir.join("types.nsql");
+    let types_content = if types_path.exists() {
+        match std::fs::read_to_string(&types_path) {
+            Ok(content) => Some(content),
+            Err(e) => {
+                result.diagnostics.push(CheckDiagnostic {
+                    file: types_path.clone(),
+                    line: None,
+                    column: None,
+                    message: format!("Failed to read file: {}", e),
+                    source: DiagnosticSource::Io,
+                });
+                return result;
+            }
+        }
+    } else {
+        None
+    };
+
+    // If types.nsql exists, validate it parses
+    if let Some(ref types_src) = types_content {
+        result.files_checked += 1;
+        if let Err(e) = nextsql_core::parser::parse_module(types_src) {
+            let (line, col) = extract_pest_line_col(&e);
+            result.diagnostics.push(CheckDiagnostic {
+                file: types_path.clone(),
+                line: Some(line),
+                column: Some(col),
+                message: format_pest_error(&e),
+                source: DiagnosticSource::Parse,
+            });
+            return result; // types.nsql is fatal
+        }
+    }
+
+    for nsql_path in &nsql_files {
+        let filename = nsql_path.file_name().unwrap().to_str().unwrap();
+        if filename == "types.nsql" {
+            continue;
+        }
+
+        result.files_checked += 1;
+
+        let file_content = match std::fs::read_to_string(nsql_path) {
+            Ok(c) => c,
+            Err(e) => {
+                result.diagnostics.push(CheckDiagnostic {
+                    file: nsql_path.clone(),
+                    line: None,
+                    column: None,
+                    message: format!("Failed to read file: {}", e),
+                    source: DiagnosticSource::Io,
+                });
+                continue;
+            }
+        };
+
+        let combined_content = match &types_content {
+            Some(types) => format!("{}\n{}", types, file_content),
+            None => file_content.clone(),
+        };
+
+        let types_line_offset = types_content.as_ref().map(|t| t.lines().count() + 1).unwrap_or(0);
+
+        match nextsql_core::parser::parse_module(&combined_content) {
+            Ok(module) => {
+                // Run type validation
+                let mut validator = nextsql_core::TypeValidator::new(schema);
+                let errors = validator.validate_module(&module);
+                for error in errors {
+                    let (line, col) = if let Some(span) = &error.span {
+                        let text = &combined_content;
+                        let line = text[..span.start].matches('\n').count() + 1;
+                        let col = span.start
+                            - text[..span.start].rfind('\n').map(|i| i + 1).unwrap_or(0)
+                            + 1;
+                        (line, col)
+                    } else {
+                        (0, 0)
+                    };
+
+                    // Adjust line numbers for types.nsql offset
+                    let adjusted_line = if line > types_line_offset {
+                        line - types_line_offset
+                    } else if line > 0 {
+                        // Error is in the types.nsql portion — skip (already validated)
+                        continue;
+                    } else {
+                        0
+                    };
+
+                    result.diagnostics.push(CheckDiagnostic {
+                        file: nsql_path.clone(),
+                        line: if adjusted_line > 0 { Some(adjusted_line) } else { None },
+                        column: if col > 0 { Some(col) } else { None },
+                        message: error.message,
+                        source: DiagnosticSource::TypeCheck,
+                    });
+                }
+            }
+            Err(e) => {
+                let (line, col) = extract_pest_line_col(&e);
+                let adjusted_line = if line > types_line_offset {
+                    line - types_line_offset
+                } else {
+                    line
+                };
+                result.diagnostics.push(CheckDiagnostic {
+                    file: nsql_path.clone(),
+                    line: Some(adjusted_line),
+                    column: Some(col),
+                    message: format_pest_error(&e),
+                    source: DiagnosticSource::Parse,
+                });
+            }
+        }
+    }
+
+    result
+}
+
+pub struct CheckConfig {
+    pub source_dir: PathBuf,
+}
+
+fn extract_pest_line_col(error: &pest::error::Error<nextsql_core::Rule>) -> (usize, usize) {
+    match &error.line_col {
+        pest::error::LineColLocation::Pos((line, col)) => (*line, *col),
+        pest::error::LineColLocation::Span((line, col), _) => (*line, *col),
+    }
+}
+
+fn format_pest_error(error: &pest::error::Error<nextsql_core::Rule>) -> String {
+    match &error.variant {
+        pest::error::ErrorVariant::ParsingError { positives, negatives } => {
+            if !positives.is_empty() {
+                format!(
+                    "expected one of: {}",
+                    positives.iter().map(|r| format!("{:?}", r)).collect::<Vec<_>>().join(", ")
+                )
+            } else if !negatives.is_empty() {
+                format!(
+                    "unexpected: {}",
+                    negatives.iter().map(|r| format!("{:?}", r)).collect::<Vec<_>>().join(", ")
+                )
+            } else {
+                "parsing error".to_string()
+            }
+        }
+        pest::error::ErrorVariant::CustomError { message } => message.clone(),
+    }
+}
+
 /// Main entry point for code generation.
 ///
 /// Finds all .nsql files in the configured source directory, parses them,
 /// merges type definitions from types.nsql, dispatches to the appropriate
 /// backend, and writes the generated files.
+///
+/// Runs check (validation) first. If any errors are found, generation is aborted.
 pub fn generate(config: &CodegenConfig, schema: &DatabaseSchema) -> CodegenResult {
     let mut result = CodegenResult {
         generated_files: Vec::new(),
         errors: Vec::new(),
     };
+
+    // Run check first — abort if there are errors
+    let check_config = CheckConfig {
+        source_dir: config.source_dir.clone(),
+    };
+    let check_result = check(&check_config, schema);
+    if check_result.has_errors() {
+        for diag in &check_result.diagnostics {
+            let location = match (diag.line, diag.column) {
+                (Some(l), Some(c)) => format!("{}:{}:{}", diag.file.display(), l, c),
+                (Some(l), None) => format!("{}:{}", diag.file.display(), l),
+                _ => format!("{}", diag.file.display()),
+            };
+            result.errors.push(format!("{}: {}", location, diag.message));
+        }
+        return result;
+    }
 
     // 1. Find all .nsql files
     let nsql_files = find_nsql_files(&config.source_dir);
@@ -155,11 +375,23 @@ pub fn generate(config: &CodegenConfig, schema: &DatabaseSchema) -> CodegenResul
                 }
             }
 
+            // Build naming config
+            let naming = {
+                let mut n = nextsql_backend_rust::rust_gen::NamingConfig::default();
+                if let Some(ref p) = config.insert_params_pattern {
+                    n.insert_params_pattern = p.clone();
+                }
+                if let Some(ref p) = config.update_params_pattern {
+                    n.update_params_pattern = p.clone();
+                }
+                n
+            };
+
             // Generate each module
             for (module_name, module) in &parsed_modules {
                 let generated =
-                    nextsql_backend_rust::rust_gen::generate_rust_file_with_options(
-                        module, schema, skip_inline_valtypes,
+                    nextsql_backend_rust::rust_gen::generate_rust_file_full(
+                        module, schema, skip_inline_valtypes, &naming,
                     );
 
                 // Collect codegen errors (e.g., duplicate field names)

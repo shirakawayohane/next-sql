@@ -65,14 +65,15 @@ impl LanguageServer for NextSqlLanguageServer {
             .log_message(MessageType::INFO, "NextSQL Language Server initialized!")
             .await;
 
-        // Load schema from database in the background if next-sql.toml exists
+        // Load schema from database if next-sql.toml exists, then validate all files
         let workspace_root = self.workspace_root.read().await.clone();
         if let Some(root) = workspace_root {
             let schema_cache = self.schema_cache.clone();
             let client = self.client.clone();
-            tokio::spawn(async move {
-                Self::load_schema_on_init(root, schema_cache, client).await;
-            });
+            Self::load_schema_on_init(root.clone(), schema_cache, client).await;
+
+            // スキーマロード後に全プロジェクトファイルを検証して診断を公開する
+            self.validate_all_files_in_root(&root).await;
         }
     }
 
@@ -86,14 +87,14 @@ impl LanguageServer for NextSqlLanguageServer {
             params.text_document.text.clone(),
         );
 
-        // next-sql.tomlファイルかNextSQLファイルかで処理を分ける
         if params.text_document.uri.path().ends_with("next-sql.toml") {
             self.validate_toml_document(&params.text_document.uri, &params.text_document.text)
                 .await;
         } else {
-            // .nsqlファイルを開いた時、スキーマが未ロードならロードする
             self.ensure_schema_loaded(params.text_document.uri.path()).await;
-            self.validate_all_project_files(params.text_document.uri.path()).await;
+            self.update_valtype_cache(params.text_document.uri.path(), &params.text_document.text).await;
+            self.validate_document(&params.text_document.uri, &params.text_document.text)
+                .await;
         }
     }
 
@@ -102,9 +103,8 @@ impl LanguageServer for NextSqlLanguageServer {
         if let Some(change) = params.content_changes.into_iter().next() {
             document_map.insert(params.text_document.uri.to_string(), change.text.clone());
             drop(document_map);
-            
+
             if params.text_document.uri.path().ends_with("next-sql.toml") {
-                // Invalidate schema cache when next-sql.toml changes
                 let file_path = std::path::Path::new(params.text_document.uri.path());
                 if let Some(project_root) = self.schema_cache.find_project_root(file_path) {
                     self.schema_cache.invalidate_cache(&project_root).await;
@@ -112,6 +112,7 @@ impl LanguageServer for NextSqlLanguageServer {
                 self.validate_toml_document(&params.text_document.uri, &change.text)
                     .await;
             } else {
+                self.update_valtype_cache(params.text_document.uri.path(), &change.text).await;
                 self.validate_document(&params.text_document.uri, &change.text)
                     .await;
             }
@@ -156,36 +157,82 @@ impl LanguageServer for NextSqlLanguageServer {
         drop(document_map);
 
         // Get the word at cursor position
-        let table_name = match Self::get_table_name_at_position(&text, position) {
+        let word = match Self::get_word_at_position(&text, position) {
             Some(name) => name,
             None => return Ok(None),
         };
 
-        // Check if it's a known table in the schema
+        // Load schema
         let file_path = params.text_document_position_params.text_document.uri.path().to_string();
         let schema = match self.schema_cache.get_schema_for_file(std::path::Path::new(&file_path)).await {
             Some(s) => s,
             None => return Ok(None),
         };
 
-        if !schema.tables.contains_key(&table_name) {
-            return Ok(None);
+        let (_, table_lines, column_lines) = Self::generate_schema_document(&schema);
+        let target_uri = Url::parse("nextsql-schema:///schema.nsql").unwrap();
+
+        // 1. Field key inside value/set/doUpdate: { field: ... }
+        if let Some((table_name, field_name)) = Self::resolve_field_context(&text, position, &schema) {
+            if field_name == word {
+                if let Some(cols) = column_lines.get(&table_name) {
+                    if let Some(&line) = cols.get(&field_name) {
+                        return Ok(Some(GotoDefinitionResponse::Scalar(Location {
+                            uri: target_uri,
+                            range: Range {
+                                start: Position { line, character: 4 },
+                                end: Position { line, character: 4 + field_name.len() as u32 },
+                            },
+                        })));
+                    }
+                }
+            }
         }
 
-        // Generate the virtual schema document and find the table's line
-        let (_, table_lines) = Self::generate_schema_document(&schema);
-        let line = table_lines.get(&table_name).copied().unwrap_or(0);
+        // 2. Expression field access: table.field (cursor on `field` part)
+        if let Some((table_name, field_name)) = Self::resolve_dot_access(&text, position, &schema) {
+            if field_name == word {
+                if let Some(cols) = column_lines.get(&table_name) {
+                    if let Some(&line) = cols.get(&field_name) {
+                        return Ok(Some(GotoDefinitionResponse::Scalar(Location {
+                            uri: target_uri,
+                            range: Range {
+                                start: Position { line, character: 4 },
+                                end: Position { line, character: 4 + field_name.len() as u32 },
+                            },
+                        })));
+                    }
+                }
+            }
+        }
 
-        let target_uri = Url::parse("nextsql-schema:///schema.nsql").unwrap();
-        let target_range = Range {
-            start: Position { line, character: 0 },
-            end: Position { line, character: 0 },
-        };
+        // 3. Table name resolution
+        if schema.tables.contains_key(&word) {
+            let line = table_lines.get(&word).copied().unwrap_or(0);
+            return Ok(Some(GotoDefinitionResponse::Scalar(Location {
+                uri: target_uri,
+                range: Range {
+                    start: Position { line, character: 0 },
+                    end: Position { line, character: 0 },
+                },
+            })));
+        }
 
-        Ok(Some(GotoDefinitionResponse::Scalar(Location {
-            uri: target_uri,
-            range: target_range,
-        })))
+        // 4. ValType name resolution (e.g., OrganizationId in `$org_id: OrganizationId`)
+        if let Some((vt_path, vt_line)) = self.schema_cache.get_valtype_location(&word).await {
+            let vt_uri = Url::from_file_path(&vt_path).ok();
+            if let Some(uri) = vt_uri {
+                return Ok(Some(GotoDefinitionResponse::Scalar(Location {
+                    uri,
+                    range: Range {
+                        start: Position { line: vt_line, character: 0 },
+                        end: Position { line: vt_line, character: 0 },
+                    },
+                })));
+            }
+        }
+
+        Ok(None)
     }
 
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
@@ -230,22 +277,20 @@ impl NextSqlLanguageServer {
                 .get_schema_for_file(std::path::Path::new(file_path))
                 .await
         } else {
-            // file_path がない場合、キャッシュ内の最初のスキーマを使う
-            let schemas = self.schema_cache.schemas_write().await;
-            schemas.values().next().cloned()
+            None
         };
 
         match schema {
             Some(schema) => {
-                let (doc, _) = Self::generate_schema_document(&schema);
+                let (doc, _, _) = Self::generate_schema_document(&schema);
                 Ok(serde_json::json!({ "content": doc }))
             }
             None => Ok(serde_json::json!({ "content": "// No schema loaded\n" })),
         }
     }
 
-    /// カーソル位置のテーブル名を取得する
-    fn get_table_name_at_position(text: &str, position: Position) -> Option<String> {
+    /// カーソル位置の単語を取得する
+    fn get_word_at_position(text: &str, position: Position) -> Option<String> {
         let lines: Vec<&str> = text.lines().collect();
         let line = lines.get(position.line as usize)?;
         let char_pos = position.character as usize;
@@ -254,7 +299,6 @@ impl NextSqlLanguageServer {
             return None;
         }
 
-        // Find word boundaries around cursor - table names are identifiers (alphanumeric + underscore)
         let bytes = line.as_bytes();
         let mut start = char_pos;
         let mut end = char_pos;
@@ -270,15 +314,239 @@ impl NextSqlLanguageServer {
             return None;
         }
 
-        let word = &line[start..end];
-        Some(word.to_string())
+        Some(line[start..end].to_string())
+    }
+
+    /// カーソル位置がオブジェクトリテラル内のフィールドキーかを判定し、
+    /// 対応する(テーブル名, フィールド名)を返す
+    ///
+    /// 対象パターン:
+    ///   insert(table).value({ field: ... })
+    ///   insert(table).values({ field: ... })
+    ///   from(table)...set({ field: ... })
+    ///   .doUpdate({ field: ... })
+    fn resolve_field_context(
+        text: &str,
+        position: Position,
+        schema: &nextsql_core::DatabaseSchema,
+    ) -> Option<(String, String)> {
+        let lines: Vec<&str> = text.lines().collect();
+        let current_line = lines.get(position.line as usize)?;
+        let char_pos = position.character as usize;
+
+        // Check if cursor is on a field key pattern: `ident:` (identifier followed by colon)
+        // The word at cursor must be followed by `:` (possibly with whitespace)
+        let bytes = current_line.as_bytes();
+        let mut word_start = char_pos;
+        let mut word_end = char_pos;
+
+        while word_start > 0 && (bytes[word_start - 1].is_ascii_alphanumeric() || bytes[word_start - 1] == b'_') {
+            word_start -= 1;
+        }
+        while word_end < bytes.len() && (bytes[word_end].is_ascii_alphanumeric() || bytes[word_end] == b'_') {
+            word_end += 1;
+        }
+
+        if word_start == word_end {
+            return None;
+        }
+
+        let field_name = &current_line[word_start..word_end];
+
+        // After the word, expect optional whitespace then `:`
+        let rest = current_line[word_end..].trim_start();
+        if !rest.starts_with(':') {
+            return None;
+        }
+
+        // Now find the enclosing `{` and determine which method call it belongs to
+        // Walk backwards from cursor position through the text to find the opening `{`
+        let cursor_offset = lines[..position.line as usize]
+            .iter()
+            .map(|l| l.len() + 1) // +1 for newline
+            .sum::<usize>()
+            + char_pos;
+
+        let text_before = &text[..cursor_offset];
+
+        // Find matching `{` by counting braces
+        let mut brace_depth = 0;
+        let mut brace_pos = None;
+        for (i, ch) in text_before.char_indices().rev() {
+            match ch {
+                '}' => brace_depth += 1,
+                '{' => {
+                    if brace_depth == 0 {
+                        brace_pos = Some(i);
+                        break;
+                    }
+                    brace_depth -= 1;
+                }
+                _ => {}
+            }
+        }
+
+        let brace_pos = brace_pos?;
+
+        // Look at what's before the `{` to find the method call
+        let before_brace = text_before[..brace_pos].trim_end();
+
+        // Match patterns like `.value(`, `.values(`, `.set(`, `.doUpdate(`
+        let is_field_context = before_brace.ends_with(".value(")
+            || before_brace.ends_with(".values(")
+            || before_brace.ends_with(".set(")
+            || before_brace.ends_with(".doUpdate(");
+
+        if !is_field_context {
+            return None;
+        }
+
+        // Find the table name by searching for `insert(table)` or `from(table)` earlier in the same statement
+        // Walk back further to find the statement start
+        let statement_text = &text[..brace_pos];
+
+        // Try insert(table) pattern
+        if let Some(table) = Self::extract_table_from_pattern(statement_text, "insert(", schema) {
+            return Some((table, field_name.to_string()));
+        }
+
+        // Try from(table) pattern (for update queries)
+        if let Some(table) = Self::extract_table_from_pattern(statement_text, "from(", schema) {
+            return Some((table, field_name.to_string()));
+        }
+
+        None
+    }
+
+    /// テキスト内から `pattern_prefix + table_name + )` を後方から検索してテーブル名を抽出する
+    fn extract_table_from_pattern(
+        text: &str,
+        pattern_prefix: &str,
+        schema: &nextsql_core::DatabaseSchema,
+    ) -> Option<String> {
+        // Search from the end backwards for the most recent occurrence
+        let mut search_from = text.len();
+        while let Some(pos) = text[..search_from].rfind(pattern_prefix) {
+            let after = &text[pos + pattern_prefix.len()..];
+            if let Some(close_paren) = after.find(')') {
+                let candidate = after[..close_paren].trim();
+                if schema.tables.contains_key(candidate) {
+                    return Some(candidate.to_string());
+                }
+            }
+            search_from = pos;
+        }
+        None
+    }
+
+    /// 式中の `table.field` パターンを解決する
+    /// カーソルが `field` 部分にある場合、直前の `.` とその前のテーブル名を取得する
+    /// `table.relation.field` のようなチェーンの場合は最初のテーブル名のカラムとして解決
+    fn resolve_dot_access(
+        text: &str,
+        position: Position,
+        schema: &nextsql_core::DatabaseSchema,
+    ) -> Option<(String, String)> {
+        let lines: Vec<&str> = text.lines().collect();
+        let current_line = lines.get(position.line as usize)?;
+        let char_pos = position.character as usize;
+
+        if char_pos > current_line.len() {
+            return None;
+        }
+
+        let bytes = current_line.as_bytes();
+
+        // Find the word at cursor (the field name candidate)
+        let mut word_start = char_pos;
+        let mut word_end = char_pos;
+        while word_start > 0 && (bytes[word_start - 1].is_ascii_alphanumeric() || bytes[word_start - 1] == b'_') {
+            word_start -= 1;
+        }
+        while word_end < bytes.len() && (bytes[word_end].is_ascii_alphanumeric() || bytes[word_end] == b'_') {
+            word_end += 1;
+        }
+        if word_start == word_end {
+            return None;
+        }
+
+        let field_name = &current_line[word_start..word_end];
+
+        // Check there's a `.` immediately before the word
+        if word_start == 0 || bytes[word_start - 1] != b'.' {
+            return None;
+        }
+
+        // Walk backwards from the dot to collect the chain: e.g. `users.field` or `posts.author.field`
+        // We need to find the root table name (the leftmost identifier in the chain)
+        let mut pos = word_start - 1; // position of the `.`
+        let mut chain_parts: Vec<&str> = Vec::new();
+
+        loop {
+            // Move before the dot
+            if pos == 0 {
+                break;
+            }
+
+            // Read the identifier before this dot
+            let ident_end = pos;
+            let mut ident_start = pos;
+            while ident_start > 0 && (bytes[ident_start - 1].is_ascii_alphanumeric() || bytes[ident_start - 1] == b'_') {
+                ident_start -= 1;
+            }
+            if ident_start == ident_end {
+                break;
+            }
+
+            let part = &current_line[ident_start..ident_end];
+            chain_parts.push(part);
+
+            // Check if there's another dot before this identifier
+            if ident_start > 0 && bytes[ident_start - 1] == b'.' {
+                pos = ident_start - 1;
+            } else {
+                break;
+            }
+        }
+
+        if chain_parts.is_empty() {
+            return None;
+        }
+
+        // chain_parts is in reverse order: for `users.name` it's ["users"], for `posts.author.name` it's ["author", "posts"]
+        // The root (table) is the last element
+        let root_table = chain_parts.last()?;
+
+        // Check if root is a known table
+        if schema.tables.contains_key(*root_table) {
+            // For direct `table.field`, check field exists
+            if chain_parts.len() == 1 {
+                let table = schema.tables.get(*root_table)?;
+                if table.has_column(field_name) {
+                    return Some((root_table.to_string(), field_name.to_string()));
+                }
+            } else {
+                // For chained access like `posts.author.name`, the field belongs to the root table
+                // only if it's a direct column. Otherwise we can't resolve through relations here.
+                // Still try direct column match on the root table as a best-effort.
+                let table = schema.tables.get(*root_table)?;
+                if table.has_column(field_name) {
+                    return Some((root_table.to_string(), field_name.to_string()));
+                }
+            }
+        }
+
+        None
     }
 
     /// スキーマ情報からNextSQL風の仮想ドキュメントを生成する
-    /// 戻り値: (ドキュメントテキスト, テーブル名→行番号のマップ)
-    fn generate_schema_document(schema: &nextsql_core::DatabaseSchema) -> (String, HashMap<String, u32>) {
+    /// 戻り値: (ドキュメントテキスト, テーブル名→行番号, テーブル名→(カラム名→行番号))
+    fn generate_schema_document(
+        schema: &nextsql_core::DatabaseSchema,
+    ) -> (String, HashMap<String, u32>, HashMap<String, HashMap<String, u32>>) {
         let mut doc = String::new();
         let mut table_lines: HashMap<String, u32> = HashMap::new();
+        let mut column_lines: HashMap<String, HashMap<String, u32>> = HashMap::new();
         let mut current_line: u32 = 0;
 
         doc.push_str("// NextSQL Database Schema (auto-generated)\n");
@@ -297,10 +565,14 @@ impl NextSqlLanguageServer {
             let table = &schema.tables[*table_name];
             table_lines.insert(table_name.to_string(), current_line);
 
+            let mut cols: HashMap<String, u32> = HashMap::new();
+
             doc.push_str(&format!("table {} {{\n", table_name));
             current_line += 1;
 
             for column in &table.columns {
+                cols.insert(column.name.clone(), current_line);
+
                 let type_str = if column.nullable {
                     format!("{}?", column.column_type)
                 } else {
@@ -334,9 +606,19 @@ impl NextSqlLanguageServer {
 
             doc.push_str("}\n");
             current_line += 1;
+
+            column_lines.insert(table_name.to_string(), cols);
         }
 
-        (doc, table_lines)
+        (doc, table_lines, column_lines)
+    }
+
+    /// .nsqlファイルのテキストからValType定義を抽出してキャッシュを更新する
+    async fn update_valtype_cache(&self, file_path: &str, text: &str) {
+        let valtypes = SchemaCache::extract_valtypes_with_lines(text);
+        self.schema_cache
+            .update_valtypes_for_file(std::path::PathBuf::from(file_path), valtypes)
+            .await;
     }
 
     /// .nsqlファイルを開いた時に、プロジェクトルートを探してスキーマが未ロードならロードする
@@ -350,6 +632,9 @@ impl NextSqlLanguageServer {
                 tokio::spawn(async move {
                     Self::load_schema_on_init(root, schema_cache, client).await;
                 });
+            } else {
+                // スキーマは既にキャッシュ済みだが、ValTypeキャッシュが未充填なら充填
+                self.schema_cache.ensure_valtype_cache_populated(&project_root).await;
             }
         }
     }
@@ -362,6 +647,11 @@ impl NextSqlLanguageServer {
             None => return,
         };
 
+        self.validate_all_files_in_root(&project_root).await;
+    }
+
+    /// 指定されたプロジェクトルート内の全.nsqlファイルの診断を実行する
+    async fn validate_all_files_in_root(&self, project_root: &std::path::Path) {
         let pattern = format!("{}/**/*.nsql", project_root.display());
         let entries: Vec<_> = glob::glob(&pattern)
             .into_iter()
@@ -371,7 +661,6 @@ impl NextSqlLanguageServer {
 
         for entry in entries {
             let uri_string = format!("file://{}", entry.display());
-            // document_mapに既にあればそのテキストを使う、なければファイルから読む
             let text = {
                 let doc_map = self.document_map.read().await;
                 if let Some(text) = doc_map.get(&uri_string) {
@@ -383,6 +672,9 @@ impl NextSqlLanguageServer {
                     }
                 }
             };
+
+            // ValTypeキャッシュも更新
+            self.update_valtype_cache(entry.to_str().unwrap_or(""), &text).await;
 
             if let Ok(uri) = Url::parse(&uri_string) {
                 self.validate_document(&uri, &text).await;
@@ -410,7 +702,6 @@ impl NextSqlLanguageServer {
             .log_message(MessageType::INFO, "Found next-sql.toml, loading database schema...")
             .await;
 
-        let project_root = root.clone();
         let cache = schema_cache.clone();
         match tokio::task::spawn_blocking(move || {
             // Read and parse config
@@ -429,16 +720,6 @@ impl NextSqlLanguageServer {
                 None => return Err("No database_url in next-sql.toml".to_string()),
             };
 
-            // Try to load from cached JSON file first
-            let schema_cache_path = project_root.join(".nextsql").join("schema.json");
-            if schema_cache_path.exists() {
-                if let Ok(contents) = std::fs::read_to_string(&schema_cache_path) {
-                    if let Ok(schema) = nextsql_core::SchemaLoader::load_from_json(&contents) {
-                        return Ok((schema, Some(db_url)));
-                    }
-                }
-            }
-
             // Connect to database and load schema
             let config = match db_url.parse::<postgres::Config>() {
                 Ok(c) => c,
@@ -451,27 +732,17 @@ impl NextSqlLanguageServer {
             };
 
             match nextsql_core::SchemaLoader::load_from_database(&mut pg_client) {
-                Ok(schema) => {
-                    // Save schema cache to disk
-                    let cache_path = project_root.join(".nextsql").join("schema.json");
-                    if let Some(parent) = cache_path.parent() {
-                        let _ = std::fs::create_dir_all(parent);
-                    }
-                    if let Ok(json) = nextsql_core::SchemaLoader::save_to_json(&schema) {
-                        let _ = std::fs::write(&cache_path, json);
-                    }
-                    Ok((schema, None))
-                }
+                Ok(schema) => Ok(schema),
                 Err(e) => Err(format!("Failed to load schema from database: {}", e)),
             }
         })
         .await
         {
-            Ok(Ok((schema, _))) => {
+            Ok(Ok(schema)) => {
                 let table_count = schema.tables.len();
-                let mut schemas = cache.schemas_write().await;
-                schemas.insert(root.clone(), schema);
-                drop(schemas);
+                cache.insert_schema(root.clone(), schema).await;
+                // プロジェクト内の全.nsqlファイルからValType定義をキャッシュに充填
+                cache.populate_valtype_cache(&root).await;
                 client
                     .log_message(
                         MessageType::INFO,
@@ -510,51 +781,20 @@ impl NextSqlLanguageServer {
         let text_owned = text.to_string();
         
         // Run validation with proper error handling
-        let diagnostics = match tokio::task::spawn_blocking(move || {
-            eprintln!("LSP: Inside spawn_blocking");
-            
-            // Use runtime handle to run async code in blocking context
-            let handle = match tokio::runtime::Handle::try_current() {
-                Ok(h) => h,
-                Err(e) => {
-                    eprintln!("LSP: Failed to get runtime handle: {:?}", e);
-                    return Err(format!("No runtime handle: {}", e));
-                }
-            };
-            
-            // Wrap the entire block in catch_unwind
-            match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                eprintln!("LSP: Inside catch_unwind, creating provider");
-                handle.block_on(async move {
-                    let provider = DiagnosticsProvider::with_schema_cache(&text_owned, schema_cache, uri_str);
-                    eprintln!("LSP: Provider created, calling get_diagnostics");
-                    let result = provider.get_diagnostics().await;
-                    eprintln!("LSP: get_diagnostics returned");
-                    result
-                })
-            })) {
-                Ok(diags) => {
-                    eprintln!("LSP: Diagnostics generated successfully");
-                    Ok(diags)
-                }
-                Err(panic_info) => {
-                    let msg = if let Some(s) = panic_info.downcast_ref::<&str>() {
-                        s.to_string()
-                    } else if let Some(s) = panic_info.downcast_ref::<String>() {
-                        s.clone()
-                    } else {
-                        format!("{:?}", panic_info)
-                    };
-                    eprintln!("LSP: Panic occurred: {}", msg);
-                    Err(format!("Panic: {}", msg))
-                }
-            }
-        })
-        .await
-        {
-            Ok(Ok(diags)) => diags,
-            Ok(Err(error_msg)) => {
-                eprintln!("LSP: Error in validation: {}", error_msg);
+        let diagnostics = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let provider = DiagnosticsProvider::with_schema_cache(&text_owned, schema_cache, uri_str);
+            provider
+        })) {
+            Ok(provider) => provider.get_diagnostics().await,
+            Err(panic_info) => {
+                let msg = if let Some(s) = panic_info.downcast_ref::<&str>() {
+                    s.to_string()
+                } else if let Some(s) = panic_info.downcast_ref::<String>() {
+                    s.clone()
+                } else {
+                    format!("{:?}", panic_info)
+                };
+                eprintln!("LSP: Panic occurred: {}", msg);
                 vec![Diagnostic {
                     range: Range {
                         start: Position { line: 0, character: 0 },
@@ -564,24 +804,7 @@ impl NextSqlLanguageServer {
                     code: None,
                     code_description: None,
                     source: Some("nextsql-lsp".to_string()),
-                    message: format!("Internal error: {}", error_msg),
-                    related_information: None,
-                    tags: None,
-                    data: None,
-                }]
-            }
-            Err(join_error) => {
-                eprintln!("LSP: Task join error: {:?}", join_error);
-                vec![Diagnostic {
-                    range: Range {
-                        start: Position { line: 0, character: 0 },
-                        end: Position { line: 0, character: text.len() as u32 },
-                    },
-                    severity: Some(DiagnosticSeverity::ERROR),
-                    code: None,
-                    code_description: None,
-                    source: Some("nextsql-lsp".to_string()),
-                    message: format!("Internal error: Task join failed"),
+                    message: format!("Internal error: {}", msg),
                     related_information: None,
                     tags: None,
                     data: None,
@@ -656,10 +879,10 @@ impl NextSqlLanguageServer {
         let lines: Vec<&str> = text.lines().collect();
         
         // TOMLパースエラーメッセージから行と列の情報を抽出
-        if let Some(captures) = regex::Regex::new(r"at line (\d+), column (\d+)")
-            .unwrap()
-            .captures(error_msg) 
-        {
+        static RE_LINE_COL: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+            regex::Regex::new(r"at line (\d+), column (\d+)").unwrap()
+        });
+        if let Some(captures) = RE_LINE_COL.captures(error_msg) {
             if let (Ok(line), Ok(column)) = (
                 captures.get(1).unwrap().as_str().parse::<u32>(),
                 captures.get(2).unwrap().as_str().parse::<u32>()
@@ -719,11 +942,10 @@ impl NextSqlLanguageServer {
     }
 
     fn extract_unknown_field(&self, error_msg: &str) -> Option<String> {
-        // "unknown field `field_name`" パターンからフィールド名を抽出
-        if let Some(captures) = regex::Regex::new(r"unknown field `([^`]+)`")
-            .unwrap()
-            .captures(error_msg)
-        {
+        static RE_UNKNOWN_FIELD: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+            regex::Regex::new(r"unknown field `([^`]+)`").unwrap()
+        });
+        if let Some(captures) = RE_UNKNOWN_FIELD.captures(error_msg) {
             return Some(captures.get(1).unwrap().as_str().to_string());
         }
         None

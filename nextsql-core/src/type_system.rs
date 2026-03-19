@@ -37,9 +37,9 @@ impl TypeSystem {
             let insertable_type = self.create_insertable_type(table_name, table);
             self.types.insert(format!("Insertable<{}>", table_name), insertable_type);
 
-            // Generate Updatable<T> type
+            // Generate ChangeSet<T> type
             let updatable_type = self.create_updatable_type(table_name, table);
-            self.types.insert(format!("Updatable<{}>", table_name), updatable_type);
+            self.types.insert(format!("ChangeSet<{}>", table_name), updatable_type);
         }
     }
 
@@ -92,14 +92,14 @@ impl TypeSystem {
                 Some(FieldDefinition {
                     name: col.name.clone(),
                     field_type: col.column_type.clone(),
-                    // All fields are optional in Updatable<T> (partial update)
+                    // All fields are optional in ChangeSet<T> (partial update)
                     optional: true,
                 })
             })
             .collect();
 
         TypeDefinition {
-            name: format!("Updatable<{}>", table_name),
+            name: format!("ChangeSet<{}>", table_name),
             fields,
         }
     }
@@ -113,8 +113,8 @@ impl TypeSystem {
             "Insertable" => {
                 self.types.get(&format!("Insertable<{}>", type_arg)).cloned()
             }
-            "Updatable" => {
-                self.types.get(&format!("Updatable<{}>", type_arg)).cloned()
+            "ChangeSet" => {
+                self.types.get(&format!("ChangeSet<{}>", type_arg)).cloned()
             }
             _ => None,
         }
@@ -132,9 +132,9 @@ impl TypeSystem {
                 }
                 false
             }
-            (Type::Utility(UtilityType::Updatable(updatable)), to) => {
+            (Type::Utility(UtilityType::ChangeSet(updatable)), to) => {
                 if let Type::UserDefined(table_name) = &*updatable.0 {
-                    if let Some(updatable_def) = self.resolve_utility_type("Updatable", &table_name) {
+                    if let Some(updatable_def) = self.resolve_utility_type("ChangeSet", &table_name) {
                         return self.check_object_assignability(&updatable_def, to);
                     }
                 }

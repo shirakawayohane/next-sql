@@ -174,8 +174,8 @@ fn test_parse_type() {
     let typ = parse_type(pairs.peekable().next().unwrap().into_inner());
     assert_eq!(input, typ.to_string());
 
-    // Test basic Updatable type
-    let input = "Updatable<User>";
+    // Test basic ChangeSet type
+    let input = "ChangeSet<User>";
     let pairs = match NextSqlParser::parse(Rule::r#type, input) {
         Ok(p) => p,
         Err(e) => panic!("{}のパースでエラーが発生しました: {}", input, e),
@@ -183,8 +183,8 @@ fn test_parse_type() {
     let typ = parse_type(pairs.peekable().next().unwrap().into_inner());
     assert_eq!(input, typ.to_string());
 
-    // Test Updatable with built-in type
-    let input = "Updatable<string>";
+    // Test ChangeSet with built-in type
+    let input = "ChangeSet<string>";
     let pairs = match NextSqlParser::parse(Rule::r#type, input) {
         Ok(p) => p,
         Err(e) => panic!("{}のパースでエラーが発生しました: {}", input, e),
@@ -192,8 +192,8 @@ fn test_parse_type() {
     let typ = parse_type(pairs.peekable().next().unwrap().into_inner());
     assert_eq!(input, typ.to_string());
 
-    // Test optional Updatable type
-    let input = "Updatable<User>?";
+    // Test optional ChangeSet type
+    let input = "ChangeSet<User>?";
     let pairs = match NextSqlParser::parse(Rule::r#type, input) {
         Ok(p) => p,
         Err(e) => panic!("{}のパースでエラーが発生しました: {}", input, e),
@@ -258,7 +258,7 @@ fn parse_type(pairs: pest::iterators::Pairs<Rule>) -> Type {
         let inner = parse_type(pair.into_inner().next().unwrap().into_inner());
         match rule {
             Rule::insertable => Type::Utility(UtilityType::Insertable(Insertable(Box::new(inner)))),
-            Rule::updatable => Type::Utility(UtilityType::Updatable(Updatable(Box::new(inner)))),
+            Rule::change_set => Type::Utility(UtilityType::ChangeSet(ChangeSet(Box::new(inner)))),
             _ => unreachable!(),
         }
     }
@@ -524,9 +524,10 @@ fn test_parse_mutation_decl() {
     dbg!(&decl);
 }
 
-fn parse_insert_clause(pairs: pest::iterators::Pairs<Rule>) -> String {
+fn parse_insert_clause(pairs: pest::iterators::Pairs<Rule>) -> Target {
     let mut pairs = pairs.peekable();
-    pairs.next().unwrap().as_str().to_string()
+    let pair = pairs.next().unwrap();
+    parse_target(pair)
 }
 
 #[test]
@@ -537,7 +538,7 @@ fn test_parse_insert_clause() {
         Err(e) => panic!("パースエラーが発生しました: {}", e),
     };
     let clause = parse_insert_clause(pairs.peekable().next().unwrap().into_inner());
-    assert_eq!(clause, "foo");
+    assert_eq!(clause.name, "foo");
 }
 
 #[test]
@@ -553,7 +554,7 @@ fn test_parse_value_clause() {
         match clause {
             Expression::Atomic(e) => {
                 if let AtomicExpression::Literal(Literal::Object(obj)) = e {
-                    obj.0.keys().cloned().collect()
+                    obj.fields.keys().cloned().collect()
                 } else {
                     unreachable!()
                 }
@@ -664,7 +665,7 @@ fn parse_on_conflict_clause(pair: pest::iterators::Pair<Rule>) -> OnConflictClau
 fn parse_insert(pairs: pest::iterators::Pairs<Rule>) -> Insert {
     let mut pairs = pairs.peekable();
     // dbg!(&pairs);
-    let insert = match pairs.peek().unwrap().as_rule() {
+    let target = match pairs.peek().unwrap().as_rule() {
         Rule::insert_clause => parse_insert_clause(pairs.next().unwrap().into_inner()),
         _ => unreachable!(),
     };
@@ -687,7 +688,7 @@ fn parse_insert(pairs: pest::iterators::Pairs<Rule>) -> Insert {
         _ => None,
     };
     Insert {
-        into: insert,
+        into: target,
         values,
         on_conflict,
         returning,
@@ -1175,16 +1176,17 @@ fn test_parse_expression() {
     let expr = parse_expression(pairs.peekable().next().unwrap().into_inner());
     assert_eq!(
         Expression::Atomic(AtomicExpression::Literal(Literal::Object(
-            ObjectLiteralExpression(
-                vec![(
+            ObjectLiteralExpression {
+                fields: vec![(
                     "name".to_string(),
                     Expression::Atomic(AtomicExpression::Literal(Literal::String(
                         "alice".to_string()
                     )))
                 )]
                 .into_iter()
-                .collect()
-            )
+                .collect(),
+                span: Some(Span { start: 0, end: 17 }),
+            }
         ))),
         expr
     );
@@ -1545,6 +1547,7 @@ fn parse_literal_expression(pairs: pest::iterators::Pairs<Rule>) -> Expression {
         }
         Rule::null_literal => AtomicExpression::Literal(Literal::Null),
         Rule::object_literal => {
+            let span = get_span(&pair);
             let mut pairs = pair.into_inner();
             let mut map: HashMap<String, Expression> = HashMap::new();
             while pairs.peek().is_some() {
@@ -1552,7 +1555,7 @@ fn parse_literal_expression(pairs: pest::iterators::Pairs<Rule>) -> Expression {
                 let value = parse_expression(pairs.next().unwrap().into_inner());
                 map.insert(key, value);
             }
-            AtomicExpression::Literal(Literal::Object(ObjectLiteralExpression(map)))
+            AtomicExpression::Literal(Literal::Object(ObjectLiteralExpression { fields: map, span }))
         }
         Rule::array_literal => {
             let pairs = pair.into_inner().peekable();
@@ -2459,7 +2462,7 @@ fn test_on_conflict_do_update() {
             assert_eq!(mutation.decl.name, "upsertUser");
             match &mutation.body.items[0] {
                 MutationBodyItem::Mutation(MutationStatement::Insert(insert)) => {
-                    assert_eq!(insert.into, "users");
+                    assert_eq!(insert.into.name, "users");
                     let on_conflict = insert.on_conflict.as_ref().unwrap();
                     assert_eq!(on_conflict.columns, vec!["email".to_string()]);
                     match &on_conflict.action {
@@ -2743,9 +2746,9 @@ fn test_count_with_alias_parse() {
 }
 
 #[test]
-fn test_updatable_type() {
+fn test_change_set_type() {
     let input = r#"
-        mutation updateUser($id: uuid, $changes: Updatable<users>) {
+        mutation updateUser($id: uuid, $changes: ChangeSet<users>) {
             update(users)
             .where(users.id == $id)
             .set({
@@ -2762,7 +2765,7 @@ fn test_updatable_type() {
     assert_eq!(m.decl.arguments.len(), 2);
     assert_eq!(
         m.decl.arguments[1].typ,
-        Type::Utility(UtilityType::Updatable(Updatable(Box::new(Type::UserDefined("users".to_string())))))
+        Type::Utility(UtilityType::ChangeSet(ChangeSet(Box::new(Type::UserDefined("users".to_string())))))
     );
 }
 

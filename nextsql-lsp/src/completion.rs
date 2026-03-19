@@ -183,12 +183,8 @@ impl<'a> TableCompletionProvider for CompletionProvider<'a> {
 }
 
 impl<'a> TypeCompletionProvider for CompletionProvider<'a> {
-    fn get_schema_cache(&self) -> Option<&Arc<SchemaCache>> {
-        self.schema_cache.as_ref()
-    }
-    
-    fn get_file_uri(&self) -> Option<&str> {
-        self.file_uri.as_deref()
+    fn get_text(&self) -> &str {
+        self.text
     }
 }
 

@@ -157,11 +157,11 @@
       "patterns": [
         {
           "name": "entity.name.type.nextsql",
-          "match": "\\b(i16|i32|i64|f32|f64|string|bool|uuid|timestamp|date)\\b"
+          "match": "\\b(i16|i32|i64|f32|f64|string|bool|uuid|timestamp|timestamptz|date|numeric|decimal|json)\\b"
         },
         {
           "name": "entity.name.type.utility.nextsql",
-          "match": "\\b(Insertable)\\b"
+          "match": "\\b(Insertable|ChangeSet)\\b"
         },
         {
           "name": "entity.name.type.valtype.nextsql",
@@ -175,6 +175,13 @@
     },
     "functions": {
       "patterns": [
+        {
+          "match": "\\b(insert|delete|update|from)\\(([a-z_][a-zA-Z0-9_]*)",
+          "captures": {
+            "1": { "name": "entity.name.function.nextsql" },
+            "2": { "name": "variable.other.table.nextsql" }
+          }
+        },
         {
           "name": "support.function.join.nextsql",
           "match": "\\b(innerJoin|leftJoin|rightJoin|fullOuterJoin|crossJoin)(?=\\()"

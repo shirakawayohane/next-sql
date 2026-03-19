@@ -196,7 +196,10 @@ pub struct Variable {
 }
 
 #[derive(Debug, PartialEq, Clone)]
-pub struct ObjectLiteralExpression(pub HashMap<String, Expression>);
+pub struct ObjectLiteralExpression {
+    pub fields: HashMap<String, Expression>,
+    pub span: Option<Span>,
+}
 
 #[derive(Debug, PartialEq, Clone, serde::Serialize, serde::Deserialize)]
 pub enum BuiltInType {
@@ -220,12 +223,12 @@ pub enum BuiltInType {
 pub struct Insertable(pub Box<Type>);
 
 #[derive(Debug, PartialEq, Clone, serde::Serialize, serde::Deserialize)]
-pub struct Updatable(pub Box<Type>);
+pub struct ChangeSet(pub Box<Type>);
 
 #[derive(Debug, PartialEq, Clone, serde::Serialize, serde::Deserialize)]
 pub enum UtilityType {
     Insertable(Insertable),
-    Updatable(Updatable),
+    ChangeSet(ChangeSet),
 }
 
 impl Display for BuiltInType {
@@ -273,7 +276,7 @@ impl Display for Type {
                 Type::Utility(u) => {
                     match u {
                         UtilityType::Insertable(t) => format!("Insertable<{}>", t.0),
-                        UtilityType::Updatable(t) => format!("Updatable<{}>", t.0),
+                        UtilityType::ChangeSet(t) => format!("ChangeSet<{}>", t.0),
                     }
                 }
                 Type::Array(inner) => format!("[{}]", inner),
@@ -422,7 +425,7 @@ pub struct OnConflictClause {
 
 #[derive(Debug, PartialEq)]
 pub struct Insert {
-    pub into: String,
+    pub into: Target,
     pub values: Vec<Expression>,
     pub on_conflict: Option<OnConflictClause>,
     pub returning: Option<Vec<Column>>,

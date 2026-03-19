@@ -118,8 +118,8 @@ builtin_type = { i16_type | i32_type | i64_type | f32_type | f64_type | numeric_
 user_defined_type = { ident }
 
 insertable = { "Insertable" ~ "<" ~ type ~ ">" }
-updatable = { "Updatable" ~ "<" ~ type ~ ">" }
-utility_type = { insertable | updatable }
+change_set = { "ChangeSet" ~ "<" ~ type ~ ">" }
+utility_type = { insertable | change_set }
 array_type = { "[" ~ type ~ "]" }
 type = { (array_type | builtin_type | utility_type | user_defined_type) ~ question_mark? }
 argument = { variable ~ ":" ~ type }

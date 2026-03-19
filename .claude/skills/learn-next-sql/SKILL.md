@@ -103,10 +103,10 @@ mutation updateUser($id: uuid, $name: string) {
 }
 ```
 
-Use `Updatable<T>` for partial updates with a variable:
+Use `ChangeSet<T>` for partial updates with a variable:
 
 ```nsql
-mutation updateUser($id: uuid, $data: Updatable<users>) {
+mutation updateUser($id: uuid, $data: ChangeSet<users>) {
   update(users)
   .where(users.id == $id)
   .set($data)
@@ -163,8 +163,16 @@ All mutation types support `.returning(table.*, col1, col2)`.
 
 ### Utility Types
 
-- `Insertable<TableName>` - represents a full row for insertion
-- `Updatable<TableName>` - represents a partial row for updates
+- `Insertable<TableName>` - represents a full row for insertion. Generates a struct (default: `Insert{Table}Params`) with required/optional fields based on schema, plus a builder pattern.
+- `ChangeSet<TableName>` - represents a partial row for updates. Generates a struct (default: `Update{Table}Params`) with all fields wrapped in `UpdateField<T>`, plus `Default` impl.
+
+Naming patterns are configurable in `next-sql.toml`:
+
+```toml
+[codegen]
+insert_params = "Insert{Table}Params"
+update_params = "Update{Table}Params"
+```
 
 ### Value Types (valtype)
 
@@ -332,6 +340,66 @@ Use like regular columns:
 
 ```nsql
 .select(users.name, users.post_count)
+```
+
+## CLI Usage
+
+### Project Setup
+
+```bash
+# Initialize a new NextSQL project (creates next-sql.toml)
+nextsql init [dir]
+```
+
+### Configuration (`next-sql.toml`)
+
+```toml
+# Optional: database connection URL for schema-aware validation
+database_url = "postgresql://user:pass@localhost:5432/mydb"
+
+[files]
+includes = ["**"]  # Glob patterns for .nsql files
+
+[target]
+target_language = "rust"        # Currently only "rust" is supported
+target_directory = "../generated"  # Output directory for generated code
+```
+
+### Code Generation
+
+```bash
+# Generate code from .nsql files
+nextsql generate -s <source_dir> -o <output_dir> [-b rust] [--schema schema.json]
+
+# Check .nsql files for errors without generating code
+nextsql check -s <source_dir> [--schema schema.json]
+
+# Parse and validate a single .nsql file
+nextsql parse <file.nsql>
+```
+
+### Migrations
+
+```bash
+# Initialize migrations directory
+nextsql migration init
+
+# Generate a new migration
+nextsql migration generate <name> [-d "description"]
+
+# List migrations
+nextsql migration list
+
+# Run migrations (file-based)
+nextsql migration up [timestamp]
+nextsql migration down <timestamp>
+
+# Run migrations against database
+nextsql migration db-up [timestamp] --host localhost --port 5432 --database mydb --username user --password pass
+nextsql migration db-down <timestamp> --host localhost --port 5432 --database mydb --username user --password pass
+
+# Show database migration status
+nextsql migration db-status --host localhost --port 5432 --database mydb --username user --password pass
 ```
 
 ## References

@@ -1,4 +1,4 @@
-use nextsql_core::ast::{Type, BuiltInType, UtilityType, Insertable, Updatable};
+use nextsql_core::ast::{Type, BuiltInType, UtilityType, Insertable, ChangeSet};
 
 pub fn nextsql_type_to_rust(typ: &Type) -> String {
     match typ {
@@ -29,7 +29,7 @@ pub fn nextsql_type_to_rust(typ: &Type) -> String {
         },
         Type::Utility(u) => match u {
             UtilityType::Insertable(Insertable(inner)) => nextsql_type_to_rust(inner),
-            UtilityType::Updatable(Updatable(inner)) => nextsql_type_to_rust(inner),
+            UtilityType::ChangeSet(ChangeSet(inner)) => nextsql_type_to_rust(inner),
         },
     }
 }

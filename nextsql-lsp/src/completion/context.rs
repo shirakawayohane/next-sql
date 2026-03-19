@@ -191,8 +191,11 @@ pub fn extract_table_before_dot(full_text: &str, text: &str) -> Option<String> {
 
 /// Resolve an alias name to its target table name by scanning "alias X = Y" patterns in the text.
 fn resolve_alias(full_text: &str, identifier: &str) -> Option<String> {
-    let re = regex::Regex::new(r"alias\s+(\w+)\s*=\s*(\w+)").unwrap();
-    for cap in re.captures_iter(full_text) {
+    use std::sync::LazyLock;
+    static RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+        regex::Regex::new(r"alias\s+(\w+)\s*=\s*(\w+)").unwrap()
+    });
+    for cap in RE.captures_iter(full_text) {
         if &cap[1] == identifier {
             eprintln!("LSP: Resolved alias '{}' to '{}'", identifier, &cap[2]);
             return Some(cap[2].to_string());
@@ -270,16 +273,20 @@ fn is_in_join_method_context(text: &str) -> bool {
 }
 
 pub fn is_after_insertable_angle_bracket(before_cursor: &str) -> bool {
-    eprintln!("LSP: Checking for Insertable< pattern in: '{}'", before_cursor);
-    
-    // Check if the text ends with "Insertable<" or "Insertable< " with optional partial text
-    if let Some(pos) = before_cursor.rfind("Insertable<") {
-        let after_bracket = &before_cursor[pos + "Insertable<".len()..];
-        // Allow partial model names but not complete statements
-        !after_bracket.contains('>') && !after_bracket.contains('.')
-    } else {
-        false
+    eprintln!("LSP: Checking for Insertable</ChangeSet< pattern in: '{}'", before_cursor);
+
+    // Check if the text ends with "Insertable<" or "ChangeSet<" with optional partial text
+    let patterns = ["Insertable<", "ChangeSet<"];
+    for pattern in &patterns {
+        if let Some(pos) = before_cursor.rfind(pattern) {
+            let after_bracket = &before_cursor[pos + pattern.len()..];
+            // Allow partial model names but not complete statements
+            if !after_bracket.contains('>') && !after_bracket.contains('.') {
+                return true;
+            }
+        }
     }
+    false
 }
 
 pub fn is_after_variable_colon(before_cursor: &str) -> bool {
@@ -342,7 +349,10 @@ pub fn extract_from_tables(text: &str) -> Vec<String> {
             
             // Extract table names (simple pattern for now)
             // This handles: from(users), from(u), from(users.leftJoin(...))
-            if let Some(table_match) = regex::Regex::new(r"^(\w+)").unwrap().captures(from_content) {
+            static RE_TABLE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+                regex::Regex::new(r"^(\w+)").unwrap()
+            });
+            if let Some(table_match) = RE_TABLE.captures(from_content) {
                 if let Some(table) = table_match.get(1) {
                     tables.push(table.as_str().to_string());
                     eprintln!("LSP: Found table in FROM: '{}'", table.as_str());

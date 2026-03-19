@@ -33,6 +33,8 @@ fn test_generated_code_compiles() {
         source_dir: source_dir.clone(),
         output_dir: generated_dir.clone(),
         backend: "rust".to_string(),
+        insert_params_pattern: None,
+        update_params_pattern: None,
     };
     let result = nextsql_codegen::generate(&config, &schema);
     assert!(
@@ -90,6 +92,8 @@ fn test_generated_function_signatures() {
         source_dir,
         output_dir: output_dir.clone(),
         backend: "rust".to_string(),
+        insert_params_pattern: None,
+        update_params_pattern: None,
     };
     let result = nextsql_codegen::generate(&config, &schema);
     assert!(result.errors.is_empty(), "Errors: {:?}", result.errors);

@@ -53,6 +53,25 @@
       },
       "required": ["target_language", "target_directory"],
       "additionalProperties": false
+    },
+    "codegen": {
+      "type": "object",
+      "description": "Code generation style configuration",
+      "properties": {
+        "insert_params": {
+          "type": "string",
+          "description": "Naming pattern for insert param structs. Use {Table} as placeholder.",
+          "default": "Insert{Table}Params",
+          "examples": ["Insert{Table}Params", "New{Table}", "{Table}Insert"]
+        },
+        "update_params": {
+          "type": "string",
+          "description": "Naming pattern for update changeset structs. Use {Table} as placeholder.",
+          "default": "Update{Table}Params",
+          "examples": ["Update{Table}Params", "{Table}ChangeSet", "{Table}Update"]
+        }
+      },
+      "additionalProperties": false
     }
   },
   "required": ["files", "target"],

@@ -8,7 +8,7 @@ use clap::{Parser, Subcommand};
 use config::NextSqlConfig;
 use db::{DatabaseConfig, DatabaseMigrationManager};
 use migration::{MigrationDirection, MigrationManager};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Parser)]
 #[command(name = "nextsql")]
@@ -48,10 +48,12 @@ enum Commands {
         /// Target backend
         #[arg(short, long, default_value = "rust")]
         backend: String,
-
-        /// Path to a schema JSON file (uses empty schema if not provided)
-        #[arg(long)]
-        schema: Option<PathBuf>,
+    },
+    /// Check NextSQL files for errors (without generating code)
+    Check {
+        /// Source directory containing .nsql files
+        #[arg(short, long, default_value = ".")]
+        source: PathBuf,
     },
     /// Validate NextSQL configuration file
     ValidateConfig {
@@ -59,8 +61,6 @@ enum Commands {
         #[arg(default_value = "next-sql.toml")]
         config: PathBuf,
     },
-    /// Set up Claude Code skill for NextSQL
-    SetupClaude,
 }
 
 #[derive(Subcommand)]
@@ -197,21 +197,20 @@ async fn main() {
             source,
             output,
             backend,
-            schema,
         } => {
-            if let Err(e) = handle_generate_command(source, output, backend, schema) {
+            if let Err(e) = handle_generate_command(source, output, backend) {
+                eprintln!("Error: {}", e);
+                std::process::exit(1);
+            }
+        }
+        Commands::Check { source } => {
+            if let Err(e) = handle_check_command(source) {
                 eprintln!("Error: {}", e);
                 std::process::exit(1);
             }
         }
         Commands::ValidateConfig { config } => {
             if let Err(e) = handle_validate_config_command(config) {
-                eprintln!("Error: {}", e);
-                std::process::exit(1);
-            }
-        }
-        Commands::SetupClaude => {
-            if let Err(e) = handle_setup_claude_command() {
                 eprintln!("Error: {}", e);
                 std::process::exit(1);
             }
@@ -440,23 +439,27 @@ fn handle_generate_command(
     source: PathBuf,
     output: PathBuf,
     backend: String,
-    schema_path: Option<PathBuf>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    use nextsql_core::schema::DatabaseSchema;
+    let db_schema = resolve_schema(&source)?;
 
-    let db_schema = if let Some(path) = schema_path {
-        let content = std::fs::read_to_string(&path)
-            .map_err(|e| format!("Failed to read schema file: {}", e))?;
-        serde_json::from_str(&content)
-            .map_err(|e| format!("Failed to parse schema JSON: {}", e))?
+    // Load config for naming patterns
+    let nsql_config_path = source.join("next-sql.toml");
+    let nsql_config = if nsql_config_path.exists() {
+        config::NextSqlConfig::load_from_file(&nsql_config_path).ok()
     } else {
-        DatabaseSchema::new()
+        None
     };
 
     let config = nextsql_codegen::CodegenConfig {
         source_dir: source,
         output_dir: output,
         backend,
+        insert_params_pattern: nsql_config.as_ref()
+            .and_then(|c| c.codegen.as_ref())
+            .and_then(|c| c.insert_params.clone()),
+        update_params_pattern: nsql_config.as_ref()
+            .and_then(|c| c.codegen.as_ref())
+            .and_then(|c| c.update_params.clone()),
     };
 
     let result = nextsql_codegen::generate(&config, &db_schema);
@@ -479,17 +482,119 @@ fn handle_generate_command(
     Ok(())
 }
 
-fn handle_setup_claude_command() -> Result<(), Box<dyn std::error::Error>> {
-    let skill_dir = PathBuf::from(".claude/skills/learn-next-sql");
-    std::fs::create_dir_all(&skill_dir)?;
+/// Resolve the schema for a given source directory.
+/// Priority: database connection from next-sql.toml > empty schema
+fn resolve_schema(
+    source: &Path,
+) -> Result<nextsql_core::schema::DatabaseSchema, Box<dyn std::error::Error>> {
+    use nextsql_core::schema::DatabaseSchema;
 
-    let skill_content = include_str!(concat!(env!("OUT_DIR"), "/skill.md"));
-    let skill_path = skill_dir.join("SKILL.md");
+    // Find project root by walking up from source dir looking for next-sql.toml
+    let source_abs = std::fs::canonicalize(source).unwrap_or_else(|_| source.to_path_buf());
+    let project_root = find_project_root(&source_abs);
 
-    std::fs::write(&skill_path, skill_content)?;
-    println!("Created {}", skill_path.display());
+    if let Some(ref root) = project_root {
+        let config_path = root.join("next-sql.toml");
+        if config_path.exists() {
+            if let Ok(config) = NextSqlConfig::load_from_file(&config_path) {
+                if let Some(db_url) = config.database_url {
+                    match load_schema_from_database(&db_url) {
+                        Ok(schema) => {
+                            return Ok(schema);
+                        }
+                        Err(e) => {
+                            eprintln!("Warning: could not load schema from database: {}", e);
+                        }
+                    }
+                }
+            }
+        }
+    }
 
-    Ok(())
+    // Fallback: empty schema
+    Ok(DatabaseSchema::new())
+}
+
+fn find_project_root(start: &Path) -> Option<PathBuf> {
+    let mut current = start;
+    loop {
+        if current.join("next-sql.toml").exists() {
+            return Some(current.to_path_buf());
+        }
+        // If start is a file, also check its parent
+        current = current.parent()?;
+    }
+}
+
+fn load_schema_from_database(
+    db_url: &str,
+) -> Result<nextsql_core::schema::DatabaseSchema, Box<dyn std::error::Error>> {
+    let config = db_url.parse::<postgres::Config>()?;
+    let mut client = config.connect(postgres::NoTls)?;
+    let schema = nextsql_core::SchemaLoader::load_from_database(&mut client)?;
+    Ok(schema)
+}
+
+fn handle_check_command(
+    source: PathBuf,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use nextsql_codegen::{CheckConfig, DiagnosticSource};
+
+    let db_schema = resolve_schema(&source)?;
+
+    let config = CheckConfig {
+        source_dir: source,
+    };
+
+    let use_color = std::io::IsTerminal::is_terminal(&std::io::stderr());
+
+    let red = if use_color { "\x1b[1;31m" } else { "" };
+    let cyan = if use_color { "\x1b[1;36m" } else { "" };
+    let green = if use_color { "\x1b[1;32m" } else { "" };
+    let yellow = if use_color { "\x1b[1;33m" } else { "" };
+    let bold = if use_color { "\x1b[1m" } else { "" };
+    let reset = if use_color { "\x1b[0m" } else { "" };
+
+    eprintln!("{green}    Checking{reset} nextsql files...");
+
+    let result = nextsql_codegen::check(&config, &db_schema);
+
+    if result.diagnostics.is_empty() {
+        eprintln!(
+            "{green}    Finished{reset} checking {} file(s). No errors found.",
+            result.files_checked
+        );
+        Ok(())
+    } else {
+        for diag in &result.diagnostics {
+            let (label, label_color) = match diag.source {
+                DiagnosticSource::Parse => ("parse error", red),
+                DiagnosticSource::TypeCheck => ("type error", red),
+                DiagnosticSource::Io => ("io error", yellow),
+            };
+
+            let location = match (diag.line, diag.column) {
+                (Some(l), Some(c)) => format!("{}:{}:{}", diag.file.display(), l, c),
+                (Some(l), None) => format!("{}:{}", diag.file.display(), l),
+                _ => format!("{}", diag.file.display()),
+            };
+
+            eprintln!(
+                "{label_color}error[{label}]{reset}{bold}: {}{reset}",
+                diag.message
+            );
+            eprintln!("  {cyan}-->{reset} {}", location);
+            eprintln!();
+        }
+
+        let error_count = result.diagnostics.len();
+        Err(format!(
+            "{red}error{reset}: could not compile due to {bold}{}{reset} error{}",
+            error_count,
+            if error_count == 1 { "" } else { "s" }
+        )
+        .into())
+    }
 }
 
 fn handle_parse_command(file: PathBuf) -> Result<(), Box<dyn std::error::Error>> {

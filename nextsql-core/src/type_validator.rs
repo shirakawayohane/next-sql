@@ -1,4 +1,4 @@
-use crate::ast::{Module, MutationBody, MutationBodyItem, MutationStatement, Expression, Type, BuiltInType, Literal, CallExpression, AtomicExpression, Column, PropertyAccess, FromExpr, Span, RelationReturnType};
+use crate::ast::{Module, MutationBody, MutationBodyItem, MutationStatement, Expression, Type, BuiltInType, Literal, CallExpression, AtomicExpression, Column, PropertyAccess, FromExpr, Span, RelationReturnType, UtilityType, Target};
 use crate::schema::DatabaseSchema;
 use std::collections::{HashMap, HashSet};
 
@@ -145,54 +145,123 @@ impl<'a> TypeValidator<'a> {
         }
     }
 
-    fn validate_property_access(&mut self, property_access: &PropertyAccess) {
-        // First validate the base expression
-        self.validate_expression(&property_access.target);
-        
-        // Check if this is a relation access
-        match property_access.target.as_ref() {
-            Expression::Atomic(AtomicExpression::Column(Column::ExplicitTarget(table_name, _, _))) => {
-                // This could be a relation access like table.relation.field
-                let actual_table_name = table_name;
-                
-                // Check if the property is a relation defined for this table
-                if let Some(relation_info) = self.relations.get(&property_access.property) {
-                    if &relation_info.for_table != actual_table_name {
-                        self.errors.push(ValidationError {
-                            message: format!(
-                                "Relation '{}' is not defined for table '{}' (it's defined for '{}')",
-                                property_access.property, table_name, relation_info.for_table
-                            ),
-                            span: None,
-                        });
+    /// Try to resolve a property access chain to the table it refers to.
+    /// e.g., `orders.customer` → Some("customers") if `customer` is a relation on orders returning customers.
+    /// e.g., `reviews.product.category` → Some("categories") via nested relations.
+    fn resolve_property_access_table(&self, expr: &Expression) -> Option<String> {
+        match expr {
+            Expression::Atomic(AtomicExpression::Column(Column::ExplicitTarget(table_name, relation_name, _))) => {
+                // table.relation → check if relation_name is a relation for table_name
+                if let Some(relation_info) = self.relations.get(relation_name) {
+                    if relation_info.for_table == *table_name {
+                        match &relation_info.returning_type {
+                            RelationReturnType::Table(ret_table) => Some(ret_table.clone()),
+                            _ => None,
+                        }
+                    } else {
+                        None
                     }
                 } else {
-                    // If it's not a relation, it should be a column
-                    if let Some(table) = self.schema.get_table(actual_table_name) {
-                        if !table.has_column(&property_access.property) {
-                            self.errors.push(ValidationError {
-                                message: format!(
-                                    "Column '{}' not found in table '{}'",
-                                    property_access.property, table_name
-                                ),
-                                span: None,
-                            });
+                    None
+                }
+            }
+            Expression::Atomic(AtomicExpression::PropertyAccess(inner)) => {
+                // Nested: resolve inner first, then check if property is a relation on the resolved table
+                let inner_table = self.resolve_property_access_table(&inner.target)?;
+                if let Some(relation_info) = self.relations.get(&inner.property) {
+                    if relation_info.for_table == inner_table {
+                        match &relation_info.returning_type {
+                            RelationReturnType::Table(ret_table) => Some(ret_table.clone()),
+                            _ => None,
+                        }
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
+
+    fn validate_property_access(&mut self, property_access: &PropertyAccess) {
+        // Try to resolve the target as a relation chain
+        let resolved_table = self.resolve_property_access_table(&property_access.target);
+
+        if let Some(ref table_name) = resolved_table {
+            // The target resolves to a table via relation(s).
+            // Validate that property is a column of that table, or another relation.
+            if let Some(table) = self.schema.get_table(table_name) {
+                if !table.has_column(&property_access.property)
+                    && !self.is_relation_for_table(&property_access.property, table_name)
+                {
+                    self.errors.push(ValidationError {
+                        message: format!(
+                            "Column '{}' not found in table '{}'",
+                            property_access.property, table_name
+                        ),
+                        span: None,
+                    });
+                }
+            }
+            // Validate the rest of the chain (the base expression, skipping the relation part)
+            // We validate the root table.relation column reference (which is valid)
+            self.validate_property_access_base(&property_access.target);
+        } else {
+            // Not a relation access — validate normally
+            self.validate_expression(&property_access.target);
+
+            match property_access.target.as_ref() {
+                Expression::Atomic(AtomicExpression::Column(Column::ExplicitTarget(table_name, _column_name, _))) => {
+                    // target is table.column, property is a method or subfield
+                    // If it's not a known column, validate_column_reference already handles it
+                    // Check if property is a column (for table.column.property pattern that's not a relation)
+                    if let Some(table) = self.schema.get_table(table_name) {
+                        if !table.has_column(&property_access.property)
+                            && !self.is_relation_for_table(&property_access.property, table_name)
+                        {
+                            // This could be a method call like .desc(), .asc(), .isNull() etc.
+                            // Don't report as error — these are handled elsewhere
                         }
                     }
                 }
+                _ => {
+                    // Other types of property access (e.g., on variables)
+                }
             }
-            Expression::Atomic(AtomicExpression::PropertyAccess(_inner_property_access)) => {
-                // This is a nested property access like p.author.name
-                // The inner property access (p.author) should resolve to a relation
-                // that returns a table, and then we validate the outer property (name)
-                // against that returned table
-                
-                // For now, we'll just validate that each part is valid
-                // A more complete implementation would track the resolved types
+        }
+    }
+
+    /// Validate the base of a property access chain without reporting
+    /// relation names as missing columns.
+    fn validate_property_access_base(&mut self, expr: &Expression) {
+        match expr {
+            Expression::Atomic(AtomicExpression::Column(Column::ExplicitTarget(table_name, _name, span))) => {
+                // This is table.something — check table exists
+                if !self.schema.tables.contains_key(table_name) && !self.valid_tables.contains(table_name) {
+                    self.errors.push(ValidationError {
+                        message: format!("Table '{}' not found", table_name),
+                        span: span.clone(),
+                    });
+                }
+                // name could be a column or a relation — both are fine here
+            }
+            Expression::Atomic(AtomicExpression::PropertyAccess(inner)) => {
+                self.validate_property_access_base(&inner.target);
             }
             _ => {
-                // Other types of property access (e.g., on variables)
+                self.validate_expression(expr);
             }
+        }
+    }
+
+    /// Check if a name is a relation defined for a given table.
+    fn is_relation_for_table(&self, name: &str, table_name: &str) -> bool {
+        if let Some(relation_info) = self.relations.get(name) {
+            relation_info.for_table == table_name
+        } else {
+            false
         }
     }
 
@@ -200,7 +269,8 @@ impl<'a> TypeValidator<'a> {
         match column {
             Column::ExplicitTarget(table_name, column_name, span) => {
                 if let Some(table) = self.schema.get_table(table_name) {
-                    if !table.has_column(column_name) {
+                    // It's a valid column, or it could be a relation name
+                    if !table.has_column(column_name) && !self.is_relation_for_table(column_name, table_name) {
                         self.errors.push(ValidationError {
                             message: format!("Column '{}' not found in table '{}'", column_name, table_name),
                             span: span.clone(),
@@ -287,7 +357,7 @@ impl<'a> TypeValidator<'a> {
                 if !self.schema.tables.contains_key(&join.table) {
                     self.errors.push(ValidationError {
                         message: format!("Table '{}' not found in join", join.table),
-                        span: None,
+                        span: join.span.clone(),
                     });
                 }
                 self.validate_expression(&join.condition);
@@ -339,7 +409,7 @@ impl<'a> TypeValidator<'a> {
                 MutationBodyItem::Mutation(statement) => {
                     match statement {
                         MutationStatement::Insert(insert) => {
-                            self.validate_insert(&insert.into, &insert.values);
+                            self.validate_insert(&insert.into.name, &insert.values, insert.into.span.as_ref());
                             if let Some(on_conflict) = &insert.on_conflict {
                                 if let crate::ast::OnConflictAction::DoUpdate(sets) = &on_conflict.action {
                                     for (_key, value) in sets {
@@ -349,10 +419,10 @@ impl<'a> TypeValidator<'a> {
                             }
                         }
                         MutationStatement::Update(update) => {
-                            self.validate_update(&update.target.name, &update.set, update.where_clause.as_ref());
+                            self.validate_update(&update.target, &update.set, update.set_variable.as_deref(), update.where_clause.as_ref());
                         }
                         MutationStatement::Delete(delete) => {
-                            self.validate_delete(&delete.target.name, delete.where_clause.as_ref());
+                            self.validate_delete(&delete.target, delete.where_clause.as_ref());
                         }
                     }
                 }
@@ -360,7 +430,7 @@ impl<'a> TypeValidator<'a> {
         }
     }
 
-    fn validate_insert(&mut self, target: &str, values: &[Expression]) {
+    fn validate_insert(&mut self, target: &str, values: &[Expression], target_span: Option<&Span>) {
         let table = match self.schema.get_table(target) {
             Some(table) => table,
             None => {
@@ -368,7 +438,7 @@ impl<'a> TypeValidator<'a> {
                 if !self.valid_tables.contains(target) {
                     self.errors.push(ValidationError {
                         message: format!("Table '{}' not found", target),
-                        span: None,
+                        span: target_span.cloned(),
                     });
                 }
                 return;
@@ -380,7 +450,7 @@ impl<'a> TypeValidator<'a> {
                 Expression::Atomic(AtomicExpression::Literal(Literal::Object(obj))) => {
                 // Check for unknown fields
                     let table_columns: HashSet<_> = table.columns.iter().map(|c| &c.name).collect();
-                    for (field_name, field_value) in &obj.0 {
+                    for (field_name, field_value) in &obj.fields {
                         if !table_columns.contains(field_name) {
                             self.errors.push(ValidationError {
                                 message: format!("Unknown field '{}' in table '{}'", field_name, target),
@@ -390,53 +460,125 @@ impl<'a> TypeValidator<'a> {
                     }
 
                     // Check required fields
-                    let provided_fields: HashSet<_> = obj.0.keys().collect();
+                    let provided_fields: HashSet<_> = obj.fields.keys().collect();
                     for column in table.get_required_columns() {
                         if !provided_fields.contains(&column.name) {
                             self.errors.push(ValidationError {
                                 message: format!("Required field '{}' is missing in table '{}'", column.name, target),
-                                span: None,
+                                span: obj.span.clone().or_else(|| target_span.cloned()),
                             });
                         }
                     }
 
                     // Validate field types and expressions
-                    for (field_name, field_value) in &obj.0 {
+                    for (field_name, field_value) in &obj.fields {
                         // First validate the expression itself (for undefined variables, etc)
                         self.validate_expression(field_value);
-                        
+
                         // Then validate the type if the column exists
                         if let Some(column) = table.get_column(field_name) {
                             self.validate_value_type(field_value, &column.column_type, field_name);
                         }
                     }
                 }
+                Expression::Atomic(AtomicExpression::Variable(var)) => {
+                    // Check if the variable exists
+                    if !self.variables.contains_key(&var.name) {
+                        self.errors.push(ValidationError {
+                            message: format!("Undefined variable: ${}", var.name),
+                            span: var.span.clone(),
+                        });
+                    } else if let Some(var_type) = self.variables.get(&var.name) {
+                        // Allow Insertable<T> typed variables where T matches the target table
+                        match var_type {
+                            Type::Utility(UtilityType::Insertable(insertable)) => {
+                                if let Type::UserDefined(table_name) = insertable.0.as_ref() {
+                                    if table_name != target {
+                                        self.errors.push(ValidationError {
+                                            message: format!(
+                                                "Type mismatch: variable ${} is Insertable<{}>, but inserting into '{}'",
+                                                var.name, table_name, target
+                                            ),
+                                            span: var.span.clone(),
+                                        });
+                                    }
+                                }
+                            }
+                            _ => {
+                                self.errors.push(ValidationError {
+                                    message: format!(
+                                        "INSERT values must be object literals or Insertable<T> typed variables, but ${} has type {:?}",
+                                        var.name, var_type
+                                    ),
+                                    span: var.span.clone(),
+                                });
+                            }
+                        }
+                    }
+                }
                 _ => {
                     self.errors.push(ValidationError {
-                        message: "INSERT values must be object literals".to_string(),
-                        span: None,
+                        message: "INSERT values must be object literals or Insertable<T> typed variables".to_string(),
+                        span: target_span.cloned(),
                     });
                 }
             }
         }
     }
 
-    fn validate_update(&mut self, target: &str, set: &[(String, Expression)], where_clause: Option<&Expression>) {
-        let table = match self.schema.get_table(target) {
+    fn validate_update(&mut self, target: &Target, set: &[(String, Expression)], set_variable: Option<&str>, where_clause: Option<&Expression>) {
+        let target_span = target.span.as_ref();
+        let target_name = &target.name;
+        let table = match self.schema.get_table(target_name) {
             Some(table) => table,
             None => {
                 // 実テーブル名をチェック
-                if !self.valid_tables.contains(target) {
+                if !self.valid_tables.contains(target_name) {
                     self.errors.push(ValidationError {
-                        message: format!("Table '{}' not found", target),
-                        span: None,
+                        message: format!("Table '{}' not found", target_name),
+                        span: target_span.cloned(),
                     });
                 }
                 return;
             }
         };
 
-        // Validate SET clause
+        // Validate set_variable (ChangeSet<T> typed variable)
+        if let Some(var_name) = set_variable {
+            if !self.variables.contains_key(var_name) {
+                self.errors.push(ValidationError {
+                    message: format!("Undefined variable: ${}", var_name),
+                    span: target_span.cloned(),
+                });
+            } else if let Some(var_type) = self.variables.get(var_name) {
+                match var_type {
+                    Type::Utility(UtilityType::ChangeSet(change_set)) => {
+                        if let Type::UserDefined(table_name) = change_set.0.as_ref() {
+                            if table_name != target_name {
+                                self.errors.push(ValidationError {
+                                    message: format!(
+                                        "Type mismatch: variable ${} is ChangeSet<{}>, but updating '{}'",
+                                        var_name, table_name, target_name
+                                    ),
+                                    span: target_span.cloned(),
+                                });
+                            }
+                        }
+                    }
+                    _ => {
+                        self.errors.push(ValidationError {
+                            message: format!(
+                                "UPDATE .set() variable must be ChangeSet<T> typed, but ${} has type {:?}",
+                                var_name, var_type
+                            ),
+                            span: target_span.cloned(),
+                        });
+                    }
+                }
+            }
+        }
+
+        // Validate SET clause (object literal fields)
         for (field_name, field_value) in set {
             match table.get_column(field_name) {
                 Some(column) => {
@@ -444,8 +586,8 @@ impl<'a> TypeValidator<'a> {
                 }
                 None => {
                     self.errors.push(ValidationError {
-                        message: format!("Unknown field '{}' in table '{}'", field_name, target),
-                        span: None,
+                        message: format!("Unknown field '{}' in table '{}'", field_name, target_name),
+                        span: target_span.cloned(),
                     });
                 }
             }
@@ -457,11 +599,11 @@ impl<'a> TypeValidator<'a> {
         }
     }
 
-    fn validate_delete(&mut self, target: &str, where_clause: Option<&Expression>) {
-        if !self.schema.tables.contains_key(target) && !self.valid_tables.contains(target) {
+    fn validate_delete(&mut self, target: &Target, where_clause: Option<&Expression>) {
+        if !self.schema.tables.contains_key(&target.name) && !self.valid_tables.contains(&target.name) {
             self.errors.push(ValidationError {
-                message: format!("Table '{}' not found", target),
-                span: None,
+                message: format!("Table '{}' not found", target.name),
+                span: target.span.clone(),
             });
         }
 
@@ -593,8 +735,32 @@ impl<'a> TypeValidator<'a> {
             (actual, Type::Optional(inner)) => {
                 self.types_compatible(actual, inner)
             }
-            (Type::UserDefined(a), Type::UserDefined(e)) => a == e,
-            // PostgreSQL enum types (stored as UserDefined with udt_name) are compatible with String
+            (Type::UserDefined(a), Type::UserDefined(e)) => {
+                // Same name → compatible
+                if a == e { return true; }
+                // Both are ValTypes → compare base types
+                if let (Some(a_base), Some(e_base)) = (self.valtypes.get(a), self.valtypes.get(e)) {
+                    return a_base == e_base
+                        || (self.is_numeric_builtin_type(a_base) && self.is_numeric_builtin_type(e_base));
+                }
+                false
+            }
+            // ValType (registered UserDefined) vs BuiltIn → resolve and compare base types
+            (Type::UserDefined(name), _) if self.valtypes.contains_key(name) => {
+                if let (Some(a), Some(e)) = (self.resolve_to_builtin(actual), self.resolve_to_builtin(expected)) {
+                    a == e || (self.is_numeric_builtin_type(&a) && self.is_numeric_builtin_type(&e))
+                } else {
+                    false
+                }
+            }
+            (_, Type::UserDefined(name)) if self.valtypes.contains_key(name) => {
+                if let (Some(a), Some(e)) = (self.resolve_to_builtin(actual), self.resolve_to_builtin(expected)) {
+                    a == e || (self.is_numeric_builtin_type(&a) && self.is_numeric_builtin_type(&e))
+                } else {
+                    false
+                }
+            }
+            // PostgreSQL enum types (unknown UserDefined, not a ValType) are compatible with String
             (Type::BuiltIn(BuiltInType::String), Type::UserDefined(_))
             | (Type::UserDefined(_), Type::BuiltIn(BuiltInType::String)) => true,
             _ => {
@@ -655,6 +821,37 @@ mod tests {
     use std::collections::HashMap;
 
     #[test]
+    fn test_valtype_compatible_with_builtin() {
+        let schema = DatabaseSchema::new();
+        let mut validator = TypeValidator::new(&schema);
+        validator.register_valtype("OrganizationId".to_string(), BuiltInType::I64);
+
+        // UserDefined(ValType) vs BuiltIn should be compatible when base types match
+        assert!(validator.types_compatible(
+            &Type::UserDefined("OrganizationId".to_string()),
+            &Type::BuiltIn(BuiltInType::I64),
+        ));
+
+        // BuiltIn vs UserDefined(ValType) should also work
+        assert!(validator.types_compatible(
+            &Type::BuiltIn(BuiltInType::I64),
+            &Type::UserDefined("OrganizationId".to_string()),
+        ));
+
+        // Mismatched base type should fail
+        assert!(!validator.types_compatible(
+            &Type::UserDefined("OrganizationId".to_string()),
+            &Type::BuiltIn(BuiltInType::String),
+        ));
+
+        // Optional column with ValType should work
+        assert!(validator.types_compatible(
+            &Type::UserDefined("OrganizationId".to_string()),
+            &Type::Optional(Box::new(Type::BuiltIn(BuiltInType::I64))),
+        ));
+    }
+
+    #[test]
     fn test_validate_insert_missing_required_field() {
         let mut schema = DatabaseSchema::new();
         let mut table = TableSchema::new("users".to_string());
@@ -683,9 +880,9 @@ mod tests {
         
         let mut obj_fields = HashMap::new();
         obj_fields.insert("name".to_string(), Expression::Atomic(AtomicExpression::Literal(Literal::String("test".to_string()))));
-        let insert_values = vec![Expression::Atomic(AtomicExpression::Literal(Literal::Object(ObjectLiteralExpression(obj_fields))))];
+        let insert_values = vec![Expression::Atomic(AtomicExpression::Literal(Literal::Object(ObjectLiteralExpression { fields: obj_fields, span: None })))];
         
-        validator.validate_insert("users", &insert_values);
+        validator.validate_insert("users", &insert_values, None);
         
         assert_eq!(validator.errors.len(), 2);
         assert!(validator.errors.iter().any(|e| e.message.contains("Unknown field 'name'")));

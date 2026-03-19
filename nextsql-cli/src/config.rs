@@ -8,6 +8,17 @@ pub struct NextSqlConfig {
     pub database_url: Option<String>,
     pub files: FilesConfig,
     pub target: TargetConfig,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub codegen: Option<CodegenConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CodegenConfig {
+    /// Naming pattern for insert param structs. Default: "Insert{Table}Params"
+    pub insert_params: Option<String>,
+    /// Naming pattern for update changeset structs. Default: "Update{Table}Params"
+    pub update_params: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -34,6 +45,7 @@ impl Default for NextSqlConfig {
                 target_language: "rust".to_string(),
                 target_directory: "../generated".to_string(),
             },
+            codegen: None,
         }
     }
 }
@@ -77,19 +89,58 @@ impl NextSqlConfig {
         if !path.as_ref().exists() {
             std::fs::create_dir_all(&path)?;
         }
-        
+
         let config_path = path.as_ref().join("next-sql.toml");
-        
+
         if config_path.exists() {
             return Err("next-sql.toml already exists".into());
         }
 
         let config = NextSqlConfig::default();
         config.save_to_file(&config_path)?;
-        
+
         println!("Initialized NextSQL project at {}", path.as_ref().display());
         println!("Created next-sql.toml with default configuration");
-        
+
+        // .claude ディレクトリを探して、見つかればスキルを配置
+        let absolute_path = fs::canonicalize(path.as_ref())?;
+        if let Some(claude_dir) = Self::find_claude_dir(&absolute_path) {
+            Self::install_skill(&claude_dir)?;
+        }
+
+        Ok(())
+    }
+
+    /// 親ディレクトリを遡って .claude ディレクトリを探す
+    /// ホームディレクトリ直下の ~/.claude（グローバル設定）は除外する
+    fn find_claude_dir(start: &Path) -> Option<std::path::PathBuf> {
+        let home_dir = dirs::home_dir();
+        let mut current = Some(start);
+        while let Some(dir) = current {
+            let claude_dir = dir.join(".claude");
+            if claude_dir.is_dir() {
+                // ~/.claude（グローバル）はスキップ
+                if let Some(ref home) = home_dir {
+                    if dir == home.as_path() {
+                        return None;
+                    }
+                }
+                return Some(claude_dir);
+            }
+            current = dir.parent();
+        }
+        None
+    }
+
+    fn install_skill(claude_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
+        let skill_dir = claude_dir.join("skills/learn-next-sql");
+        fs::create_dir_all(&skill_dir)?;
+
+        let skill_content = include_str!(concat!(env!("OUT_DIR"), "/skill.md"));
+        let skill_path = skill_dir.join("SKILL.md");
+        fs::write(&skill_path, skill_content)?;
+
+        println!("Installed Claude Code skill at {}", skill_path.display());
         Ok(())
     }
 }
@@ -110,8 +161,9 @@ mod tests {
                 target_language: "rust".to_string(),
                 target_directory: "../generated".to_string(),
             },
+            codegen: None,
         };
-        
+
         assert!(NextSqlConfig::validate_config(&config).is_ok());
     }
 
@@ -126,8 +178,9 @@ mod tests {
                 target_language: "invalid_language".to_string(),
                 target_directory: "../generated".to_string(),
             },
+            codegen: None,
         };
-        
+
         let result = NextSqlConfig::validate_config(&config);
         assert!(result.is_err());
         let error_msg = result.unwrap_err().to_string();
@@ -185,9 +238,10 @@ target_directory = "../generated"
                 target_language: "rust".to_string(),
                 target_directory: "../generated".to_string(),
             },
+            codegen: None,
         };
         assert!(valid_config.save_to_file(&file_path).is_ok());
-        
+
         // 無効な設定
         let invalid_config = NextSqlConfig {
             database_url: None,
@@ -198,6 +252,7 @@ target_directory = "../generated"
                 target_language: "invalid".to_string(),
                 target_directory: "../generated".to_string(),
             },
+            codegen: None,
         };
         assert!(invalid_config.save_to_file(&file_path).is_err());
     }

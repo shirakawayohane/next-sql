@@ -1,16 +1,12 @@
-use crate::schema_cache::SchemaCache;
-use super::utils::snake_to_camel_case;
-use std::sync::Arc;
 use tower_lsp::lsp_types::*;
 
 pub trait TypeCompletionProvider {
-    fn get_schema_cache(&self) -> Option<&Arc<SchemaCache>>;
-    fn get_file_uri(&self) -> Option<&str>;
+    fn get_text(&self) -> &str;
 
     async fn get_type_completions(&self) -> Vec<CompletionItem> {
         let mut completions = Vec::new();
 
-        // Add Insertable as a type with snippet
+        // Add utility types with snippet
         completions.push(CompletionItem {
             label: "Insertable".to_string(),
             kind: Some(CompletionItemKind::INTERFACE),
@@ -19,6 +15,18 @@ pub trait TypeCompletionProvider {
                 "A utility type that makes optional fields with default values".to_string(),
             )),
             insert_text: Some("Insertable<$1>$0".to_string()),
+            insert_text_format: Some(InsertTextFormat::SNIPPET),
+            ..Default::default()
+        });
+
+        completions.push(CompletionItem {
+            label: "ChangeSet".to_string(),
+            kind: Some(CompletionItemKind::INTERFACE),
+            detail: Some("ChangeSet<T> - Partial update type for models".to_string()),
+            documentation: Some(Documentation::String(
+                "A utility type for partial updates where all fields are optional".to_string(),
+            )),
+            insert_text: Some("ChangeSet<$1>$0".to_string()),
             insert_text_format: Some(InsertTextFormat::SNIPPET),
             ..Default::default()
         });
@@ -51,26 +59,26 @@ pub trait TypeCompletionProvider {
             });
         }
 
-        // Add table names as user-defined types
-        if let (Some(schema_cache), Some(file_uri)) = (self.get_schema_cache(), self.get_file_uri()) {
-            let path = std::path::Path::new(file_uri.trim_start_matches("file://"));
-
-            if let Some(schema) = schema_cache.get_schema_for_file(path).await {
-                for table_name in schema.tables.keys() {
-                    let model_name = snake_to_camel_case(table_name);
-                    
-                    completions.push(CompletionItem {
-                        label: model_name.clone(),
-                        kind: Some(CompletionItemKind::CLASS),
-                        detail: Some(format!("Model type for table {}", table_name)),
-                        documentation: Some(Documentation::String(format!(
-                            "Type representing the {} table",
-                            table_name
-                        ))),
-                        insert_text: Some(model_name),
-                        ..Default::default()
-                    });
-                }
+        // Add valtype names defined in the current file
+        {
+            use std::sync::LazyLock;
+            static RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+                regex::Regex::new(r"valtype\s+(\w+)\s*=\s*(\w+)").unwrap()
+            });
+            for cap in RE.captures_iter(self.get_text()) {
+                let valtype_name = &cap[1];
+                let base_type = &cap[2];
+                completions.push(CompletionItem {
+                    label: valtype_name.to_string(),
+                    kind: Some(CompletionItemKind::TYPE_PARAMETER),
+                    detail: Some(format!("valtype {} = {}", valtype_name, base_type)),
+                    documentation: Some(Documentation::String(format!(
+                        "Value type alias for {}",
+                        base_type
+                    ))),
+                    insert_text: Some(valtype_name.to_string()),
+                    ..Default::default()
+                });
             }
         }
 

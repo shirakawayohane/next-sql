@@ -25,6 +25,8 @@ fn run_codegen(test_name: &str) -> (nextsql_codegen::CodegenResult, PathBuf) {
         source_dir,
         output_dir: output_dir.clone(),
         backend: "rust".to_string(),
+        insert_params_pattern: None,
+        update_params_pattern: None,
     };
 
     let result = generate(&config, &schema);

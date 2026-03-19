@@ -653,11 +653,11 @@ impl<'a> SqlGenContext<'a> {
             Literal::Object(obj) => {
                 // Object literals in expression context: generate as ROW(...) constructor
                 // This handles cases where an object literal appears outside of INSERT context
-                let mut keys: Vec<&String> = obj.0.keys().collect();
+                let mut keys: Vec<&String> = obj.fields.keys().collect();
                 keys.sort();
                 let values: Vec<String> = keys
                     .iter()
-                    .map(|k| self.gen_expr(obj.0.get(*k).unwrap()))
+                    .map(|k| self.gen_expr(obj.fields.get(*k).unwrap()))
                     .collect();
                 format!("ROW({})", values.join(", "))
             }
@@ -1192,7 +1192,7 @@ impl<'a> SqlGenContext<'a> {
         all_columns: &mut Vec<String>,
     ) -> Vec<String> {
         // Use sorted keys for deterministic output
-        let mut keys: Vec<&String> = obj.0.keys().collect();
+        let mut keys: Vec<&String> = obj.fields.keys().collect();
         keys.sort();
 
         if all_columns.is_empty() {
@@ -1200,7 +1200,7 @@ impl<'a> SqlGenContext<'a> {
         }
 
         keys.iter()
-            .map(|k| self.gen_expr(obj.0.get(*k).unwrap()))
+            .map(|k| self.gen_expr(obj.fields.get(*k).unwrap()))
             .collect()
     }
 
@@ -1254,7 +1254,7 @@ impl<'a> SqlGenContext<'a> {
 
         let mut sql = format!(
             "INSERT INTO {}{} VALUES {}",
-            insert.into,
+            insert.into.name,
             cols_str,
             rows.join(", ")
         );
@@ -1526,7 +1526,7 @@ mod tests {
         map.insert("name".to_string(), str_lit("Alice"));
         map.insert("age".to_string(), num(30.0));
         let obj = Expression::Atomic(AtomicExpression::Literal(Literal::Object(
-            ObjectLiteralExpression(map),
+            ObjectLiteralExpression { fields: map, span: None },
         )));
         let reg = RelationRegistry::empty();
         let mut ctx = SqlGenContext::new(&reg);
@@ -1538,7 +1538,7 @@ mod tests {
     #[test]
     fn test_empty_object_literal_generates_row() {
         let obj = Expression::Atomic(AtomicExpression::Literal(Literal::Object(
-            ObjectLiteralExpression(HashMap::new()),
+            ObjectLiteralExpression { fields: HashMap::new(), span: None },
         )));
         let reg = RelationRegistry::empty();
         let mut ctx = SqlGenContext::new(&reg);
@@ -1672,9 +1672,9 @@ mod tests {
         }));
 
         let insert = Insert {
-            into: "users".to_string(),
+            into: Target { name: "users".to_string(), span: None },
             values: vec![Expression::Atomic(AtomicExpression::Literal(
-                Literal::Object(ObjectLiteralExpression(map)),
+                Literal::Object(ObjectLiteralExpression { fields: map, span: None }),
             ))],
             on_conflict: Some(OnConflictClause {
                 columns: vec!["email".to_string()],
@@ -2239,9 +2239,9 @@ mod tests {
         map.insert("email".to_string(), var("email"));
 
         let insert = Insert {
-            into: "users".to_string(),
+            into: Target { name: "users".to_string(), span: None },
             values: vec![Expression::Atomic(AtomicExpression::Literal(
-                Literal::Object(ObjectLiteralExpression(map)),
+                Literal::Object(ObjectLiteralExpression { fields: map, span: None }),
             ))],
             on_conflict: None,
             returning: None,
@@ -2261,9 +2261,9 @@ mod tests {
         map.insert("name".to_string(), var("name"));
 
         let insert = Insert {
-            into: "users".to_string(),
+            into: Target { name: "users".to_string(), span: None },
             values: vec![Expression::Atomic(AtomicExpression::Literal(
-                Literal::Object(ObjectLiteralExpression(map)),
+                Literal::Object(ObjectLiteralExpression { fields: map, span: None }),
             ))],
             on_conflict: None,
             returning: Some(vec![
@@ -2280,9 +2280,9 @@ mod tests {
         map.insert("email".to_string(), var("email"));
 
         let insert = Insert {
-            into: "users".to_string(),
+            into: Target { name: "users".to_string(), span: None },
             values: vec![Expression::Atomic(AtomicExpression::Literal(
-                Literal::Object(ObjectLiteralExpression(map)),
+                Literal::Object(ObjectLiteralExpression { fields: map, span: None }),
             ))],
             on_conflict: Some(OnConflictClause {
                 columns: vec!["email".to_string()],
@@ -2301,9 +2301,9 @@ mod tests {
         map.insert("name".to_string(), var("name"));
 
         let insert = Insert {
-            into: "users".to_string(),
+            into: Target { name: "users".to_string(), span: None },
             values: vec![Expression::Atomic(AtomicExpression::Literal(
-                Literal::Object(ObjectLiteralExpression(map)),
+                Literal::Object(ObjectLiteralExpression { fields: map, span: None }),
             ))],
             on_conflict: Some(OnConflictClause {
                 columns: vec!["email".to_string()],

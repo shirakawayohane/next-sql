@@ -30,6 +30,8 @@ sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "postgres", "chron
 uuid = { version = "1.0", features = ["v4", "serde"] }
 toml = "0.8"
 jsonschema = "0.18"
+dirs = "5"
+postgres = "0.19"
 
 [dev-dependencies]
 tempfile = "3.0"

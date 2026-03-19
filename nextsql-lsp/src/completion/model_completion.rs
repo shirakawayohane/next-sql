@@ -21,9 +21,13 @@ pub trait ModelCompletionProvider {
                     let byte_position = utf16_position_to_byte_index(current_line, position.character as usize);
                     let before_cursor = &current_line[..byte_position.min(current_line.len())];
                     
-                    // Find where "Insertable<" starts
-                    let insertable_start = before_cursor.rfind("Insertable<").unwrap_or(byte_position);
-                    let start_of_model = insertable_start + "Insertable<".len();
+                    // Find where "Insertable<" or "ChangeSet<" starts
+                    let (insertable_start, pattern_len) = if let Some(pos) = before_cursor.rfind("ChangeSet<") {
+                        (pos, "ChangeSet<".len())
+                    } else {
+                        (before_cursor.rfind("Insertable<").unwrap_or(byte_position), "Insertable<".len())
+                    };
+                    let start_of_model = insertable_start + pattern_len;
                     
                     // Calculate start position in UTF-16
                     let start_char_count = current_line[..start_of_model].chars().count();
@@ -56,8 +60,8 @@ pub trait ModelCompletionProvider {
                         kind: Some(CompletionItemKind::CLASS),
                         detail: Some(format!("Model for table {}", table_name)),
                         documentation: Some(Documentation::String(format!(
-                            "Insertable<{}> - Insert type for {} table",
-                            model_name, table_name
+                            "Utility type for {} table",
+                            table_name
                         ))),
                         text_edit: Some(CompletionTextEdit::Edit(TextEdit {
                             range: Range {
@@ -93,8 +97,12 @@ pub trait ModelCompletionProvider {
             let byte_position = utf16_position_to_byte_index(current_line, position.character as usize);
             let before_cursor = &current_line[..byte_position.min(current_line.len())];
             
-            let insertable_start = before_cursor.rfind("Insertable<").unwrap_or(byte_position);
-            let start_of_model = insertable_start + "Insertable<".len();
+            let (insertable_start, pattern_len) = if let Some(pos) = before_cursor.rfind("ChangeSet<") {
+                (pos, "ChangeSet<".len())
+            } else {
+                (before_cursor.rfind("Insertable<").unwrap_or(byte_position), "Insertable<".len())
+            };
+            let start_of_model = insertable_start + pattern_len;
             
             let start_char_count = current_line[..start_of_model].chars().count();
             let start_position = Position {
@@ -123,8 +131,8 @@ pub trait ModelCompletionProvider {
                     kind: Some(CompletionItemKind::CLASS),
                     detail: Some(format!("Model for table {} (suggestion)", table)),
                     documentation: Some(Documentation::String(format!(
-                        "Insertable<{}> - Insert type for {} table",
-                        model, table
+                        "Utility type for {} table",
+                        table
                     ))),
                     text_edit: Some(CompletionTextEdit::Edit(TextEdit {
                         range: Range {

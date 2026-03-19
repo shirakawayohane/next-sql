@@ -167,57 +167,21 @@ impl<'a> DiagnosticsProvider<'a> {
     ) -> Vec<Diagnostic> {
         let mut diagnostics = Vec::new();
 
-        // Try to load schema for this file
         let path = std::path::Path::new(file_uri.trim_start_matches("file://"));
         let schema = match schema_cache.get_schema_for_file(path).await {
             Some(schema) => schema,
-            None => {
-                // Try to load schema
-                if let Some(project_root) = schema_cache.find_project_root(path) {
-                    match schema_cache.load_schema_for_project(&project_root).await {
-                        Ok(schema) => schema,
-                        Err(_) => return diagnostics, // Cannot validate without schema
-                    }
-                } else {
-                    return diagnostics;
-                }
-            }
+            None => return diagnostics,
         };
 
-        // Collect valtype definitions from all .nsql files in the project
-        let mut all_valtypes = Vec::new();
-        if let Some(project_root) = schema_cache.find_project_root(path) {
-            if let Ok(entries) = glob::glob(&format!("{}/**/*.nsql", project_root.display())) {
-                for entry in entries.flatten() {
-                    if entry == path {
-                        continue; // Skip current file, already parsed
-                    }
-                    if let Ok(content) = std::fs::read_to_string(&entry) {
-                        if let Ok(other_module) = std::panic::catch_unwind(
-                            std::panic::AssertUnwindSafe(|| parse_module(&content))
-                        ) {
-                            if let Ok(other_module) = other_module {
-                                for toplevel in &other_module.toplevels {
-                                    if let nextsql_core::ast::TopLevel::ValType(vt) = toplevel {
-                                        all_valtypes.push((vt.name.clone(), vt.base_type.clone()));
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        // Use cached valtypes instead of re-scanning all project files
+        let all_valtypes = schema_cache.get_all_valtypes_except(path).await;
 
-        // Create type validator
         let mut validator = TypeValidator::new(&schema);
-        // Register external valtypes before validation
         for (name, base_type) in all_valtypes {
             validator.register_valtype(name, base_type);
         }
         let validation_errors = validator.validate_module(module);
 
-        // Convert validation errors to diagnostics
         for error in validation_errors {
             let diagnostic = self.create_diagnostic_from_validation_error(error);
             diagnostics.push(diagnostic);
