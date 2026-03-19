@@ -3165,4 +3165,33 @@ query test($min_orders: i64) {
             result.sql
         );
     }
+
+    #[test]
+    fn test_three_conditions_with_literal_boolean() {
+        // Bug: 3 conditions joined with && drops the last literal condition.
+        let input = r#"
+            query findUserByEmail($organizationId: i64, $email: string) {
+                from(users)
+                .where(users.organization_id == $organizationId && users.email == $email && users.is_active == true)
+                .select(users.*)
+            }
+        "#;
+        let stmt = parse_first_select(input);
+        let result = generate_select_sql(&stmt);
+        assert!(
+            result.sql.contains("users.is_active = TRUE"),
+            "Expected 'users.is_active = TRUE' in WHERE clause, got: {}",
+            result.sql
+        );
+        assert!(
+            result.sql.contains("users.organization_id = $1"),
+            "Expected 'users.organization_id = $1' in WHERE clause, got: {}",
+            result.sql
+        );
+        assert!(
+            result.sql.contains("users.email = $2"),
+            "Expected 'users.email = $2' in WHERE clause, got: {}",
+            result.sql
+        );
+    }
 }

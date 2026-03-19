@@ -1350,21 +1350,21 @@ fn parse_expression(pairs: pest::iterators::Pairs<Rule>) -> Expression {
 
 fn parse_logical_expression(pairs: pest::iterators::Pairs<Rule>) -> Expression {
     let mut pairs = pairs.peekable();
-    let left = parse_equality_expression(pairs.next().unwrap().into_inner());
-    if pairs.peek().is_none() {
-        return left;
+    let mut left = parse_equality_expression(pairs.next().unwrap().into_inner());
+    while pairs.peek().is_some() {
+        let op = match pairs.next().unwrap().as_rule() {
+            Rule::and => BinaryOp::And,
+            Rule::or => BinaryOp::Or,
+            _ => unreachable!(),
+        };
+        let right = parse_equality_expression(pairs.next().unwrap().into_inner());
+        left = Expression::Binary {
+            left: Box::new(left),
+            op,
+            right: Box::new(right),
+        };
     }
-    let op = match pairs.next().unwrap().as_rule() {
-        Rule::and => BinaryOp::And,
-        Rule::or => BinaryOp::Or,
-        _ => unreachable!(),
-    };
-    let right = parse_equality_expression(pairs.next().unwrap().into_inner());
-    Expression::Binary {
-        left: Box::new(left),
-        op,
-        right: Box::new(right),
-    }
+    left
 }
 
 fn parse_equality_expression(pairs: pest::iterators::Pairs<Rule>) -> Expression {
