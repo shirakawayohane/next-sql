@@ -1,0 +1,118 @@
+name: Release All
+
+# Unified release workflow:
+#   1. Bumps version in Cargo.toml & package.json
+#   2. Optionally updates syntax docs with Claude Code
+#   3. Commits, tags, and pushes
+#   4. Tag push triggers: release.yml (CLI) + publish-vscode.yml (VSCode Extension)
+#   5. Docs push triggers: deploy-pages.yml (GitHub Pages)
+#
+# Required secrets:
+#   RELEASE_TOKEN  — GitHub PAT with contents:write scope
+#                    (GITHUB_TOKEN cannot trigger downstream workflows)
+#   ANTHROPIC_API_KEY — Required only when update_docs is enabled
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Version bump type"
+        required: true
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+      update_docs:
+        description: "Update syntax docs with Claude Code"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.RELEASE_TOKEN }}
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Calculate new version
+        id: version
+        run: |
+          CURRENT=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
+
+          case "${{ inputs.bump }}" in
+            major) MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0 ;;
+            minor) MINOR=$((MINOR + 1)); PATCH=0 ;;
+            patch) PATCH=$((PATCH + 1)) ;;
+          esac
+
+          NEW="${MAJOR}.${MINOR}.${PATCH}"
+          echo "current=$CURRENT" >> "$GITHUB_OUTPUT"
+          echo "new=$NEW" >> "$GITHUB_OUTPUT"
+          echo "tag=v${NEW}" >> "$GITHUB_OUTPUT"
+          echo "::notice::Version bump: $CURRENT → $NEW"
+
+      - name: Bump Cargo.toml workspace version
+        run: |
+          sed -i 's/^version = "${{ steps.version.outputs.current }}"/version = "${{ steps.version.outputs.new }}"/' Cargo.toml
+
+      - name: Bump VSCode extension version
+        working-directory: nextsql-vscode
+        run: |
+          npm version "${{ steps.version.outputs.new }}" --no-git-tag-version
+
+      # ── Update syntax docs with Claude Code ──
+      - name: Setup Node.js
+        if: ${{ inputs.update_docs }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Claude Code
+        if: ${{ inputs.update_docs }}
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Update syntax documentation
+        if: ${{ inputs.update_docs }}
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          claude -p --dangerously-skip-permissions "
+          You are updating the NextSQL syntax documentation for the website.
+
+          1. Read the authoritative syntax sources:
+             - nextsql-core/src/nextsql.pest (PEG grammar)
+             - The learn-next-sql skill prompt (find it via: find target -name 'skill.md' 2>/dev/null, or reconstruct from examples)
+             - All example files in examples/
+
+          2. Read the current documentation files in docs/content/syntax/
+
+          3. Update each markdown file to accurately reflect the current syntax.
+             Keep the existing structure, tone, and formatting style.
+             Add any new features that are missing. Remove anything that no longer exists.
+             Do NOT change docs/content/syntax/manifest.json unless you add or remove a section.
+
+          4. Only modify files in docs/content/syntax/. Do not touch any other files.
+          "
+
+      # ── Commit, tag, and push ──
+      - name: Commit and tag
+        run: |
+          git add -A
+          git commit -m "Release ${{ steps.version.outputs.tag }}"
+          git tag "${{ steps.version.outputs.tag }}"
+
+      - name: Push
+        run: |
+          git push origin main
+          git push origin "${{ steps.version.outputs.tag }}"
