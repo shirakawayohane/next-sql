@@ -1,0 +1,334 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>NextSQL — Type-safe SQL, beautifully expressed</title>
+    <meta
+      name="description"
+      content="A modern DSL that generates type-safe database modules from expressive query definitions."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Lexend:wght@300;400;500;600&family=Syne:wght@600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="css/style.css" />
+  </head>
+  <body>
+    <!-- ===== Navigation ===== -->
+    <nav class="nav">
+      <div class="nav-inner">
+        <a href="./" class="nav-logo">
+          <span class="logo-mark">NS</span>
+          NextSQL
+        </a>
+        <button
+          class="nav-toggle"
+          aria-label="Toggle navigation"
+          onclick="document.querySelector('.nav-links').classList.toggle('open')"
+        >
+          <svg viewBox="0 0 24 24">
+            <line x1="3" y1="6" x2="21" y2="6" />
+            <line x1="3" y1="12" x2="21" y2="12" />
+            <line x1="3" y1="18" x2="21" y2="18" />
+          </svg>
+        </button>
+        <ul class="nav-links">
+          <li><a href="./" class="active">Home</a></li>
+          <li><a href="syntax.html">Docs</a></li>
+          <li>
+            <a
+              href="https://github.com/shirakawayohane/next-sql"
+              class="gh-link"
+              target="_blank"
+              rel="noopener"
+            >
+              <svg viewBox="0 0 16 16">
+                <path
+                  d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"
+                />
+              </svg>
+              GitHub
+            </a>
+          </li>
+        </ul>
+      </div>
+    </nav>
+
+    <!-- ===== Hero ===== -->
+    <section class="hero">
+      <div class="hero-glow hero-glow--1"></div>
+      <div class="hero-glow hero-glow--2"></div>
+
+      <div class="hero-content">
+        <div class="hero-badge">Open Source DSL for SQL Generation</div>
+
+        <h1>
+          Type-safe SQL,<br />
+          <span class="gradient-text">beautifully expressed.</span>
+        </h1>
+
+        <p class="hero-subtitle">
+          Write SQL queries as composable, typed functions. Generate
+          production-ready database modules for your language.
+        </p>
+
+        <div class="hero-actions">
+          <a href="#getting-started" class="btn btn-primary">Get Started</a>
+          <a href="syntax.html" class="btn btn-outline">Read the Docs</a>
+        </div>
+
+        <!-- Code example -->
+        <div class="code-showcase">
+          <div class="code-window">
+            <div class="code-titlebar">
+              <span class="code-dot code-dot--r"></span>
+              <span class="code-dot code-dot--y"></span>
+              <span class="code-dot code-dot--g"></span>
+              <span>queries.nsql</span>
+            </div>
+            <div class="code-body">
+              <pre><span class="cm">// Define a relation — auto-generates JOINs</span>
+<span class="kw">relation</span> <span class="fn">author</span> <span class="kw">for</span> <span class="tbl">posts</span> <span class="kw">returning</span> <span class="tbl">users</span> {
+  <span class="tbl">users</span><span class="op">.</span><span class="prop">id</span> <span class="op">==</span> <span class="tbl">posts</span><span class="op">.</span><span class="prop">author_id</span>
+}
+
+<span class="kw">query</span> <span class="fn">findPostsByAuthor</span>(<span class="var">$authorName</span>: <span class="ty">string</span>) {
+  <span class="fn">from</span>(<span class="tbl">posts</span>)
+  .<span class="fn">where</span>(<span class="tbl">posts</span>.<span class="prop">author</span>.<span class="prop">name</span> <span class="op">==</span> <span class="var">$authorName</span>)
+  .<span class="fn">select</span>(<span class="tbl">posts</span>.<span class="prop">title</span>, <span class="tbl">posts</span>.<span class="prop">author</span>.<span class="prop">email</span>)
+}</pre>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== Features ===== -->
+    <section class="features reveal">
+      <span class="section-label">// why NextSQL</span>
+      <h2 class="section-title">Built for real-world databases</h2>
+      <p class="section-desc">
+        NextSQL bridges the gap between raw SQL and type-safe application code,
+        giving you expressiveness without sacrificing safety.
+      </p>
+
+      <div class="features-grid">
+        <div class="feature-card">
+          <div class="feature-icon feature-icon--blue">
+            <svg
+              width="22"
+              height="22"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+            </svg>
+          </div>
+          <h3>Compile-time Type Safety</h3>
+          <p>
+            Catch SQL errors before runtime. Schema-aware validation ensures
+            your queries match your database at build time.
+          </p>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-icon feature-icon--cyan">
+            <svg
+              width="22"
+              height="22"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <polyline points="16 18 22 12 16 6" />
+              <polyline points="8 6 2 12 8 18" />
+            </svg>
+          </div>
+          <h3>Code Generation</h3>
+          <p>
+            Generate idiomatic, production-ready modules for your target
+            language. Currently supports Rust with more languages planned.
+          </p>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-icon feature-icon--purple">
+            <svg
+              width="22"
+              height="22"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <circle cx="12" cy="12" r="10" />
+              <path d="M8 14s1.5 2 4 2 4-2 4-2" />
+              <line x1="9" y1="9" x2="9.01" y2="9" />
+              <line x1="15" y1="9" x2="15.01" y2="9" />
+            </svg>
+          </div>
+          <h3>IDE-first Design</h3>
+          <p>
+            VSCode extension with LSP support provides real-time error
+            detection, context-aware autocompletion, and syntax highlighting.
+          </p>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-icon feature-icon--amber">
+            <svg
+              width="22"
+              height="22"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" />
+              <circle cx="9" cy="7" r="4" />
+              <path d="M23 21v-2a4 4 0 00-3-3.87" />
+              <path d="M16 3.13a4 4 0 010 7.75" />
+            </svg>
+          </div>
+          <h3>Relations &amp; Auto-JOINs</h3>
+          <p>
+            Declare relationships once, then navigate them with dot notation.
+            NextSQL resolves JOINs automatically from your definitions.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== Getting Started ===== -->
+    <section class="getting-started" id="getting-started">
+      <div class="getting-started-inner">
+        <span class="section-label">// getting started</span>
+        <h2 class="section-title">Up and running in minutes</h2>
+        <p class="section-desc">
+          Install the CLI, initialize your project, write a query, and generate
+          code.
+        </p>
+
+        <div class="steps">
+          <!-- Step 1 -->
+          <div class="step reveal">
+            <div class="step-number">1</div>
+            <div class="step-content">
+              <h3>Install NextSQL CLI</h3>
+              <p>
+                Install from the
+                <a
+                  href="https://github.com/shirakawayohane/next-sql/releases"
+                  target="_blank"
+                  >GitHub releases</a
+                >
+                or build from source.
+              </p>
+              <div class="step-code">
+                <span class="prompt">$ </span>cargo install nextsql-cli
+              </div>
+            </div>
+          </div>
+
+          <!-- Step 2 -->
+          <div class="step reveal">
+            <div class="step-number">2</div>
+            <div class="step-content">
+              <h3>Initialize a project</h3>
+              <p>
+                Create a <code>next-sql.toml</code> config and directory
+                structure.
+              </p>
+              <div class="step-code">
+                <span class="prompt">$ </span>nextsql init my-project
+              </div>
+            </div>
+          </div>
+
+          <!-- Step 3 -->
+          <div class="step reveal">
+            <div class="step-number">3</div>
+            <div class="step-content">
+              <h3>Write your first query</h3>
+              <p>
+                Create a <code>.nsql</code> file with type-safe query
+                definitions.
+              </p>
+              <div class="step-code">
+                <pre><span class="kw" style="color:#c084fc">query</span> <span style="color:#60a5fa">findUserById</span>(<span style="color:#fbbf24">$id</span>: <span style="color:#22d3ee">uuid</span>) {
+  <span style="color:#60a5fa">from</span>(<span style="color:#fb923c">users</span>)
+  .<span style="color:#60a5fa">where</span>(<span style="color:#fb923c">users</span>.id <span style="color:#f87171">==</span> <span style="color:#fbbf24">$id</span>)
+  .<span style="color:#60a5fa">select</span>(<span style="color:#fb923c">users</span>.*)
+}</pre>
+              </div>
+            </div>
+          </div>
+
+          <!-- Step 4 -->
+          <div class="step reveal">
+            <div class="step-number">4</div>
+            <div class="step-content">
+              <h3>Generate code</h3>
+              <p>
+                Run the generator and get type-safe Rust modules ready for use.
+              </p>
+              <div class="step-code">
+                <span class="prompt">$ </span>nextsql generate -s src/ -o
+                generated/ -b rust
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== Footer ===== -->
+    <footer class="footer">
+      <ul class="footer-links">
+        <li><a href="syntax.html">Documentation</a></li>
+        <li>
+          <a
+            href="https://github.com/shirakawayohane/next-sql"
+            target="_blank"
+            rel="noopener"
+            >GitHub</a
+          >
+        </li>
+        <li>
+          <a
+            href="https://github.com/shirakawayohane/next-sql/releases"
+            target="_blank"
+            rel="noopener"
+            >Releases</a
+          >
+        </li>
+      </ul>
+      <p>NextSQL is open source under the MIT License.</p>
+    </footer>
+
+    <!-- Scroll reveal -->
+    <script>
+      (function () {
+        var observer = new IntersectionObserver(
+          function (entries) {
+            entries.forEach(function (entry) {
+              if (entry.isIntersecting) {
+                entry.target.classList.add("visible");
+              }
+            });
+          },
+          { threshold: 0.1 }
+        );
+        document.querySelectorAll(".reveal").forEach(function (el) {
+          observer.observe(el);
+        });
+      })();
+    </script>
+  </body>
+</html>

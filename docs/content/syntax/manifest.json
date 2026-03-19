@@ -1,0 +1,49 @@
+{
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "file": "01-overview.md"
+    },
+    {
+      "id": "queries",
+      "title": "Queries",
+      "file": "02-queries.md"
+    },
+    {
+      "id": "mutations",
+      "title": "Mutations",
+      "file": "03-mutations.md"
+    },
+    {
+      "id": "relations",
+      "title": "Relations & Aggregations",
+      "file": "04-relations.md"
+    },
+    {
+      "id": "types",
+      "title": "Type System",
+      "file": "05-types.md"
+    },
+    {
+      "id": "expressions",
+      "title": "Expressions",
+      "file": "06-expressions.md"
+    },
+    {
+      "id": "joins-ctes",
+      "title": "JOINs & CTEs",
+      "file": "07-joins-and-ctes.md"
+    },
+    {
+      "id": "advanced",
+      "title": "Advanced Features",
+      "file": "08-advanced.md"
+    },
+    {
+      "id": "cli",
+      "title": "CLI Reference",
+      "file": "09-cli.md"
+    }
+  ]
+}
