@@ -37,23 +37,15 @@ enum Commands {
     },
     /// Generate code from NextSQL files
     Generate {
-        /// Source directory containing .nsql files
-        #[arg(short, long, default_value = ".")]
-        source: PathBuf,
-
-        /// Output directory for generated files
-        #[arg(short, long, default_value = "generated")]
-        output: PathBuf,
-
-        /// Target backend
-        #[arg(short, long, default_value = "rust")]
-        backend: String,
+        /// Project directory containing next-sql.toml (default: current directory)
+        #[arg(default_value = ".")]
+        dir: PathBuf,
     },
     /// Check NextSQL files for errors (without generating code)
     Check {
-        /// Source directory containing .nsql files
-        #[arg(short, long, default_value = ".")]
-        source: PathBuf,
+        /// Project directory containing next-sql.toml (default: current directory)
+        #[arg(default_value = ".")]
+        dir: PathBuf,
     },
     /// Validate NextSQL configuration file
     ValidateConfig {
@@ -193,18 +185,14 @@ async fn main() {
                 std::process::exit(1);
             }
         }
-        Commands::Generate {
-            source,
-            output,
-            backend,
-        } => {
-            if let Err(e) = handle_generate_command(source, output, backend) {
+        Commands::Generate { dir } => {
+            if let Err(e) = handle_generate_command(dir) {
                 eprintln!("Error: {}", e);
                 std::process::exit(1);
             }
         }
-        Commands::Check { source } => {
-            if let Err(e) = handle_check_command(source) {
+        Commands::Check { dir } => {
+            if let Err(e) = handle_check_command(dir) {
                 eprintln!("Error: {}", e);
                 std::process::exit(1);
             }
@@ -436,41 +424,26 @@ async fn handle_migration_command(
 }
 
 fn handle_generate_command(
-    source: PathBuf,
-    _output: PathBuf,
-    backend: String,
+    dir: PathBuf,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let db_schema = resolve_schema(&source)?;
+    // Load config from next-sql.toml (required)
+    let nsql_config_path = dir.join("next-sql.toml");
+    let nsql_config = config::NextSqlConfig::load_from_file(&nsql_config_path)?;
 
-    // Load config for naming patterns and target_directory
-    let nsql_config_path = source.join("next-sql.toml");
-    let nsql_config = if nsql_config_path.exists() {
-        config::NextSqlConfig::load_from_file(&nsql_config_path).ok()
-    } else {
-        None
-    };
+    let db_schema = resolve_schema(&dir)?;
 
-    // Compute crate_root and output_dir from target_directory config.
-    // target_directory means "crate root" relative to the source directory.
-    // Generated .rs files go into {crate_root}/src/.
-    let target_directory = nsql_config
-        .as_ref()
-        .map(|c| c.target.target_directory.as_str())
-        .unwrap_or(".");
-    let output_dir = source.join(target_directory).join("src");
+    let target_directory = &nsql_config.target.target_directory;
+    let output_dir = dir.join(target_directory).join("src");
 
     let config = nextsql_codegen::CodegenConfig {
-        source_dir: source,
+        source_dir: dir,
         output_dir,
-        backend,
-        insert_params_pattern: nsql_config.as_ref()
-            .and_then(|c| c.codegen.as_ref())
+        backend: nsql_config.target.target_language.clone(),
+        insert_params_pattern: nsql_config.codegen.as_ref()
             .and_then(|c| c.insert_params.clone()),
-        update_params_pattern: nsql_config.as_ref()
-            .and_then(|c| c.codegen.as_ref())
+        update_params_pattern: nsql_config.codegen.as_ref()
             .and_then(|c| c.update_params.clone()),
-        package_name: nsql_config.as_ref()
-            .and_then(|c| c.target.package_name.clone()),
+        package_name: nsql_config.target.package_name.clone(),
     };
 
     let result = nextsql_codegen::generate(&config, &db_schema);
@@ -559,21 +532,26 @@ fn find_project_root(start: &Path) -> Option<PathBuf> {
 fn load_schema_from_database(
     db_url: &str,
 ) -> Result<nextsql_core::schema::DatabaseSchema, Box<dyn std::error::Error>> {
-    let config = db_url.parse::<postgres::Config>()?;
-    let mut client = config.connect(postgres::NoTls)?;
-    let schema = nextsql_core::SchemaLoader::load_from_database(&mut client)?;
-    Ok(schema)
+    // Use block_in_place to allow synchronous postgres calls within the tokio runtime.
+    // The synchronous postgres crate internally uses block_on, which conflicts with
+    // an already-running tokio runtime unless we signal that this thread is doing blocking work.
+    tokio::task::block_in_place(|| {
+        let config = db_url.parse::<postgres::Config>()?;
+        let mut client = config.connect(postgres::NoTls)?;
+        let schema = nextsql_core::SchemaLoader::load_from_database(&mut client)?;
+        Ok(schema)
+    })
 }
 
 fn handle_check_command(
-    source: PathBuf,
+    dir: PathBuf,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use nextsql_codegen::{CheckConfig, DiagnosticSource};
 
-    let db_schema = resolve_schema(&source)?;
+    let db_schema = resolve_schema(&dir)?;
 
     let config = CheckConfig {
-        source_dir: source,
+        source_dir: dir,
     };
 
     let use_color = std::io::IsTerminal::is_terminal(&std::io::stderr());
