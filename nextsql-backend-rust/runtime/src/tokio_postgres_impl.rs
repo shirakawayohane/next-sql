@@ -107,7 +107,7 @@ impl Row for PgRow {
 /// An owned SQL parameter value. Used internally to convert borrowed `&dyn ToSqlParam`
 /// into owned values that can be moved into async futures.
 #[derive(Debug)]
-enum OwnedParam {
+pub enum OwnedParam {
     I16(i16),
     I32(i32),
     I64(i64),
@@ -229,7 +229,7 @@ impl tokio_postgres::types::ToSql for OwnedParam {
 }
 
 /// Convert a `&dyn ToSqlParam` to an owned parameter value by downcasting.
-fn to_owned_param(param: &dyn ToSqlParam) -> OwnedParam {
+pub fn to_owned_param(param: &dyn ToSqlParam) -> OwnedParam {
     let any = param.as_any();
     // Non-optional types
     if let Some(v) = any.downcast_ref::<i16>() { return OwnedParam::I16(*v); }
@@ -272,7 +272,7 @@ fn to_owned_param(param: &dyn ToSqlParam) -> OwnedParam {
 }
 
 /// Convert a slice of borrowed params to a vec of owned params.
-fn convert_params(params: &[&dyn ToSqlParam]) -> Vec<OwnedParam> {
+pub fn convert_params(params: &[&dyn ToSqlParam]) -> Vec<OwnedParam> {
     params.iter().map(|p| to_owned_param(*p)).collect()
 }
 
@@ -350,6 +350,12 @@ impl Client for PgClient {
 /// Drop without calling `commit()` will rollback the transaction.
 pub struct PgTransaction<'a> {
     inner: tokio_postgres::Transaction<'a>,
+}
+
+impl<'a> PgTransaction<'a> {
+    pub fn new(tx: tokio_postgres::Transaction<'a>) -> Self {
+        Self { inner: tx }
+    }
 }
 
 impl Transaction for PgTransaction<'_> {
