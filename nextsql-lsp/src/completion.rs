@@ -7,6 +7,7 @@ mod field_completion;
 mod method_completion;
 mod model_completion;
 mod table_completion;
+pub mod toml_completion;
 mod type_completion;
 mod utils;
 

@@ -35,17 +35,6 @@
           ".nsql"
         ],
         "configuration": "./language-configuration.json"
-      },
-      {
-        "id": "nextsql-toml",
-        "aliases": [
-          "NextSQL Config",
-          "nextsql-toml"
-        ],
-        "extensions": [],
-        "filenames": [
-          "next-sql.toml"
-        ]
       }
     ],
     "commands": [
@@ -68,7 +57,16 @@
         }
       }
     },
+    "tomlValidation": [
+      {
+        "fileMatch": "next-sql.toml",
+        "url": "./schemas/next-sql.schema.json"
+      }
+    ],
     "configurationDefaults": {
+      "evenBetterToml.schema.associations": {
+        "next-sql.toml": "https://schemas.nextsql.dev/next-sql.schema.json"
+      },
       "editor.tokenColorCustomizations": {
         "textMateRules": [
           {
@@ -104,7 +102,6 @@
   "main": "./out/extension.js",
   "activationEvents": [
     "onLanguage:nextsql",
-    "onLanguage:nextsql-toml",
     "workspaceContains:**/next-sql.toml"
   ],
   "scripts": {

@@ -68,7 +68,6 @@ export function activate(context: vscode.ExtensionContext) {
   const clientOptions: LanguageClientOptions = {
     documentSelector: [
       { scheme: "file", language: "nextsql" },
-      { scheme: "file", language: "nextsql-toml" },
       { scheme: "file", pattern: "**/next-sql.toml" },
     ],
     synchronize: {

@@ -243,11 +243,19 @@ impl LanguageServer for NextSqlLanguageServer {
 
         let document_map = self.document_map.read().await;
         if let Some(text) = document_map.get(&uri) {
+            // TOML ファイルの場合は TOML 補完を使用
+            if params.text_document_position.text_document.uri.path().ends_with("next-sql.toml") {
+                let text_owned = text.clone();
+                let completions = completion::toml_completion::TomlCompletionProvider::new(&text_owned)
+                    .get_completions(position);
+                return Ok(Some(CompletionResponse::Array(completions)));
+            }
+
             // Clone Arc for the async block
             let schema_cache = self.schema_cache.clone();
             let text_owned = text.clone();
             let uri_str = uri.clone();
-            
+
             // Run completion in a separate task
             let completions = tokio::task::spawn(async move {
                 let provider = CompletionProvider::with_schema_cache(&text_owned, schema_cache, uri_str);
@@ -255,7 +263,7 @@ impl LanguageServer for NextSqlLanguageServer {
             })
             .await
             .unwrap_or_else(|_| Vec::new());
-            
+
             return Ok(Some(CompletionResponse::Array(completions)));
         }
 

@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nextsql.dev/next-sql.schema.json",
+  "title": "NextSQL Configuration",
+  "description": "Configuration schema for NextSQL projects",
+  "type": "object",
+  "properties": {
+    "database_url": {
+      "type": ["string", "null"],
+      "description": "Database connection URL",
+      "examples": [
+        "postgresql://username:password@localhost:5432/database",
+        "http://nextsql:password@localhost:5437/nextsql"
+      ]
+    },
+    "files": {
+      "type": "object",
+      "description": "File configuration",
+      "properties": {
+        "includes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Files to include in parsing (supports glob patterns)",
+          "default": ["**"],
+          "examples": [
+            ["**"],
+            ["src/**"],
+            ["src/**/*.nsql", "queries/**/*.nsql"]
+          ]
+        }
+      },
+      "required": ["includes"],
+      "additionalProperties": false
+    },
+    "target": {
+      "type": "object",
+      "description": "Target configuration for code generation",
+      "properties": {
+        "target_language": {
+          "type": "string",
+          "description": "Target language for code generation",
+          "enum": ["rust"],
+          "default": "rust"
+        },
+        "target_directory": {
+          "type": "string",
+          "description": "Crate root directory (relative to the source directory). Generated .rs files are placed in {target_directory}/src/generated/, and Cargo.toml is placed at {target_directory}/Cargo.toml.",
+          "default": ".",
+          "examples": [".", "../my-crate", "../generated-entities"]
+        },
+        "package_name": {
+          "type": "string",
+          "description": "If set, a project manifest (Cargo.toml for Rust) will be generated with this package name, including lint suppression for generated code.",
+          "examples": ["my-generated-queries"]
+        }
+      },
+      "required": ["target_language", "target_directory"],
+      "additionalProperties": false
+    },
+    "codegen": {
+      "type": "object",
+      "description": "Code generation style configuration",
+      "properties": {
+        "insert_params": {
+          "type": "string",
+          "description": "Naming pattern for insert param structs. Use {Table} as placeholder.",
+          "default": "Insert{Table}Params",
+          "examples": ["Insert{Table}Params", "New{Table}", "{Table}Insert"]
+        },
+        "update_params": {
+          "type": "string",
+          "description": "Naming pattern for update changeset structs. Use {Table} as placeholder.",
+          "default": "Update{Table}Params",
+          "examples": ["Update{Table}Params", "{Table}ChangeSet", "{Table}Update"]
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "required": ["files", "target"],
+  "additionalProperties": false
+}
