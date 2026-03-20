@@ -105,7 +105,7 @@ impl CreateOrderParams {
 }
 
 pub async fn create_order(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl nextsql_backend_rust_runtime::QueryExecutor + ?Sized),
     params: &CreateOrderParams,
 ) -> Result<Vec<Order>, Box<dyn std::error::Error + Send + Sync>> {
     let rows = client.query(
@@ -129,7 +129,7 @@ impl AddOrderItemParams {
 }
 
 pub async fn add_order_item(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl nextsql_backend_rust_runtime::QueryExecutor + ?Sized),
     params: &AddOrderItemParams,
 ) -> Result<Vec<OrderItem>, Box<dyn std::error::Error + Send + Sync>> {
     let rows = client.query(
@@ -153,7 +153,7 @@ impl UpsertOrderItemParams {
 }
 
 pub async fn upsert_order_item(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl nextsql_backend_rust_runtime::QueryExecutor + ?Sized),
     params: &UpsertOrderItemParams,
 ) -> Result<Vec<OrderItem>, Box<dyn std::error::Error + Send + Sync>> {
     let rows = client.query(
@@ -177,7 +177,7 @@ impl InsertOrderItemIfNotExistsParams {
 }
 
 pub async fn insert_order_item_if_not_exists(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl nextsql_backend_rust_runtime::QueryExecutor + ?Sized),
     params: &InsertOrderItemIfNotExistsParams,
 ) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
     let count = client.execute(
@@ -199,7 +199,7 @@ impl UpdateOrderStatusParams {
 }
 
 pub async fn update_order_status(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl nextsql_backend_rust_runtime::QueryExecutor + ?Sized),
     params: &UpdateOrderStatusParams,
 ) -> Result<Vec<Order>, Box<dyn std::error::Error + Send + Sync>> {
     let rows = client.query(
@@ -220,7 +220,7 @@ impl ShipOrderParams {
 }
 
 pub async fn ship_order(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl nextsql_backend_rust_runtime::QueryExecutor + ?Sized),
     params: &ShipOrderParams,
 ) -> Result<Vec<Order>, Box<dyn std::error::Error + Send + Sync>> {
     let rows = client.query(
@@ -241,7 +241,7 @@ impl CancelOrderParams {
 }
 
 pub async fn cancel_order(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl nextsql_backend_rust_runtime::QueryExecutor + ?Sized),
     params: &CancelOrderParams,
 ) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
     let count = client.execute(
@@ -262,7 +262,7 @@ impl DeleteOrderItemParams {
 }
 
 pub async fn delete_order_item(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl nextsql_backend_rust_runtime::QueryExecutor + ?Sized),
     params: &DeleteOrderItemParams,
 ) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
     let count = client.execute(
@@ -311,7 +311,7 @@ impl FindOrderByIdRow {
 }
 
 pub async fn find_order_by_id(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl nextsql_backend_rust_runtime::QueryExecutor + ?Sized),
     params: &FindOrderByIdParams,
 ) -> Result<Vec<FindOrderByIdRow>, Box<dyn std::error::Error + Send + Sync>> {
     let rows = client.query(
@@ -334,7 +334,7 @@ impl FindOrdersByCustomerParams {
 }
 
 pub async fn find_orders_by_customer(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl nextsql_backend_rust_runtime::QueryExecutor + ?Sized),
     params: &FindOrdersByCustomerParams,
 ) -> Result<Vec<Order>, Box<dyn std::error::Error + Send + Sync>> {
     let rows = client.query(
@@ -379,7 +379,7 @@ impl FindOrderItemsRow {
 }
 
 pub async fn find_order_items(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl nextsql_backend_rust_runtime::QueryExecutor + ?Sized),
     params: &FindOrderItemsParams,
 ) -> Result<Vec<FindOrderItemsRow>, Box<dyn std::error::Error + Send + Sync>> {
     let rows = client.query(
@@ -428,7 +428,7 @@ impl FindRecentOrdersRow {
 }
 
 pub async fn find_recent_orders(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl nextsql_backend_rust_runtime::QueryExecutor + ?Sized),
     params: &FindRecentOrdersParams,
 ) -> Result<Vec<FindRecentOrdersRow>, Box<dyn std::error::Error + Send + Sync>> {
     let rows = client.query(
@@ -455,7 +455,7 @@ impl FindAllActiveOrdersRow {
 }
 
 pub async fn find_all_active_orders(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl nextsql_backend_rust_runtime::QueryExecutor + ?Sized),
 ) -> Result<Vec<FindAllActiveOrdersRow>, Box<dyn std::error::Error + Send + Sync>> {
     let rows = client.query(
         "SELECT orders.id, orders.customer_id, orders.total_amount FROM orders WHERE orders.status = 'pending' UNION SELECT orders.id, orders.customer_id, orders.total_amount FROM orders WHERE orders.status = 'shipped'",
@@ -475,7 +475,7 @@ impl FindOrdersWithHighValueItemsParams {
 }
 
 pub async fn find_orders_with_high_value_items(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl nextsql_backend_rust_runtime::QueryExecutor + ?Sized),
     params: &FindOrdersWithHighValueItemsParams,
 ) -> Result<Vec<Order>, Box<dyn std::error::Error + Send + Sync>> {
     let rows = client.query(
@@ -496,7 +496,7 @@ impl DeleteOrderItemReturningParams {
 }
 
 pub async fn delete_order_item_returning(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl nextsql_backend_rust_runtime::QueryExecutor + ?Sized),
     params: &DeleteOrderItemReturningParams,
 ) -> Result<Vec<OrderItem>, Box<dyn std::error::Error + Send + Sync>> {
     let rows = client.query(

@@ -530,12 +530,12 @@ pub(super) fn generate_insertable_mutation(
     if has_returning {
         let row_type = effective_row.as_ref().unwrap();
         out.push_str(&format!(
-            "pub async fn {}(\n    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),\n    params: &{},\n) -> Result<Vec<{}>, Box<dyn std::error::Error + Send + Sync>> {{\n",
+            "pub async fn {}(\n    client: &(impl nextsql_backend_rust_runtime::QueryExecutor + ?Sized),\n    params: &{},\n) -> Result<Vec<{}>, Box<dyn std::error::Error + Send + Sync>> {{\n",
             fn_name, actual_params_struct, row_type,
         ));
     } else {
         out.push_str(&format!(
-            "pub async fn {}(\n    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),\n    params: &{},\n) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {{\n",
+            "pub async fn {}(\n    client: &(impl nextsql_backend_rust_runtime::QueryExecutor + ?Sized),\n    params: &{},\n) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {{\n",
             fn_name, actual_params_struct,
         ));
     }
@@ -738,12 +738,12 @@ pub(super) fn generate_updatable_mutation(
     if has_returning {
         let row_type = effective_row.as_ref().unwrap();
         out.push_str(&format!(
-            "pub async fn {}(\n    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),\n    params: &{},\n) -> Result<Vec<{}>, Box<dyn std::error::Error + Send + Sync>> {{\n",
+            "pub async fn {}(\n    client: &(impl nextsql_backend_rust_runtime::QueryExecutor + ?Sized),\n    params: &{},\n) -> Result<Vec<{}>, Box<dyn std::error::Error + Send + Sync>> {{\n",
             fn_name, params_struct, row_type,
         ));
     } else {
         out.push_str(&format!(
-            "pub async fn {}(\n    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),\n    params: &{},\n) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {{\n",
+            "pub async fn {}(\n    client: &(impl nextsql_backend_rust_runtime::QueryExecutor + ?Sized),\n    params: &{},\n) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {{\n",
             fn_name, params_struct,
         ));
     }

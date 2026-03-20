@@ -1,4 +1,4 @@
-use crate::{Client, Row, ToSqlParam, Transaction};
+use crate::{Client, QueryExecutor, Row, ToSqlParam, Transaction};
 
 // ---- Row implementation wrapping tokio_postgres::Row ----
 
@@ -240,10 +240,9 @@ impl PgClient {
     }
 }
 
-impl Client for PgClient {
+impl QueryExecutor for PgClient {
     type Error = tokio_postgres::Error;
     type Row = PgRow;
-    type Transaction<'a> = PgTransaction<'a>;
 
     fn query(
         &self,
@@ -275,6 +274,10 @@ impl Client for PgClient {
             client.execute(&sql, &param_refs).await
         }
     }
+}
+
+impl Client for PgClient {
+    type Transaction<'a> = PgTransaction<'a>;
 
     fn transaction(&mut self) -> impl std::future::Future<Output = Result<Self::Transaction<'_>, Self::Error>> + Send {
         async move {
@@ -299,10 +302,9 @@ impl<'a> PgTransaction<'a> {
     }
 }
 
-impl Transaction for PgTransaction<'_> {
+impl QueryExecutor for PgTransaction<'_> {
     type Error = tokio_postgres::Error;
     type Row = PgRow;
-    type Nested<'a> = PgTransaction<'a> where Self: 'a;
 
     fn query(
         &self,
@@ -334,6 +336,10 @@ impl Transaction for PgTransaction<'_> {
             client.execute(&sql, &param_refs).await
         }
     }
+}
+
+impl Transaction for PgTransaction<'_> {
+    type Nested<'a> = PgTransaction<'a> where Self: 'a;
 
     fn transaction(&mut self) -> impl std::future::Future<Output = Result<Self::Nested<'_>, Self::Error>> + Send {
         async move {

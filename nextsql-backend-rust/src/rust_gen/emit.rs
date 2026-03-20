@@ -139,7 +139,7 @@ pub(super) fn emit_query_fn_no_params(
     sql: &str,
 ) {
     out.push_str(&format!(
-        "pub async fn {}(\n    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),\n) -> Result<Vec<{}>, Box<dyn std::error::Error + Send + Sync>> {{\n",
+        "pub async fn {}(\n    client: &(impl nextsql_backend_rust_runtime::QueryExecutor + ?Sized),\n) -> Result<Vec<{}>, Box<dyn std::error::Error + Send + Sync>> {{\n",
         fn_name, row_struct
     ));
     out.push_str(&format!(
@@ -160,7 +160,7 @@ pub(super) fn emit_execute_fn_no_params(
     sql: &str,
 ) {
     out.push_str(&format!(
-        "pub async fn {}(\n    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),\n) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {{\n",
+        "pub async fn {}(\n    client: &(impl nextsql_backend_rust_runtime::QueryExecutor + ?Sized),\n) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {{\n",
         fn_name
     ));
     out.push_str(&format!(
@@ -294,7 +294,7 @@ pub(super) fn emit_query_fn_individual_params(
 ) {
     // Function signature
     out.push_str(&format!(
-        "pub async fn {}(\n    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),\n",
+        "pub async fn {}(\n    client: &(impl nextsql_backend_rust_runtime::QueryExecutor + ?Sized),\n",
         fn_name,
     ));
     emit_individual_fn_params(out, args, registry, input_registry, schema);
@@ -336,7 +336,7 @@ pub(super) fn emit_execute_fn_individual_params(
     schema: &DatabaseSchema,
 ) {
     out.push_str(&format!(
-        "pub async fn {}(\n    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),\n",
+        "pub async fn {}(\n    client: &(impl nextsql_backend_rust_runtime::QueryExecutor + ?Sized),\n",
         fn_name,
     ));
     emit_individual_fn_params(out, args, registry, input_registry, schema);
@@ -372,7 +372,7 @@ pub(super) fn emit_dynamic_query_fn_individual_params(
 ) {
     // Function signature
     out.push_str(&format!(
-        "#[allow(unused_assignments)]\npub async fn {}(\n    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),\n",
+        "#[allow(unused_assignments)]\npub async fn {}(\n    client: &(impl nextsql_backend_rust_runtime::QueryExecutor + ?Sized),\n",
         fn_name,
     ));
     emit_individual_fn_params(out, args, registry, input_registry, schema);

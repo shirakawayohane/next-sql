@@ -63,7 +63,7 @@ impl CountOrdersByStatusRow {
 }
 
 pub async fn count_orders_by_status(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl nextsql_backend_rust_runtime::QueryExecutor + ?Sized),
 ) -> Result<Vec<CountOrdersByStatusRow>, Box<dyn std::error::Error + Send + Sync>> {
     let rows = client.query(
         "SELECT orders.status, order_count, COUNT(orders.id) AS order_count FROM orders GROUP BY orders.status",
@@ -89,7 +89,7 @@ impl SalesByCategoryRow {
 }
 
 pub async fn sales_by_category(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl nextsql_backend_rust_runtime::QueryExecutor + ?Sized),
 ) -> Result<Vec<SalesByCategoryRow>, Box<dyn std::error::Error + Send + Sync>> {
     let rows = client.query(
         "SELECT products.category_id, total_revenue, total_items, SUM(order_items.unit_price * order_items.quantity) AS total_revenue, COUNT(order_items.id) AS total_items FROM order_items INNER JOIN products ON order_items.product_id = products.id GROUP BY products.category_id ORDER BY total_revenue DESC",
@@ -125,7 +125,7 @@ impl TopCustomersRow {
 }
 
 pub async fn top_customers(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl nextsql_backend_rust_runtime::QueryExecutor + ?Sized),
     params: &TopCustomersParams,
 ) -> Result<Vec<TopCustomersRow>, Box<dyn std::error::Error + Send + Sync>> {
     let rows = client.query(
@@ -152,7 +152,7 @@ impl AverageRatingByProductRow {
 }
 
 pub async fn average_rating_by_product(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl nextsql_backend_rust_runtime::QueryExecutor + ?Sized),
 ) -> Result<Vec<AverageRatingByProductRow>, Box<dyn std::error::Error + Send + Sync>> {
     let rows = client.query(
         "SELECT reviews.product_id, avg_rating, review_count, AVG(reviews.rating) AS avg_rating, COUNT(reviews.id) AS review_count FROM reviews GROUP BY reviews.product_id HAVING COUNT(reviews.id) ORDER BY avg_rating DESC",
@@ -178,7 +178,7 @@ impl CustomerSpendingRow {
 }
 
 pub async fn customer_spending(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl nextsql_backend_rust_runtime::QueryExecutor + ?Sized),
 ) -> Result<Vec<CustomerSpendingRow>, Box<dyn std::error::Error + Send + Sync>> {
     let rows = client.query(
         "SELECT orders.customer_id, total, item_count, SUM(order_items.unit_price * order_items.quantity) AS total, COUNT(order_items.id) AS item_count FROM orders INNER JOIN order_items ON orders.id = order_items.order_id WHERE orders.status != 'cancelled' GROUP BY orders.customer_id ORDER BY total DESC LIMIT 100",
@@ -206,7 +206,7 @@ impl PriceRangeByCategoryRow {
 }
 
 pub async fn price_range_by_category(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl nextsql_backend_rust_runtime::QueryExecutor + ?Sized),
 ) -> Result<Vec<PriceRangeByCategoryRow>, Box<dyn std::error::Error + Send + Sync>> {
     let rows = client.query(
         "SELECT products.category_id, min_price, max_price, product_count, MIN(products.price) AS min_price, MAX(products.price) AS max_price, COUNT(products.id) AS product_count FROM products WHERE products.is_active = TRUE GROUP BY products.category_id",
@@ -228,7 +228,7 @@ impl ActiveCustomerCountRow {
 }
 
 pub async fn active_customer_count(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl nextsql_backend_rust_runtime::QueryExecutor + ?Sized),
 ) -> Result<Vec<ActiveCustomerCountRow>, Box<dyn std::error::Error + Send + Sync>> {
     let rows = client.query(
         "SELECT total, COUNT(customers.id) AS total FROM customers WHERE customers.is_active = TRUE",
@@ -264,7 +264,7 @@ impl HighValueCustomersRow {
 }
 
 pub async fn high_value_customers(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl nextsql_backend_rust_runtime::QueryExecutor + ?Sized),
     params: &HighValueCustomersParams,
 ) -> Result<Vec<HighValueCustomersRow>, Box<dyn std::error::Error + Send + Sync>> {
     let rows = client.query(

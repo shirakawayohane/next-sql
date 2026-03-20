@@ -74,15 +74,13 @@ pub trait Row: Send {
     fn get_vec_uuid(&self, idx: usize) -> Vec<uuid::Uuid>;
 }
 
-/// Trait for executing SQL queries against a database.
-/// Uses `impl Future` instead of async_trait to avoid proc macro compile overhead.
+/// Common trait for executing SQL queries, shared by both [`Client`] and [`Transaction`].
 ///
-/// This trait is backend-agnostic: implementations exist for PostgreSQL (tokio-postgres),
-/// and can be added for MySQL, SQLite, etc.
-pub trait Client: Send + Sync {
+/// Generated NextSQL functions accept `&(impl QueryExecutor + ?Sized)` so they
+/// can be called with either a client connection or inside a transaction.
+pub trait QueryExecutor: Send + Sync {
     type Error: std::error::Error + Send + Sync + 'static;
     type Row: Row;
-    type Transaction<'a>: Transaction<Error = Self::Error, Row = Self::Row> + 'a where Self: 'a;
 
     /// Execute a query that returns rows.
     fn query(
@@ -97,32 +95,25 @@ pub trait Client: Send + Sync {
         sql: &str,
         params: &[&dyn ToSqlParam],
     ) -> impl Future<Output = Result<u64, Self::Error>> + Send;
+}
+
+/// Trait for executing SQL queries against a database connection.
+/// Extends [`QueryExecutor`] with transaction management.
+///
+/// This trait is backend-agnostic: implementations exist for PostgreSQL (tokio-postgres),
+/// and can be added for MySQL, SQLite, etc.
+pub trait Client: QueryExecutor {
+    type Transaction<'a>: Transaction<Error = Self::Error, Row = Self::Row> + 'a where Self: 'a;
 
     /// Begin a new transaction.
     fn transaction(&mut self) -> impl Future<Output = Result<Self::Transaction<'_>, Self::Error>> + Send;
 }
 
 /// Trait for a database transaction.
-/// Supports the same query/execute operations as `Client`, plus commit/rollback.
+/// Extends [`QueryExecutor`] with commit/rollback and nested transaction (savepoint) support.
 /// Dropping without calling `commit()` should rollback the transaction.
-pub trait Transaction: Send {
-    type Error: std::error::Error + Send + Sync + 'static;
-    type Row: Row;
+pub trait Transaction: QueryExecutor {
     type Nested<'a>: Transaction<Error = Self::Error, Row = Self::Row> + 'a where Self: 'a;
-
-    /// Execute a query that returns rows.
-    fn query(
-        &self,
-        sql: &str,
-        params: &[&dyn ToSqlParam],
-    ) -> impl Future<Output = Result<Vec<Self::Row>, Self::Error>> + Send;
-
-    /// Execute a statement that returns the number of affected rows.
-    fn execute(
-        &self,
-        sql: &str,
-        params: &[&dyn ToSqlParam],
-    ) -> impl Future<Output = Result<u64, Self::Error>> + Send;
 
     /// Begin a nested transaction (savepoint).
     fn transaction(&mut self) -> impl Future<Output = Result<Self::Nested<'_>, Self::Error>> + Send;

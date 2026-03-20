@@ -81,7 +81,7 @@ impl FindCustomerByIdParams {
 }
 
 pub async fn find_customer_by_id(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl nextsql_backend_rust_runtime::QueryExecutor + ?Sized),
     params: &FindCustomerByIdParams,
 ) -> Result<Vec<Customer>, Box<dyn std::error::Error + Send + Sync>> {
     let rows = client.query(
@@ -104,7 +104,7 @@ impl SearchCustomersParams {
 }
 
 pub async fn search_customers(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl nextsql_backend_rust_runtime::QueryExecutor + ?Sized),
     params: &SearchCustomersParams,
 ) -> Result<Vec<Customer>, Box<dyn std::error::Error + Send + Sync>> {
     let rows = client.query(
@@ -126,7 +126,7 @@ impl ListCustomersParams {
 }
 
 pub async fn list_customers(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl nextsql_backend_rust_runtime::QueryExecutor + ?Sized),
     params: &ListCustomersParams,
 ) -> Result<Vec<Customer>, Box<dyn std::error::Error + Send + Sync>> {
     let rows = client.query(
@@ -159,7 +159,7 @@ impl HasActiveOrdersRow {
 }
 
 pub async fn has_active_orders(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl nextsql_backend_rust_runtime::QueryExecutor + ?Sized),
     params: &HasActiveOrdersParams,
 ) -> Result<Vec<HasActiveOrdersRow>, Box<dyn std::error::Error + Send + Sync>> {
     let rows = client.query(
@@ -180,7 +180,7 @@ impl FindCustomerByEmailParams {
 }
 
 pub async fn find_customer_by_email(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl nextsql_backend_rust_runtime::QueryExecutor + ?Sized),
     params: &FindCustomerByEmailParams,
 ) -> Result<Vec<Customer>, Box<dyn std::error::Error + Send + Sync>> {
     let rows = client.query(
@@ -203,7 +203,7 @@ impl CreateCustomerParams {
 }
 
 pub async fn create_customer(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl nextsql_backend_rust_runtime::QueryExecutor + ?Sized),
     params: &CreateCustomerParams,
 ) -> Result<Vec<Customer>, Box<dyn std::error::Error + Send + Sync>> {
     let rows = client.query(
@@ -227,7 +227,7 @@ impl UpdateCustomerParams {
 }
 
 pub async fn update_customer(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl nextsql_backend_rust_runtime::QueryExecutor + ?Sized),
     params: &UpdateCustomerParams,
 ) -> Result<Vec<Customer>, Box<dyn std::error::Error + Send + Sync>> {
     let rows = client.query(
@@ -248,7 +248,7 @@ impl DeactivateCustomerParams {
 }
 
 pub async fn deactivate_customer(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl nextsql_backend_rust_runtime::QueryExecutor + ?Sized),
     params: &DeactivateCustomerParams,
 ) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
     let count = client.execute(

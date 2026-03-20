@@ -9,7 +9,7 @@
 pub use nextsql_backend_rust_runtime::tokio_postgres_impl::{
     convert_params, to_owned_param, OwnedParam, PgClient, PgRow, PgTransaction,
 };
-pub use nextsql_backend_rust_runtime::{Client, Row, ToSqlParam, Transaction};
+pub use nextsql_backend_rust_runtime::{Client, QueryExecutor, Row, ToSqlParam, Transaction};
 
 /// Convert a slice of [`OwnedParam`] to a vec of trait-object references
 /// suitable for passing to `tokio_postgres` query methods.
@@ -45,10 +45,9 @@ impl PooledPgClient {
     }
 }
 
-impl Client for PooledPgClient {
+impl QueryExecutor for PooledPgClient {
     type Error = tokio_postgres::Error;
     type Row = PgRow;
-    type Transaction<'a> = PgTransaction<'a>;
 
     fn query(
         &self,
@@ -78,6 +77,10 @@ impl Client for PooledPgClient {
             client.execute(&sql, &param_refs).await
         }
     }
+}
+
+impl Client for PooledPgClient {
+    type Transaction<'a> = PgTransaction<'a>;
 
     fn transaction(
         &mut self,

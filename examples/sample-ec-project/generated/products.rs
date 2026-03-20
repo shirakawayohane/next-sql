@@ -113,7 +113,7 @@ impl FindProductByIdRow {
 }
 
 pub async fn find_product_by_id(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl nextsql_backend_rust_runtime::QueryExecutor + ?Sized),
     params: &FindProductByIdParams,
 ) -> Result<Vec<FindProductByIdRow>, Box<dyn std::error::Error + Send + Sync>> {
     let rows = client.query(
@@ -134,7 +134,7 @@ impl FindProductsByCategoryParams {
 }
 
 pub async fn find_products_by_category(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl nextsql_backend_rust_runtime::QueryExecutor + ?Sized),
     params: &FindProductsByCategoryParams,
 ) -> Result<Vec<Product>, Box<dyn std::error::Error + Send + Sync>> {
     let rows = client.query(
@@ -155,7 +155,7 @@ impl FindProductsByIdsParams {
 }
 
 pub async fn find_products_by_ids(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl nextsql_backend_rust_runtime::QueryExecutor + ?Sized),
     params: &FindProductsByIdsParams,
 ) -> Result<Vec<Product>, Box<dyn std::error::Error + Send + Sync>> {
     let rows = client.query(
@@ -179,7 +179,7 @@ impl SearchProductsParams {
 }
 
 pub async fn search_products(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl nextsql_backend_rust_runtime::QueryExecutor + ?Sized),
     params: &SearchProductsParams,
 ) -> Result<Vec<Product>, Box<dyn std::error::Error + Send + Sync>> {
     let rows = client.query(
@@ -206,7 +206,7 @@ impl FindProductsWithCategoryRow {
 }
 
 pub async fn find_products_with_category(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl nextsql_backend_rust_runtime::QueryExecutor + ?Sized),
 ) -> Result<Vec<FindProductsWithCategoryRow>, Box<dyn std::error::Error + Send + Sync>> {
     let rows = client.query(
         "SELECT products.name, products.price, categories.name FROM products INNER JOIN categories ON categories.id = products.category_id WHERE products.is_active = TRUE ORDER BY products.name ASC",
@@ -228,7 +228,7 @@ impl FindDistinctCategoryIdsRow {
 }
 
 pub async fn find_distinct_category_ids(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl nextsql_backend_rust_runtime::QueryExecutor + ?Sized),
 ) -> Result<Vec<FindDistinctCategoryIdsRow>, Box<dyn std::error::Error + Send + Sync>> {
     let rows = client.query(
         "SELECT DISTINCT products.category_id FROM products WHERE products.is_active = TRUE",
@@ -252,7 +252,7 @@ impl FindProductsWithNullDescriptionRow {
 }
 
 pub async fn find_products_with_null_description(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl nextsql_backend_rust_runtime::QueryExecutor + ?Sized),
 ) -> Result<Vec<FindProductsWithNullDescriptionRow>, Box<dyn std::error::Error + Send + Sync>> {
     let rows = client.query(
         "SELECT products.id, products.name FROM products WHERE products.description IS NULL",
@@ -273,7 +273,7 @@ impl FindProductsInPriceRangeParams {
 }
 
 pub async fn find_products_in_price_range(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl nextsql_backend_rust_runtime::QueryExecutor + ?Sized),
     params: &FindProductsInPriceRangeParams,
 ) -> Result<Vec<Product>, Box<dyn std::error::Error + Send + Sync>> {
     let rows = client.query(
@@ -300,7 +300,7 @@ impl FindProductsWithDescriptionRow {
 }
 
 pub async fn find_products_with_description(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl nextsql_backend_rust_runtime::QueryExecutor + ?Sized),
 ) -> Result<Vec<FindProductsWithDescriptionRow>, Box<dyn std::error::Error + Send + Sync>> {
     let rows = client.query(
         "SELECT products.id, products.name, products.description FROM products WHERE products.description IS NOT NULL AND (products.is_active = TRUE)",
@@ -336,7 +336,7 @@ impl FindLowStockProductsRow {
 }
 
 pub async fn find_low_stock_products(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl nextsql_backend_rust_runtime::QueryExecutor + ?Sized),
     params: &FindLowStockProductsParams,
 ) -> Result<Vec<FindLowStockProductsRow>, Box<dyn std::error::Error + Send + Sync>> {
     let rows = client.query(

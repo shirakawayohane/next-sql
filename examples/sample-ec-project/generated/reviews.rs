@@ -105,7 +105,7 @@ impl FindProductReviewsRow {
 }
 
 pub async fn find_product_reviews(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl nextsql_backend_rust_runtime::QueryExecutor + ?Sized),
     params: &FindProductReviewsParams,
 ) -> Result<Vec<FindProductReviewsRow>, Box<dyn std::error::Error + Send + Sync>> {
     let rows = client.query(
@@ -152,7 +152,7 @@ impl FindHighRatedReviewsRow {
 }
 
 pub async fn find_high_rated_reviews(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl nextsql_backend_rust_runtime::QueryExecutor + ?Sized),
     params: &FindHighRatedReviewsParams,
 ) -> Result<Vec<FindHighRatedReviewsRow>, Box<dyn std::error::Error + Send + Sync>> {
     let rows = client.query(
@@ -174,7 +174,7 @@ impl FindReviewsByRatingRangeParams {
 }
 
 pub async fn find_reviews_by_rating_range(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl nextsql_backend_rust_runtime::QueryExecutor + ?Sized),
     params: &FindReviewsByRatingRangeParams,
 ) -> Result<Vec<Review>, Box<dyn std::error::Error + Send + Sync>> {
     let rows = client.query(
@@ -219,7 +219,7 @@ impl FindCustomerReviewsRow {
 }
 
 pub async fn find_customer_reviews(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl nextsql_backend_rust_runtime::QueryExecutor + ?Sized),
     params: &FindCustomerReviewsParams,
 ) -> Result<Vec<FindCustomerReviewsRow>, Box<dyn std::error::Error + Send + Sync>> {
     let rows = client.query(
@@ -243,7 +243,7 @@ impl CreateReviewParams {
 }
 
 pub async fn create_review(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl nextsql_backend_rust_runtime::QueryExecutor + ?Sized),
     params: &CreateReviewParams,
 ) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
     let count = client.execute(
@@ -264,7 +264,7 @@ impl DeleteReviewParams {
 }
 
 pub async fn delete_review(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl nextsql_backend_rust_runtime::QueryExecutor + ?Sized),
     params: &DeleteReviewParams,
 ) -> Result<Vec<Review>, Box<dyn std::error::Error + Send + Sync>> {
     let rows = client.query(
@@ -287,7 +287,7 @@ impl UpdateReviewParams {
 }
 
 pub async fn update_review(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl nextsql_backend_rust_runtime::QueryExecutor + ?Sized),
     params: &UpdateReviewParams,
 ) -> Result<Vec<Review>, Box<dyn std::error::Error + Send + Sync>> {
     let rows = client.query(
@@ -324,7 +324,7 @@ impl FindReviewsWithoutCommentsRow {
 }
 
 pub async fn find_reviews_without_comments(
-    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),
+    client: &(impl nextsql_backend_rust_runtime::QueryExecutor + ?Sized),
     params: &FindReviewsWithoutCommentsParams,
 ) -> Result<Vec<FindReviewsWithoutCommentsRow>, Box<dyn std::error::Error + Send + Sync>> {
     let rows = client.query(
