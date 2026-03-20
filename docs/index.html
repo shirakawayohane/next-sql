@@ -89,18 +89,16 @@
               <span class="code-dot code-dot--g"></span>
               <span>queries.nsql</span>
             </div>
-            <div class="code-body">
-              <pre><span class="cm">// Define a relation — auto-generates JOINs</span>
+            <div class="code-body"><pre><span class="cm">// Define a relation — auto-generates JOINs</span>
 <span class="kw">relation</span> <span class="fn">author</span> <span class="kw">for</span> <span class="tbl">posts</span> <span class="kw">returning</span> <span class="tbl">users</span> {
-  <span class="tbl">users</span><span class="op">.</span><span class="prop">id</span> <span class="op">==</span> <span class="tbl">posts</span><span class="op">.</span><span class="prop">author_id</span>
+    <span class="tbl">users</span><span class="op">.</span><span class="prop">id</span> <span class="op">==</span> <span class="tbl">posts</span><span class="op">.</span><span class="prop">author_id</span>
 }
 
 <span class="kw">query</span> <span class="fn">findPostsByAuthor</span>(<span class="var">$authorName</span>: <span class="ty">string</span>) {
-  <span class="fn">from</span>(<span class="tbl">posts</span>)
-  .<span class="fn">where</span>(<span class="tbl">posts</span>.<span class="prop">author</span>.<span class="prop">name</span> <span class="op">==</span> <span class="var">$authorName</span>)
-  .<span class="fn">select</span>(<span class="tbl">posts</span>.<span class="prop">title</span>, <span class="tbl">posts</span>.<span class="prop">author</span>.<span class="prop">email</span>)
-}</pre>
-            </div>
+    <span class="fn">from</span>(<span class="tbl">posts</span>)
+    .<span class="fn">where</span>(<span class="tbl">posts</span>.<span class="prop">author</span>.<span class="prop">name</span> <span class="op">==</span> <span class="var">$authorName</span>)
+    .<span class="fn">select</span>(<span class="tbl">posts</span>.<span class="prop">title</span>, <span class="tbl">posts</span>.<span class="prop">author</span>.<span class="prop">email</span>)
+}</pre></div>
           </div>
         </div>
       </div>
@@ -221,20 +219,21 @@
             <div class="step-number">1</div>
             <div class="step-content">
               <h3>Install NextSQL CLI</h3>
-              <div class="install-tabs">
-                <div class="install-tab-buttons">
-                  <button class="install-tab-btn active" data-tab="macos-linux">macOS / Linux</button>
-                  <button class="install-tab-btn" data-tab="windows">Windows PowerShell</button>
-                </div>
-                <div class="install-tab-panel active" id="tab-macos-linux">
-                  <div class="step-code">
-                    <span class="prompt">$ </span>curl -fsSL https://github.com/shirakawayohane/next-sql/releases/latest/download/nextsql-cli-installer.sh | bash
+              <div class="install-terminal" id="install-terminal">
+                <div class="install-terminal-bar">
+                  <div class="install-terminal-bar-top">
+                    <span class="code-dot code-dot--r"></span>
+                    <span class="code-dot code-dot--y"></span>
+                    <span class="code-dot code-dot--g"></span>
+                  </div>
+                  <div class="install-terminal-tabs">
+                    <button class="install-terminal-tab is-active" onclick="switchInstallTab(0)">macOS / Linux</button>
+                    <button class="install-terminal-tab" onclick="switchInstallTab(1)">Windows PowerShell</button>
                   </div>
                 </div>
-                <div class="install-tab-panel" id="tab-windows">
-                  <div class="step-code">
-                    <span class="prompt">&gt; </span>irm https://github.com/shirakawayohane/next-sql/releases/latest/download/nextsql-cli-installer.ps1 | iex
-                  </div>
+                <div class="install-terminal-body">
+                  <div class="install-terminal-panel is-active"><span class="prompt">$ </span>curl -fsSL https://github.com/shirakawayohane/next-sql/releases/latest/download/nextsql-cli-installer.sh | bash</div>
+                  <div class="install-terminal-panel"><span class="prompt">&gt; </span>irm https://github.com/shirakawayohane/next-sql/releases/latest/download/nextsql-cli-installer.ps1 | iex</div>
                 </div>
               </div>
             </div>
@@ -336,23 +335,16 @@
 
     <!-- Install tabs -->
     <script>
-      (function () {
-        document.querySelectorAll(".install-tab-btn").forEach(function (btn) {
-          btn.addEventListener("click", function () {
-            var tabs = this.closest(".install-tabs");
-            tabs
-              .querySelectorAll(".install-tab-btn")
-              .forEach(function (b) { b.classList.remove("active"); });
-            tabs
-              .querySelectorAll(".install-tab-panel")
-              .forEach(function (p) { p.classList.remove("active"); });
-            this.classList.add("active");
-            tabs
-              .querySelector("#tab-" + this.dataset.tab)
-              .classList.add("active");
-          });
-        });
-      })();
+      function switchInstallTab(index) {
+        var tabs = document.querySelectorAll('.install-terminal-tab');
+        var panels = document.querySelectorAll('.install-terminal-panel');
+        for (var i = 0; i < tabs.length; i++) {
+          tabs[i].classList.remove('is-active');
+          panels[i].classList.remove('is-active');
+        }
+        tabs[index].classList.add('is-active');
+        panels[index].classList.add('is-active');
+      }
     </script>
   </body>
 </html>

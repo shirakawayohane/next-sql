@@ -388,6 +388,7 @@ h4 {
   font-size: 0.85rem;
   line-height: 1.8;
   overflow-x: auto;
+  text-align: left;
 }
 
 .code-body .kw {
@@ -578,52 +579,83 @@ h4 {
   user-select: none;
 }
 
-/* ---------- Install Tabs ---------- */
-.install-tabs {
-  margin-top: 0.5rem;
+/* ---------- Install Terminal ---------- */
+.install-terminal {
+  margin-top: 0.75rem;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow), 0 0 40px rgba(59, 130, 246, 0.06);
 }
 
-.install-tab-buttons {
+.install-terminal-bar {
   display: flex;
-  gap: 0;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 0.7rem 1rem;
+  background: rgba(255, 255, 255, 0.03);
   border-bottom: 1px solid var(--border);
-  margin-bottom: 0;
 }
 
-.install-tab-btn {
+.install-terminal-bar-top {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.install-terminal-tabs {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.install-terminal-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.3rem 0.75rem;
+  border-radius: 6px;
+  border: 1px solid transparent;
   background: transparent;
-  border: none;
-  border-bottom: 2px solid transparent;
   color: var(--text-muted);
-  font-family: "Lexend", sans-serif;
-  font-size: 0.85rem;
-  padding: 0.5rem 1rem;
+  font-family: "Fira Code", monospace;
+  font-size: 0.72rem;
   cursor: pointer;
-  transition: color 0.2s, border-color 0.2s;
+  transition: all var(--transition);
+  white-space: nowrap;
 }
 
-.install-tab-btn:hover {
+.install-terminal-tab:hover {
   color: var(--text-secondary);
+  background: rgba(255, 255, 255, 0.04);
 }
 
-.install-tab-btn.active {
-  color: var(--accent);
-  border-bottom-color: var(--accent);
+.install-terminal-tab.is-active {
+  color: var(--blue-400);
+  background: rgba(59, 130, 246, 0.1);
+  border-color: rgba(59, 130, 246, 0.25);
 }
 
-.install-tab-panel {
+.install-terminal-body {
+  background: var(--code-bg);
+  padding: 1rem 1.25rem;
+  font-family: "Fira Code", monospace;
+  font-size: 0.75rem;
+  line-height: 1.8;
+  min-height: 3.2rem;
+}
+
+.install-terminal-panel {
   display: none;
+  word-break: break-all;
 }
 
-.install-tab-panel.active {
+.install-terminal-panel.is-active {
   display: block;
 }
 
-.install-tab-panel .step-code {
-  border-top-left-radius: 0;
-  border-top-right-radius: 0;
-  font-size: 0.8rem;
-  word-break: break-all;
+.install-terminal-panel .prompt {
+  color: var(--text-muted);
+  user-select: none;
 }
 
 /* ---------- Footer ---------- */
