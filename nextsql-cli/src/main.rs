@@ -5,7 +5,7 @@ mod migration;
 use nextsql_core::*;
 
 use clap::{Parser, Subcommand};
-use config::NextSqlConfig;
+use config::{NextSqlConfig, NextSqlConfigExt};
 use db::{DatabaseConfig, DatabaseMigrationManager};
 use migration::{MigrationDirection, MigrationManager};
 use std::path::{Path, PathBuf};
@@ -687,6 +687,9 @@ fn handle_parse_command(file: PathBuf) -> Result<(), Box<dyn std::error::Error>>
                     }
                     ast::TopLevel::ValType(vt) => {
                         println!("  {}: ValType '{}'", i + 1, vt.name);
+                    }
+                    ast::TopLevel::Input(input) => {
+                        println!("  {}: Input '{}' ({} fields)", i + 1, input.name, input.fields.len());
                     }
                 }
             }

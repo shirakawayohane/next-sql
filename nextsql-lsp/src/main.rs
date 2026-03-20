@@ -718,7 +718,7 @@ impl NextSqlLanguageServer {
                 Err(e) => return Err(format!("Failed to read next-sql.toml: {}", e)),
             };
 
-            let config: nextsql_cli::config::NextSqlConfig = match toml::from_str(&config_str) {
+            let config: nextsql_core::config::NextSqlConfig = match toml::from_str(&config_str) {
                 Ok(c) => c,
                 Err(e) => return Err(format!("Failed to parse next-sql.toml: {}", e)),
             };
@@ -833,100 +833,57 @@ impl NextSqlLanguageServer {
     }
 
     fn validate_toml_config(&self, text: &str) -> Vec<Diagnostic> {
-        use nextsql_cli::config::NextSqlConfig;
-        
-        // TOMLパースを試行
+        use nextsql_core::config::NextSqlConfig;
+
+        // serde deserialization with #[serde(deny_unknown_fields)] catches invalid fields
         match toml::from_str::<NextSqlConfig>(text) {
             Ok(config) => {
-                // 設定をJSONに変換してスキーマ検証
-                match serde_json::to_value(&config) {
-                    Ok(json_value) => {
-                        let schema_str = include_str!("../../nextsql-cli/schemas/next-sql.schema.json");
-                        match serde_json::from_str::<serde_json::Value>(schema_str) {
-                            Ok(schema) => {
-                                match jsonschema::JSONSchema::compile(&schema) {
-                                    Ok(compiled_schema) => {
-                                        if let Err(errors) = compiled_schema.validate(&json_value) {
-                                            errors
-                                                .map(|error| Diagnostic {
-                                                    range: Range {
-                                                        start: Position { line: 0, character: 0 },
-                                                        end: Position { line: 0, character: text.len() as u32 },
-                                                    },
-                                                    severity: Some(DiagnosticSeverity::ERROR),
-                                                    code: None,
-                                                    code_description: None,
-                                                    source: Some("nextsql-toml-validator".to_string()),
-                                                    message: format!("Configuration validation error: {}", error),
-                                                    related_information: None,
-                                                    tags: None,
-                                                    data: None,
-                                                })
-                                                .collect()
-                                        } else {
-                                            Vec::new() // 検証成功
-                                        }
-                                    }
-                                    Err(e) => vec![self.create_error_diagnostic(text, &format!("Schema compilation error: {}", e))],
-                                }
-                            }
-                            Err(e) => vec![self.create_error_diagnostic(text, &format!("Schema parse error: {}", e))],
-                        }
-                    }
-                    Err(e) => vec![self.create_error_diagnostic(text, &format!("JSON conversion error: {}", e))],
+                // Deserialization succeeded, run semantic validation
+                match NextSqlConfig::validate_config(&config) {
+                    Ok(()) => Vec::new(),
+                    Err(e) => vec![self.create_error_diagnostic(text, &e.to_string())],
                 }
             }
             Err(e) => {
-                // TOMLパースエラーの場合、エラー位置を特定
-                self.parse_toml_error(text, &e.to_string())
+                // Deserialization failed - extract position info from the toml error
+                self.parse_toml_error(text, &e)
             }
         }
     }
 
-    fn parse_toml_error(&self, text: &str, error_msg: &str) -> Vec<Diagnostic> {
+    fn parse_toml_error(&self, text: &str, error: &toml::de::Error) -> Vec<Diagnostic> {
+        let error_msg = error.to_string();
         let lines: Vec<&str> = text.lines().collect();
-        
-        // TOMLパースエラーメッセージから行と列の情報を抽出
-        static RE_LINE_COL: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
-            regex::Regex::new(r"at line (\d+), column (\d+)").unwrap()
-        });
-        if let Some(captures) = RE_LINE_COL.captures(error_msg) {
-            if let (Ok(line), Ok(column)) = (
-                captures.get(1).unwrap().as_str().parse::<u32>(),
-                captures.get(2).unwrap().as_str().parse::<u32>()
-            ) {
-                let line_idx = (line - 1) as usize;
-                let line_length = if line_idx < lines.len() {
-                    lines[line_idx].len() as u32
-                } else {
-                    0
-                };
-                
-                return vec![Diagnostic {
-                    range: Range {
-                        start: Position { line: line - 1, character: column - 1 },
-                        end: Position { line: line - 1, character: line_length },
-                    },
-                    severity: Some(DiagnosticSeverity::ERROR),
-                    code: None,
-                    code_description: None,
-                    source: Some("nextsql-toml-validator".to_string()),
-                    message: error_msg.to_string(),
-                    related_information: None,
-                    tags: None,
-                    data: None,
-                }];
-            }
+
+        // toml crate provides span information
+        if let Some(span) = error.span() {
+            // Convert byte offset to line/column
+            let (start_line, start_col) = Self::byte_offset_to_position(text, span.start);
+            let (end_line, end_col) = Self::byte_offset_to_position(text, span.end);
+
+            return vec![Diagnostic {
+                range: Range {
+                    start: Position { line: start_line, character: start_col },
+                    end: Position { line: end_line, character: end_col },
+                },
+                severity: Some(DiagnosticSeverity::ERROR),
+                code: None,
+                code_description: None,
+                source: Some("nextsql-toml-validator".to_string()),
+                message: error.message().to_string(),
+                related_information: None,
+                tags: None,
+                data: None,
+            }];
         }
-        
-        // エラーメッセージから無効なフィールド名を抽出
-        if let Some(field_name) = self.extract_unknown_field(error_msg) {
-            // テキスト内でそのフィールドを検索
+
+        // Try to extract unknown field name from error message for location
+        if let Some(field_name) = Self::extract_unknown_field(&error_msg) {
             for (line_num, line) in lines.iter().enumerate() {
                 if line.trim_start().starts_with(&field_name) {
                     let start_char = line.find(&field_name).unwrap_or(0) as u32;
                     let end_char = start_char + field_name.len() as u32;
-                    
+
                     return vec![Diagnostic {
                         range: Range {
                             start: Position { line: line_num as u32, character: start_char },
@@ -944,19 +901,34 @@ impl NextSqlLanguageServer {
                 }
             }
         }
-        
-        // フォールバック: エラー位置が特定できない場合は最初の行
-        vec![self.create_error_diagnostic(text, error_msg)]
+
+        // Fallback: report at the beginning of the file
+        vec![self.create_error_diagnostic(text, &error_msg)]
     }
 
-    fn extract_unknown_field(&self, error_msg: &str) -> Option<String> {
-        static RE_UNKNOWN_FIELD: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
-            regex::Regex::new(r"unknown field `([^`]+)`").unwrap()
-        });
-        if let Some(captures) = RE_UNKNOWN_FIELD.captures(error_msg) {
-            return Some(captures.get(1).unwrap().as_str().to_string());
+    fn byte_offset_to_position(text: &str, offset: usize) -> (u32, u32) {
+        let mut line = 0u32;
+        let mut col = 0u32;
+        for (i, ch) in text.char_indices() {
+            if i >= offset {
+                break;
+            }
+            if ch == '\n' {
+                line += 1;
+                col = 0;
+            } else {
+                col += 1;
+            }
         }
-        None
+        (line, col)
+    }
+
+    fn extract_unknown_field(error_msg: &str) -> Option<String> {
+        // Match pattern: unknown field `field_name`
+        let marker = "unknown field `";
+        let start = error_msg.find(marker)? + marker.len();
+        let end = error_msg[start..].find('`')? + start;
+        Some(error_msg[start..end].to_string())
     }
 
     fn create_error_diagnostic(&self, text: &str, message: &str) -> Diagnostic {

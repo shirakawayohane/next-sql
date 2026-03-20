@@ -41,3 +41,4 @@ install-path = "CARGO_HOME"
 [profile.dist]
 inherits = "release"
 lto = "thin"
+strip = true

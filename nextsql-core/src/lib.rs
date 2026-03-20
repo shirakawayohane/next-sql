@@ -1,4 +1,5 @@
 pub mod ast;
+pub mod config;
 pub mod parser;
 pub mod schema;
 pub mod schema_loader;

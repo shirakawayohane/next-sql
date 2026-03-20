@@ -1,89 +1,14 @@
-use serde::{Deserialize, Serialize};
+pub use nextsql_core::config::NextSqlConfig;
+
 use std::fs;
 use std::path::Path;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct NextSqlConfig {
-    pub database_url: Option<String>,
-    pub files: FilesConfig,
-    pub target: TargetConfig,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub codegen: Option<CodegenConfig>,
+pub trait NextSqlConfigExt {
+    fn init_project<P: AsRef<Path>>(path: P) -> Result<(), Box<dyn std::error::Error>>;
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct CodegenConfig {
-    /// Naming pattern for insert param structs. Default: "Insert{Table}Params"
-    pub insert_params: Option<String>,
-    /// Naming pattern for update changeset structs. Default: "Update{Table}Params"
-    pub update_params: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct FilesConfig {
-    pub includes: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct TargetConfig {
-    pub target_language: String,
-    pub target_directory: String,
-    /// Package name for the generated project manifest (e.g. Cargo.toml for Rust,
-    /// package.json for TypeScript). If set, a manifest will be generated with the
-    /// necessary dependencies and lint suppression for generated code.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub package_name: Option<String>,
-}
-
-impl Default for NextSqlConfig {
-    fn default() -> Self {
-        Self {
-            database_url: None,
-            files: FilesConfig {
-                includes: vec!["**".to_string()],
-            },
-            target: TargetConfig {
-                target_language: "rust".to_string(),
-                target_directory: ".".to_string(),
-                package_name: None,
-            },
-            codegen: None,
-        }
-    }
-}
-
-impl NextSqlConfig {
-    pub fn load_from_file<P: AsRef<Path>>(path: P) -> Result<Self, Box<dyn std::error::Error>> {
-        let content = fs::read_to_string(path)?;
-        let config: NextSqlConfig = toml::from_str(&content)?;
-        Self::validate_config(&config)?;
-        Ok(config)
-    }
-
-    fn validate_config(config: &NextSqlConfig) -> Result<(), Box<dyn std::error::Error>> {
-        const SUPPORTED_LANGUAGES: &[&str] = &["rust"];
-        if !SUPPORTED_LANGUAGES.contains(&config.target.target_language.as_str()) {
-            return Err(format!(
-                "Configuration validation failed:\nValidation error: unsupported target_language '{}', expected one of: {}",
-                config.target.target_language,
-                SUPPORTED_LANGUAGES.join(", ")
-            ).into());
-        }
-        Ok(())
-    }
-
-    pub fn save_to_file<P: AsRef<Path>>(&self, path: P) -> Result<(), Box<dyn std::error::Error>> {
-        Self::validate_config(self)?;
-        let content = toml::to_string_pretty(self)?;
-        fs::write(path, content)?;
-        Ok(())
-    }
-
-    pub fn init_project<P: AsRef<Path>>(path: P) -> Result<(), Box<dyn std::error::Error>> {
+impl NextSqlConfigExt for NextSqlConfig {
+    fn init_project<P: AsRef<Path>>(path: P) -> Result<(), Box<dyn std::error::Error>> {
         // ディレクトリが存在しない場合は作成
         if !path.as_ref().exists() {
             std::fs::create_dir_all(&path)?;
@@ -100,7 +25,7 @@ database_url = ""
 
 [files]
 # Glob patterns for NextSQL files to include
-includes = ["**"]
+includes = ["queries/**/*.nsql"]
 
 [target]
 # Target language for code generation
@@ -111,6 +36,21 @@ target_directory = "."
 "#;
             fs::write(&config_path, config_content)?;
             println!("Created next-sql.toml with default configuration");
+        }
+
+        // queries/ ディレクトリと types.nsql を作成
+        let queries_dir = path.as_ref().join("queries");
+        fs::create_dir_all(&queries_dir)?;
+
+        let types_path = queries_dir.join("types.nsql");
+        if !types_path.exists() {
+            let types_content = r#"// Define your value types (valtypes) and relations here.
+//
+// Valtypes: see https://shirakawayohane.github.io/next-sql/syntax.html#types
+// Relations: see https://shirakawayohane.github.io/next-sql/syntax.html#relations
+"#;
+            fs::write(&types_path, types_content)?;
+            println!("Created queries/types.nsql");
         }
 
         // .nsql/ ディレクトリを作成
@@ -135,45 +75,45 @@ target_directory = "."
 
         // .claude ディレクトリを探して、見つかればスキルを配置
         let absolute_path = fs::canonicalize(path.as_ref())?;
-        if let Some(claude_dir) = Self::find_claude_dir(&absolute_path) {
-            Self::install_skill(&claude_dir)?;
+        if let Some(claude_dir) = find_claude_dir(&absolute_path) {
+            install_skill(&claude_dir)?;
         }
 
         Ok(())
     }
+}
 
-    /// 親ディレクトリを遡って .claude ディレクトリを探す
-    /// ホームディレクトリ直下の ~/.claude（グローバル設定）は除外する
-    fn find_claude_dir(start: &Path) -> Option<std::path::PathBuf> {
-        let home_dir = dirs::home_dir();
-        let mut current = Some(start);
-        while let Some(dir) = current {
-            let claude_dir = dir.join(".claude");
-            if claude_dir.is_dir() {
-                // ~/.claude（グローバル）はスキップ
-                if let Some(ref home) = home_dir {
-                    if dir == home.as_path() {
-                        return None;
-                    }
+/// 親ディレクトリを遡って .claude ディレクトリを探す
+/// ホームディレクトリ直下の ~/.claude（グローバル設定）は除外する
+fn find_claude_dir(start: &Path) -> Option<std::path::PathBuf> {
+    let home_dir = dirs::home_dir();
+    let mut current = Some(start);
+    while let Some(dir) = current {
+        let claude_dir = dir.join(".claude");
+        if claude_dir.is_dir() {
+            // ~/.claude（グローバル）はスキップ
+            if let Some(ref home) = home_dir {
+                if dir == home.as_path() {
+                    return None;
                 }
-                return Some(claude_dir);
             }
-            current = dir.parent();
+            return Some(claude_dir);
         }
-        None
+        current = dir.parent();
     }
+    None
+}
 
-    fn install_skill(claude_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
-        let skill_dir = claude_dir.join("skills/learn-next-sql");
-        fs::create_dir_all(&skill_dir)?;
+fn install_skill(claude_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    let skill_dir = claude_dir.join("skills/learn-next-sql");
+    fs::create_dir_all(&skill_dir)?;
 
-        let skill_content = include_str!(concat!(env!("OUT_DIR"), "/skill.md"));
-        let skill_path = skill_dir.join("SKILL.md");
-        fs::write(&skill_path, skill_content)?;
+    let skill_content = include_str!(concat!(env!("OUT_DIR"), "/skill.md"));
+    let skill_path = skill_dir.join("SKILL.md");
+    fs::write(&skill_path, skill_content)?;
 
-        println!("Installed Claude Code skill at {}", skill_path.display());
-        Ok(())
-    }
+    println!("Installed Claude Code skill at {}", skill_path.display());
+    Ok(())
 }
 
 #[cfg(test)]
@@ -225,7 +165,7 @@ mod tests {
     fn test_load_from_file_with_validation() {
         let dir = tempdir().unwrap();
         let file_path = dir.path().join("test.toml");
-        
+
         // 有効な設定ファイルを作成
         std::fs::write(&file_path, r#"
 [files]
@@ -235,13 +175,13 @@ includes = ["src/**"]
 target_language = "rust"
 target_directory = "../generated"
 "#).unwrap();
-        
+
         let result = NextSqlConfig::load_from_file(&file_path);
         if let Err(e) = &result {
             println!("Error loading valid config: {}", e);
         }
         assert!(result.is_ok());
-        
+
         // 無効な設定ファイルを作成
         std::fs::write(&file_path, r#"
 [files]
@@ -251,7 +191,7 @@ includes = ["src/**"]
 target_language = "invalid"
 target_directory = "../generated"
 "#).unwrap();
-        
+
         let result = NextSqlConfig::load_from_file(&file_path);
         assert!(result.is_err());
     }
@@ -260,7 +200,7 @@ target_directory = "../generated"
     fn test_save_to_file_with_validation() {
         let dir = tempdir().unwrap();
         let file_path = dir.path().join("test.toml");
-        
+
         // 有効な設定
         let valid_config = NextSqlConfig {
             database_url: None,

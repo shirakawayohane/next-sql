@@ -69,7 +69,7 @@ impl SchemaCache {
         let config_str = std::fs::read_to_string(&config_path)
             .map_err(|e| format!("Failed to read config: {}", e))?;
 
-        let config: nextsql_cli::config::NextSqlConfig = toml::from_str(&config_str)
+        let config: nextsql_core::config::NextSqlConfig = toml::from_str(&config_str)
             .map_err(|e| format!("Failed to parse config: {}", e))?;
 
         if let Some(db_url) = config.database_url {
