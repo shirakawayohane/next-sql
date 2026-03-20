@@ -48,7 +48,7 @@ impl LanguageServer for NextSqlLanguageServer {
                 )),
                 completion_provider: Some(CompletionOptions {
                     resolve_provider: Some(false),
-                    trigger_characters: Some(vec![".".to_string(), "=".to_string(), " ".to_string(), "$".to_string()]),
+                    trigger_characters: Some(vec![".".to_string(), "=".to_string(), " ".to_string(), "$".to_string(), ":".to_string()]),
                     work_done_progress_options: Default::default(),
                     all_commit_characters: None,
                     completion_item: None,
@@ -165,7 +165,7 @@ impl LanguageServer for NextSqlLanguageServer {
         // 0. Variable reference: $varName -> jump to its declaration in query/mutation arguments
         let doc_uri = params.text_document_position_params.text_document.uri.clone();
         if Self::is_variable_at_position(&text, position) {
-            if let Some((decl_line, decl_start, decl_end)) = Self::find_variable_declaration(&text, &word) {
+            if let Some((decl_line, decl_start, decl_end)) = Self::find_variable_declaration(&text, &word, position) {
                 return Ok(Some(GotoDefinitionResponse::Scalar(Location {
                     uri: doc_uri,
                     range: Range {
@@ -362,13 +362,47 @@ impl NextSqlLanguageServer {
         start > 0 && bytes[start - 1] == b'$'
     }
 
-    /// variableの宣言位置を見つける（query/mutationの引数リスト内）
+    /// variableの宣言位置を見つける（カーソル位置を含むquery/mutationの引数リスト内）
     /// 戻り値: (行番号, 開始カラム, 終了カラム) - $を含む範囲
-    fn find_variable_declaration(text: &str, var_name: &str) -> Option<(u32, u32, u32)> {
-        // Search for $varName in argument declarations: $varName: Type
+    fn find_variable_declaration(text: &str, var_name: &str, cursor_position: Position) -> Option<(u32, u32, u32)> {
+        let lines: Vec<&str> = text.lines().collect();
+        let cursor_line = cursor_position.line as usize;
+
+        // Find the nearest query/mutation declaration before the cursor
+        let decl_re = regex::Regex::new(r"(?:query|mutation)\s+\w+\s*\(").unwrap();
+        let mut decl_line_num = None;
+        for line_num in (0..=cursor_line.min(lines.len() - 1)).rev() {
+            if decl_re.is_match(lines[line_num]) {
+                decl_line_num = Some(line_num);
+                break;
+            }
+        }
+        let decl_line_num = decl_line_num?;
+
+        // Find the closing ')' of the argument list
+        let mut paren_depth = 0;
+        let mut args_end_line = decl_line_num;
+        for (i, line) in lines.iter().enumerate().skip(decl_line_num) {
+            for ch in line.chars() {
+                if ch == '(' {
+                    paren_depth += 1;
+                } else if ch == ')' {
+                    paren_depth -= 1;
+                    if paren_depth == 0 {
+                        args_end_line = i;
+                        break;
+                    }
+                }
+            }
+            if paren_depth == 0 && i >= decl_line_num {
+                break;
+            }
+        }
+
+        // Search for $varName: Type only within the argument list lines
         let pattern = format!("${}", var_name);
-        for (line_num, line) in text.lines().enumerate() {
-            // Look for $varName followed by optional whitespace and ':'
+        for line_num in decl_line_num..=args_end_line {
+            let line = lines[line_num];
             if let Some(pos) = line.find(&pattern) {
                 let after = &line[pos + pattern.len()..];
                 let after_trimmed = after.trim_start();

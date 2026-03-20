@@ -1,7 +1,11 @@
+use crate::schema_cache::SchemaCache;
+use std::sync::Arc;
 use tower_lsp::lsp_types::*;
 
 pub trait TypeCompletionProvider {
     fn get_text(&self) -> &str;
+    fn get_schema_cache(&self) -> Option<&Arc<SchemaCache>>;
+    fn get_file_uri(&self) -> Option<&str>;
 
     async fn get_type_completions(&self) -> Vec<CompletionItem> {
         let mut completions = Vec::new();
@@ -105,6 +109,35 @@ pub trait TypeCompletionProvider {
                     sort_text: Some(format!("0_{}", input_name)),
                     ..Default::default()
                 });
+            }
+        }
+
+        // Add valtypes from other files via schema cache
+        if let Some(schema_cache) = self.get_schema_cache() {
+            if let Some(file_uri) = self.get_file_uri() {
+                let file_path = std::path::Path::new(file_uri);
+                let other_valtypes = schema_cache.get_all_valtypes_except(file_path).await;
+                // Collect current file valtype names to avoid duplicates
+                let current_valtype_names: std::collections::HashSet<String> = completions.iter()
+                    .filter(|c| c.kind == Some(CompletionItemKind::TYPE_PARAMETER))
+                    .map(|c| c.label.clone())
+                    .collect();
+                for (name, base_type) in other_valtypes {
+                    if !current_valtype_names.contains(&name) {
+                        completions.push(CompletionItem {
+                            label: name.clone(),
+                            kind: Some(CompletionItemKind::TYPE_PARAMETER),
+                            detail: Some(format!("valtype {} = {:?}", name, base_type)),
+                            documentation: Some(Documentation::String(format!(
+                                "Value type alias for {:?} (from another file)",
+                                base_type
+                            ))),
+                            insert_text: Some(name.clone()),
+                            sort_text: Some(format!("0_{}", name)),
+                            ..Default::default()
+                        });
+                    }
+                }
             }
         }
 

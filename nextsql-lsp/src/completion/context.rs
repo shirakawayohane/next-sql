@@ -44,7 +44,7 @@ pub fn analyze_context_before_dot(full_text: &str, text_before_dot: &str) -> Com
 
     // Check if we're in an expression context (inside .where(), .having(), .orderBy(), etc.)
     // where the identifier before the dot is a column reference like "users.name"
-    if is_in_expression_method_context(trimmed) {
+    if is_in_expression_method_context(full_text, trimmed) {
         eprintln!("LSP: Detected expression method context");
         return CompletionContext::ExpressionMethod;
     }
@@ -364,16 +364,18 @@ fn check_input_field_context(full_text: &str, text: &str) -> Option<String> {
 
 /// Check if we're inside an expression context (where, having, orderBy)
 /// and the dot is after a column reference (e.g., "users.name.")
-fn is_in_expression_method_context(text: &str) -> bool {
-    eprintln!("LSP: is_in_expression_method_context - checking: '{}'", text);
+/// `full_text` is used to find the enclosing expression context (.where( etc.)
+/// `trimmed` is the current line before the dot, used to check the table.column pattern
+fn is_in_expression_method_context(full_text: &str, trimmed: &str) -> bool {
+    eprintln!("LSP: is_in_expression_method_context - checking full_text for expression context");
 
     let expression_contexts = [
         ".where(", ".having(", ".orderBy(",
     ];
 
     for context in &expression_contexts {
-        if let Some(pos) = text.rfind(context) {
-            let after_context = &text[pos + context.len()..];
+        if let Some(pos) = full_text.rfind(context) {
+            let after_context = &full_text[pos + context.len()..];
 
             // Count parentheses to see if we're still inside
             let mut paren_count = 1;
@@ -394,16 +396,10 @@ fn is_in_expression_method_context(text: &str) -> bool {
 
             if still_inside {
                 // We're inside an expression context.
-                // Check if the text ends with "table.column" pattern (two identifiers separated by a dot)
-                // e.g., ".where(users.name" -> after_context = "users.name"
-                // The trimmed text already has the trailing dot removed
-                let inner = after_context.trim();
-
-                // Look for pattern: identifier.identifier at the end
-                // Split from the last part to find "table.column"
-                if let Some(dot_pos) = inner.rfind('.') {
-                    let after_dot = &inner[dot_pos + 1..];
-                    let before_dot_part = &inner[..dot_pos];
+                // Check if the current line ends with "table.column" pattern
+                if let Some(dot_pos) = trimmed.rfind('.') {
+                    let after_dot = &trimmed[dot_pos + 1..];
+                    let before_dot_part = &trimmed[..dot_pos];
 
                     // Get the identifier before the dot
                     let ident_before = before_dot_part
