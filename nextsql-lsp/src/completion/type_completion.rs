@@ -139,6 +139,37 @@ pub trait TypeCompletionProvider {
                     }
                 }
             }
+
+            // Add enum types from database schema
+            if let Some(file_uri) = self.get_file_uri() {
+                let file_path = std::path::Path::new(file_uri);
+                if let Some(schema) = schema_cache.get_schema_for_file(file_path).await {
+                    for (enum_name, enum_schema) in &schema.enums {
+                        let variants_preview = enum_schema.variants.iter()
+                            .take(5)
+                            .cloned()
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        let detail = if enum_schema.variants.len() > 5 {
+                            format!("{}, ...", variants_preview)
+                        } else {
+                            variants_preview
+                        };
+                        completions.push(CompletionItem {
+                            label: enum_name.clone(),
+                            kind: Some(CompletionItemKind::ENUM),
+                            detail: Some(format!("enum {}", enum_name)),
+                            documentation: Some(Documentation::String(format!(
+                                "Database enum type\nVariants: {}",
+                                detail
+                            ))),
+                            insert_text: Some(enum_name.clone()),
+                            sort_text: Some(format!("0_{}", enum_name)),
+                            ..Default::default()
+                        });
+                    }
+                }
+            }
         }
 
         completions

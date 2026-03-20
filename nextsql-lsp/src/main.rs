@@ -183,7 +183,7 @@ impl LanguageServer for NextSqlLanguageServer {
             None => return Ok(None),
         };
 
-        let (_, table_lines, column_lines) = Self::generate_schema_document(&schema);
+        let (_, table_lines, column_lines, enum_lines) = Self::generate_schema_document(&schema);
         let target_uri = Url::parse("nextsql-schema:///schema.nsql").unwrap();
 
         // 1. Field key inside value/set/doUpdate: { field: ... }
@@ -224,12 +224,33 @@ impl LanguageServer for NextSqlLanguageServer {
         if schema.tables.contains_key(&word) {
             let line = table_lines.get(&word).copied().unwrap_or(0);
             return Ok(Some(GotoDefinitionResponse::Scalar(Location {
-                uri: target_uri,
+                uri: target_uri.clone(),
                 range: Range {
                     start: Position { line, character: 0 },
                     end: Position { line, character: 0 },
                 },
             })));
+        }
+
+        // 3.5. Enum name resolution (exact match or case-insensitive match)
+        {
+            let enum_match = enum_lines.get(&word).map(|line| (&word, line))
+                .or_else(|| {
+                    // Case-insensitive match for PascalCase vs snake_case enum names
+                    let word_lower = word.to_lowercase().replace('_', "");
+                    enum_lines.iter().find(|(name, _)| {
+                        name.to_lowercase().replace('_', "") == word_lower
+                    }).map(|(name, line)| (name, line))
+                });
+            if let Some((_, &line)) = enum_match {
+                return Ok(Some(GotoDefinitionResponse::Scalar(Location {
+                    uri: target_uri,
+                    range: Range {
+                        start: Position { line, character: 0 },
+                        end: Position { line, character: 0 },
+                    },
+                })));
+            }
         }
 
         // 4. ValType name resolution (e.g., OrganizationId in `$org_id: OrganizationId`)
@@ -319,7 +340,7 @@ impl NextSqlLanguageServer {
 
         match schema {
             Some(schema) => {
-                let (doc, _, _) = Self::generate_schema_document(&schema);
+                let (doc, _, _, _) = Self::generate_schema_document(&schema);
                 Ok(serde_json::json!({ "content": doc }))
             }
             None => Ok(serde_json::json!({ "content": "// No schema loaded\n" })),
@@ -656,24 +677,50 @@ impl NextSqlLanguageServer {
     }
 
     /// スキーマ情報からNextSQL風の仮想ドキュメントを生成する
-    /// 戻り値: (ドキュメントテキスト, テーブル名→行番号, テーブル名→(カラム名→行番号))
+    /// 戻り値: (ドキュメントテキスト, テーブル名→行番号, テーブル名→(カラム名→行番号), enum名→行番号)
     fn generate_schema_document(
         schema: &nextsql_core::DatabaseSchema,
-    ) -> (String, HashMap<String, u32>, HashMap<String, HashMap<String, u32>>) {
+    ) -> (String, HashMap<String, u32>, HashMap<String, HashMap<String, u32>>, HashMap<String, u32>) {
         let mut doc = String::new();
         let mut table_lines: HashMap<String, u32> = HashMap::new();
         let mut column_lines: HashMap<String, HashMap<String, u32>> = HashMap::new();
+        let mut enum_lines: HashMap<String, u32> = HashMap::new();
         let mut current_line: u32 = 0;
 
         doc.push_str("// NextSQL Database Schema (auto-generated)\n");
         current_line += 1;
+
+        // Sort enums by name for consistent ordering
+        let mut enum_names: Vec<&String> = schema.enums.keys().collect();
+        enum_names.sort();
+
+        for (i, enum_name) in enum_names.iter().enumerate() {
+            if i > 0 {
+                doc.push('\n');
+                current_line += 1;
+            }
+
+            let enum_schema = &schema.enums[*enum_name];
+            enum_lines.insert(enum_name.to_string(), current_line);
+
+            doc.push_str(&format!("enum {} {{\n", enum_name));
+            current_line += 1;
+
+            for variant in &enum_schema.variants {
+                doc.push_str(&format!("    {}\n", variant));
+                current_line += 1;
+            }
+
+            doc.push_str("}\n");
+            current_line += 1;
+        }
 
         // Sort tables by name for consistent ordering
         let mut table_names: Vec<&String> = schema.tables.keys().collect();
         table_names.sort();
 
         for (i, table_name) in table_names.iter().enumerate() {
-            if i > 0 {
+            if !enum_names.is_empty() || i > 0 {
                 doc.push('\n');
                 current_line += 1;
             }
@@ -726,7 +773,7 @@ impl NextSqlLanguageServer {
             column_lines.insert(table_name.to_string(), cols);
         }
 
-        (doc, table_lines, column_lines)
+        (doc, table_lines, column_lines, enum_lines)
     }
 
     /// .nsqlファイルのテキストからValType定義を抽出してキャッシュを更新する
