@@ -551,16 +551,9 @@ pub(super) fn generate_insertable_mutation(
     for col in &insertable_columns {
         let col_snake = to_snake_case(&col.name);
         let is_optional = col.nullable || col.has_default;
-        // Determine if this column needs an enum type cast
-        let cast_suffix = if let Type::UserDefined(ref enum_name) = col.column_type {
-            if schema.enums.contains_key(enum_name) {
-                format!("::text::{}", enum_name)
-            } else {
-                String::new()
-            }
-        } else {
-            String::new()
-        };
+        // No enum type cast for parameters — PG handles implicit text-to-enum conversion
+        // and tokio-postgres rejects explicit casts to custom enum types.
+        let cast_suffix = String::new();
         if is_optional {
             out.push_str(&format!(
                 "    if let Some(ref v) = {}.{} {{\n",
@@ -799,22 +792,14 @@ pub(super) fn generate_updatable_mutation(
     for col in &updatable_columns {
         let col_snake = to_snake_case(&col.name);
         // Determine if this column needs an enum type cast
-        let cast_suffix = if let Type::UserDefined(ref enum_name) = col.column_type {
-            if schema.enums.contains_key(enum_name) {
-                format!("::text::{}", enum_name)
-            } else {
-                String::new()
-            }
-        } else {
-            String::new()
-        };
+        // No enum type cast for parameters — PG handles implicit text-to-enum conversion
         out.push_str(&format!(
             "    if params.{}.{}.is_set() {{\n",
             updatable_snake, col_snake,
         ));
         out.push_str(&format!(
-            "        set_parts.push(format!(\"{} = ${{}}{}\", idx));\n",
-            col.name, cast_suffix,
+            "        set_parts.push(format!(\"{} = ${{}}\", idx));\n",
+            col.name,
         ));
         out.push_str(&format!(
             "        bind_params.push(&params.{}.{});\n",

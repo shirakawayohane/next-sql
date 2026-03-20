@@ -285,15 +285,24 @@ impl<'a> SqlGenContext<'a> {
         }
     }
 
-    /// If the column is a PostgreSQL enum type, wrap the value expression with a type cast.
-    /// e.g. `$1` becomes `$1::status_type`
+    /// If the column is a PostgreSQL enum type and the value is a literal (not a parameter
+    /// placeholder like `$1`), wrap the value expression with a type cast.
+    /// e.g. `'approved'` becomes `'approved'::status_type`
+    ///
+    /// Parameter placeholders (`$N`) are NOT cast because tokio-postgres validates parameter
+    /// types and rejects String parameters cast to custom enum types. PostgreSQL handles
+    /// implicit text-to-enum conversion for parameters in INSERT/UPDATE contexts.
     fn maybe_enum_cast(&self, column_name: &str, val: String) -> String {
+        // Skip cast for parameter placeholders ($1, $2, etc.) — PG handles implicit conversion
+        if val.starts_with('$') && val[1..].chars().all(|c| c.is_ascii_digit()) {
+            return val;
+        }
         if let (Some(schema), Some(table_name)) = (self.schema, &self.enum_cast_table) {
             if let Some(table) = schema.get_table(table_name) {
                 if let Some(col) = table.columns.iter().find(|c| c.name == column_name) {
                     if let Type::UserDefined(enum_name) = &col.column_type {
                         if schema.enums.contains_key(enum_name) {
-                            return format!("{}::text::{}", val, enum_name);
+                            return format!("{}::{}", val, enum_name);
                         }
                     }
                 }

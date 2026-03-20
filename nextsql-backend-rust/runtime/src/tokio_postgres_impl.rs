@@ -1,5 +1,26 @@
 use crate::{Client, QueryExecutor, Row, ToSqlParam, Transaction};
 
+// ---- Helper: String wrapper that accepts any type (including custom enums) ----
+
+/// A String wrapper that implements `FromSql` for any PostgreSQL type.
+/// PostgreSQL enum values are transmitted as text on the wire, so reading
+/// them as String is safe. Standard `String::from_sql` only accepts TEXT/VARCHAR,
+/// rejecting custom enum types.
+struct AnyString(String);
+
+impl<'a> tokio_postgres::types::FromSql<'a> for AnyString {
+    fn from_sql(
+        _ty: &tokio_postgres::types::Type,
+        raw: &'a [u8],
+    ) -> Result<Self, Box<dyn std::error::Error + Sync + Send>> {
+        Ok(AnyString(String::from_utf8(raw.to_vec())?))
+    }
+
+    fn accepts(_ty: &tokio_postgres::types::Type) -> bool {
+        true
+    }
+}
+
 // ---- Row implementation wrapping tokio_postgres::Row ----
 
 pub struct PgRow(pub tokio_postgres::Row);
@@ -10,7 +31,7 @@ impl Row for PgRow {
     fn get_i64(&self, idx: usize) -> i64 { self.0.get(idx) }
     fn get_f32(&self, idx: usize) -> f32 { self.0.get(idx) }
     fn get_f64(&self, idx: usize) -> f64 { self.0.get(idx) }
-    fn get_string(&self, idx: usize) -> String { self.0.get(idx) }
+    fn get_string(&self, idx: usize) -> String { self.0.get::<_, AnyString>(idx).0 }
     fn get_bool(&self, idx: usize) -> bool { self.0.get(idx) }
     fn get_uuid(&self, idx: usize) -> uuid::Uuid { self.0.get(idx) }
     fn get_timestamp(&self, idx: usize) -> chrono::NaiveDateTime { self.0.get(idx) }
@@ -24,7 +45,9 @@ impl Row for PgRow {
     fn get_opt_i64(&self, idx: usize) -> Option<i64> { self.0.get(idx) }
     fn get_opt_f32(&self, idx: usize) -> Option<f32> { self.0.get(idx) }
     fn get_opt_f64(&self, idx: usize) -> Option<f64> { self.0.get(idx) }
-    fn get_opt_string(&self, idx: usize) -> Option<String> { self.0.get(idx) }
+    fn get_opt_string(&self, idx: usize) -> Option<String> {
+        self.0.get::<_, Option<AnyString>>(idx).map(|s| s.0)
+    }
     fn get_opt_bool(&self, idx: usize) -> Option<bool> { self.0.get(idx) }
     fn get_opt_uuid(&self, idx: usize) -> Option<uuid::Uuid> { self.0.get(idx) }
     fn get_opt_timestamp(&self, idx: usize) -> Option<chrono::NaiveDateTime> { self.0.get(idx) }
@@ -129,41 +152,12 @@ impl tokio_postgres::types::ToSql for OwnedParam {
         }
     }
 
-    fn accepts(ty: &tokio_postgres::types::Type) -> bool {
-        i16::accepts(ty)
-            || i32::accepts(ty)
-            || i64::accepts(ty)
-            || f32::accepts(ty)
-            || f64::accepts(ty)
-            || bool::accepts(ty)
-            || String::accepts(ty)
-            || uuid::Uuid::accepts(ty)
-            || chrono::NaiveDateTime::accepts(ty)
-            || chrono::DateTime::<chrono::Utc>::accepts(ty)
-            || chrono::NaiveDate::accepts(ty)
-            || rust_decimal::Decimal::accepts(ty)
-            || serde_json::Value::accepts(ty)
-            || <Option<i16>>::accepts(ty)
-            || <Option<i32>>::accepts(ty)
-            || <Option<i64>>::accepts(ty)
-            || <Option<f32>>::accepts(ty)
-            || <Option<f64>>::accepts(ty)
-            || <Option<bool>>::accepts(ty)
-            || <Option<String>>::accepts(ty)
-            || <Option<uuid::Uuid>>::accepts(ty)
-            || <Option<chrono::NaiveDateTime>>::accepts(ty)
-            || <Option<chrono::DateTime<chrono::Utc>>>::accepts(ty)
-            || <Option<chrono::NaiveDate>>::accepts(ty)
-            || <Option<rust_decimal::Decimal>>::accepts(ty)
-            || <Option<serde_json::Value>>::accepts(ty)
-            || <Vec<i16>>::accepts(ty)
-            || <Vec<i32>>::accepts(ty)
-            || <Vec<i64>>::accepts(ty)
-            || <Vec<f32>>::accepts(ty)
-            || <Vec<f64>>::accepts(ty)
-            || <Vec<bool>>::accepts(ty)
-            || <Vec<String>>::accepts(ty)
-            || <Vec<uuid::Uuid>>::accepts(ty)
+    fn accepts(_ty: &tokio_postgres::types::Type) -> bool {
+        // Accept all types unconditionally. OwnedParam is a dynamic wrapper that
+        // delegates serialization to the inner value's to_sql(). PostgreSQL handles
+        // type coercion (e.g. text -> enum) server-side when the value is sent as text.
+        // Rejecting custom/enum types here would break INSERT/UPDATE for enum columns.
+        true
     }
 
     tokio_postgres::types::to_sql_checked!();
