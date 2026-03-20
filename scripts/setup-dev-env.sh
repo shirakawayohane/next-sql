@@ -11,7 +11,7 @@ cargo build --release
 
 # Create symlink
 NSQL_PATH="$(pwd)/target/release/nsql"
-SYMLINK_PATH="$HOME/.local/bin/nsql"
+SYMLINK_PATH="$HOME/.local/bin/nsql-dev"
 
 # Create ~/.local/bin if it doesn't exist
 mkdir -p "$HOME/.local/bin"
@@ -31,7 +31,7 @@ if ! echo "$PATH" | grep -q "$HOME/.local/bin"; then
 fi
 
 # Test the command
-echo "Testing nsql command..."
-nsql --version 2>/dev/null || nsql --help | head -n 1
+echo "Testing nsql-dev command..."
+nsql-dev --version 2>/dev/null || nsql-dev --help | head -n 1
 
-echo "Setup complete! You can now use 'nsql' command."
+echo "Setup complete! You can now use 'nsql-dev' command."
