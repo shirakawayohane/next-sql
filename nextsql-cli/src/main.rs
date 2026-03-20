@@ -13,6 +13,7 @@ use std::path::{Path, PathBuf};
 #[derive(Parser)]
 #[command(name = "nsql")]
 #[command(about = "NextSQL CLI tool")]
+#[command(version)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -52,6 +53,12 @@ enum Commands {
         /// Config file path (default: next-sql.toml)
         #[arg(default_value = "next-sql.toml")]
         config: PathBuf,
+    },
+    /// Watch for file changes and re-run code generation
+    Watch {
+        /// Project directory containing next-sql.toml (default: current directory)
+        #[arg(default_value = ".")]
+        dir: PathBuf,
     },
 }
 
@@ -199,6 +206,12 @@ async fn main() {
         }
         Commands::ValidateConfig { config } => {
             if let Err(e) = handle_validate_config_command(config) {
+                eprintln!("Error: {}", e);
+                std::process::exit(1);
+            }
+        }
+        Commands::Watch { dir } => {
+            if let Err(e) = handle_watch_command(dir) {
                 eprintln!("Error: {}", e);
                 std::process::exit(1);
             }
@@ -465,6 +478,79 @@ fn handle_generate_command(
         "Successfully generated {} files",
         result.generated_files.len()
     );
+    Ok(())
+}
+
+fn handle_watch_command(dir: PathBuf) -> Result<(), Box<dyn std::error::Error>> {
+    use notify_debouncer_mini::{new_debouncer, DebouncedEventKind};
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    // Validate config exists
+    let nsql_config_path = dir.join("next-sql.toml");
+    let nsql_config = config::NextSqlConfig::load_from_file(&nsql_config_path)?;
+    let output_dir = dir.join(&nsql_config.target.target_directory);
+    let output_dir_canonical = std::fs::canonicalize(&output_dir).unwrap_or(output_dir);
+
+    let dir_display = std::fs::canonicalize(&dir)
+        .unwrap_or_else(|_| dir.clone())
+        .display()
+        .to_string();
+
+    eprintln!("[watch] Running initial generation...");
+    if let Err(e) = handle_generate_command(dir.clone()) {
+        eprintln!("[watch] {}", e);
+    }
+
+    eprintln!("[watch] Watching for changes in {}...", dir_display);
+
+    let (tx, rx) = mpsc::channel();
+    let mut debouncer = new_debouncer(Duration::from_millis(300), tx)?;
+
+    debouncer
+        .watcher()
+        .watch(&dir, notify::RecursiveMode::Recursive)?;
+
+    loop {
+        match rx.recv() {
+            Ok(Ok(events)) => {
+                let has_relevant_change = events.iter().any(|event| {
+                    if event.kind != DebouncedEventKind::Any {
+                        return false;
+                    }
+                    let path = &event.path;
+
+                    // Skip changes in output directory
+                    if let Ok(canonical) = std::fs::canonicalize(path) {
+                        if canonical.starts_with(&output_dir_canonical) {
+                            return false;
+                        }
+                    }
+
+                    let ext = path.extension().and_then(|e| e.to_str());
+                    let name = path.file_name().and_then(|n| n.to_str());
+                    ext == Some("nsql")
+                        || name == Some("next-sql.toml")
+                        || name == Some("schema.json")
+                });
+
+                if has_relevant_change {
+                    eprintln!("\n[watch] Change detected, regenerating...");
+                    if let Err(e) = handle_generate_command(dir.clone()) {
+                        eprintln!("[watch] {}", e);
+                    }
+                }
+            }
+            Ok(Err(e)) => {
+                eprintln!("[watch] Watcher error: {}", e);
+            }
+            Err(_) => {
+                eprintln!("[watch] Watcher disconnected");
+                break;
+            }
+        }
+    }
+
     Ok(())
 }
 

@@ -56,6 +56,16 @@ Generate code from `.nsql` files:
 nsql gen
 ```
 
+### watch
+
+Watch for file changes and automatically re-run code generation:
+
+```bash
+nsql watch
+```
+
+Monitors `.nsql` files, `next-sql.toml`, and `schema.json` for changes. Errors during generation are reported but do not stop the watcher.
+
 ### validate-config
 
 Validate a NextSQL configuration file:

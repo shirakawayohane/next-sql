@@ -424,6 +424,9 @@ nsql gen
 # Check .nsql files for errors without generating code
 nsql check
 
+# Watch for changes and auto-regenerate
+nsql watch
+
 # Parse and validate a single .nsql file
 nsql parse <file.nsql>
 ```
