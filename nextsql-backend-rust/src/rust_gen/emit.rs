@@ -223,6 +223,8 @@ fn gen_param_binding(
     } else {
         let arg = args.iter().find(|a| a.name == param_key);
         let field = to_snake_case(param_key);
+        // Note: individual params are already references (&T), so we don't add & again.
+        // Exception: ValType .0 access needs & because it dereferences into the inner value.
         match arg.map(|a| &a.typ) {
             Some(Type::UserDefined(name)) if registry.is_valtype(name) => {
                 format!("&{}.0 as &dyn super::runtime::ToSqlParam", field)
@@ -235,7 +237,7 @@ fn gen_param_binding(
                 format!("&__{}_inner as &dyn super::runtime::ToSqlParam", field)
             }
             _ => {
-                format!("&{} as &dyn super::runtime::ToSqlParam", field)
+                format!("{} as &dyn super::runtime::ToSqlParam", field)
             }
         }
     }
