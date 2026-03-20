@@ -184,10 +184,13 @@ impl SchemaCache {
         ) {
             for toplevel in &module.toplevels {
                 if let nextsql_core::ast::TopLevel::ValType(vt) = toplevel {
-                    // ValType定義の行番号を特定（テキスト内で "valtype Name" を検索）
+                    // ValType定義の行番号を特定（コメント行を除外して "valtype Name" を検索）
                     let line = text.lines().enumerate()
                         .find(|(_, line)| {
-                            line.contains("valtype") && line.contains(&vt.name)
+                            let trimmed = line.trim();
+                            !trimmed.starts_with("//")
+                                && trimmed.starts_with("valtype")
+                                && line.contains(&vt.name)
                         })
                         .map(|(i, _)| i as u32)
                         .unwrap_or(0);
