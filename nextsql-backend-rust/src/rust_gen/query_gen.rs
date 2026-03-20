@@ -554,7 +554,7 @@ pub(super) fn generate_insertable_mutation(
         // Determine if this column needs an enum type cast
         let cast_suffix = if let Type::UserDefined(ref enum_name) = col.column_type {
             if schema.enums.contains_key(enum_name) {
-                format!("::{}", enum_name)
+                format!("::text::{}", enum_name)
             } else {
                 String::new()
             }
@@ -801,7 +801,7 @@ pub(super) fn generate_updatable_mutation(
         // Determine if this column needs an enum type cast
         let cast_suffix = if let Type::UserDefined(ref enum_name) = col.column_type {
             if schema.enums.contains_key(enum_name) {
-                format!("::{}", enum_name)
+                format!("::text::{}", enum_name)
             } else {
                 String::new()
             }

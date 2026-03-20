@@ -293,7 +293,7 @@ impl<'a> SqlGenContext<'a> {
                 if let Some(col) = table.columns.iter().find(|c| c.name == column_name) {
                     if let Type::UserDefined(enum_name) = &col.column_type {
                         if schema.enums.contains_key(enum_name) {
-                            return format!("{}::{}", val, enum_name);
+                            return format!("{}::text::{}", val, enum_name);
                         }
                     }
                 }
