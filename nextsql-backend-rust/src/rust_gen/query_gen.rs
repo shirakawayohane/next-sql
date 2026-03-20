@@ -796,6 +796,9 @@ pub(super) fn generate_updatable_mutation(
         out.push_str("    }\n");
     }
 
+    // Suppress unused_assignments warning for the last idx increment
+    out.push_str("    let _ = idx;\n");
+
     // Early return if nothing to update
     out.push_str("\n    if set_parts.is_empty() {\n");
     if has_returning {
