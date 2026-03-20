@@ -387,7 +387,7 @@ pub fn generate(config: &CodegenConfig, schema: &DatabaseSchema) -> CodegenResul
             } else {
                 std::collections::HashSet::new()
             };
-            let needs_shared_types = (has_valtypes && multi_file) || !shared_enums.is_empty();
+            let needs_shared_types = has_valtypes || !shared_enums.is_empty();
 
             // Generate shared types.rs if needed
             if needs_shared_types {
