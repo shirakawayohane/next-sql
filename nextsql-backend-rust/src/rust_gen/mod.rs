@@ -219,7 +219,7 @@ pub fn generate_rust_file_full(module: &Module, schema: &DatabaseSchema, skip_va
     // Emit input type structs
     for toplevel in &module.toplevels {
         if let TopLevel::Input(input) = toplevel {
-            emit::emit_input_struct(&mut out, input, &registry, schema);
+            emit::emit_input_struct(&mut out, input, &registry, &input_registry, schema);
         }
     }
 

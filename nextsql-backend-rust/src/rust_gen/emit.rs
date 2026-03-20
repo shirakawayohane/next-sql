@@ -9,17 +9,18 @@ use super::InputTypeRegistry;
 use super::valtype::ValTypeRegistry;
 use super::naming::to_snake_case;
 
-/// Resolve the Rust type for a parameter, handling ValType wrappers, enums, Array and Optional.
-fn resolve_param_rust_type(typ: &Type, registry: &ValTypeRegistry, schema: &DatabaseSchema) -> String {
+/// Resolve the Rust type for a parameter, handling ValType wrappers, enums, input types, Array and Optional.
+fn resolve_param_rust_type(typ: &Type, registry: &ValTypeRegistry, input_registry: &InputTypeRegistry, schema: &DatabaseSchema) -> String {
     match typ {
         Type::UserDefined(name) if registry.is_valtype(name) => name.clone(),
         Type::UserDefined(name) if is_enum_type(name, schema) => enum_rust_type(name),
+        Type::UserDefined(name) if input_registry.get(name).is_some() => name.clone(),
         Type::Array(inner) => {
-            let inner_type = resolve_param_rust_type(inner, registry, schema);
+            let inner_type = resolve_param_rust_type(inner, registry, input_registry, schema);
             format!("Vec<{}>", inner_type)
         }
         Type::Optional(inner) => {
-            let inner_type = resolve_param_rust_type(inner, registry, schema);
+            let inner_type = resolve_param_rust_type(inner, registry, input_registry, schema);
             format!("Option<{}>", inner_type)
         }
         other => nextsql_type_to_rust(other),
@@ -174,10 +175,10 @@ pub(super) fn emit_execute_fn_no_params(
 // ── Input struct emission ──────────────────────────────────────────────
 
 /// Emit a struct definition for an `input` type declaration.
-pub(super) fn emit_input_struct(out: &mut String, input: &InputType, registry: &ValTypeRegistry, schema: &DatabaseSchema) {
+pub(super) fn emit_input_struct(out: &mut String, input: &InputType, registry: &ValTypeRegistry, input_registry: &InputTypeRegistry, schema: &DatabaseSchema) {
     out.push_str(&format!("pub struct {} {{\n", input.name));
     for field in &input.fields {
-        let rust_type = resolve_param_rust_type(&field.typ, registry, schema);
+        let rust_type = resolve_param_rust_type(&field.typ, registry, input_registry, schema);
         out.push_str(&format!("    pub {}: {},\n", to_snake_case(&field.name), rust_type));
     }
     out.push_str("}\n\n");
@@ -623,7 +624,7 @@ fn emit_individual_fn_params(
     schema: &DatabaseSchema,
 ) {
     for arg in args {
-        let rust_type = resolve_param_rust_type(&arg.typ, registry, schema);
+        let rust_type = resolve_param_rust_type(&arg.typ, registry, input_registry, schema);
         // Check if this is an input type (pass by reference)
         let is_input = matches!(&arg.typ, Type::UserDefined(name) if input_registry.get(name).is_some());
         if is_input {
