@@ -527,7 +527,7 @@ mod tests {
         assert!(result.contains("pub email: String,"));
 
         // Verify from_row
-        assert!(result.contains("pub fn from_row(row: &dyn nextsql_backend_rust_runtime::Row) -> Self"));
+        assert!(result.contains("pub fn from_row(row: &dyn nextsql_backend_rust_runtime::Row) -> Result<Self, Box<dyn std::error::Error + Send + Sync>>"));
         assert!(result.contains("row.get_uuid(0)"));
         assert!(result.contains("row.get_string(1)"));
         assert!(result.contains("row.get_string(2)"));

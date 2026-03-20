@@ -100,15 +100,15 @@ pub(super) fn emit_row_struct(out: &mut String, struct_name: &str, fields: &[Row
     out.push_str("}\n\n");
 
     out.push_str(&format!("impl {} {{\n", struct_name));
-    out.push_str("    pub fn from_row(row: &dyn nextsql_backend_rust_runtime::Row) -> Self {\n");
-    out.push_str("        Self {\n");
+    out.push_str("    pub fn from_row(row: &dyn nextsql_backend_rust_runtime::Row) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {\n");
+    out.push_str("        Ok(Self {\n");
     for (i, f) in fields.iter().enumerate() {
         let getter_expr = if f.enum_parse {
             // Enum field: parse from string
             if f.getter.contains("get_opt_") {
-                format!("row.{}({}).map(|s| s.parse().unwrap())", f.getter, i)
+                format!("row.{}({}).map(|s| s.parse()).transpose()?", f.getter, i)
             } else {
-                format!("row.{}({}).parse().unwrap()", f.getter, i)
+                format!("row.{}({}).parse()?", f.getter, i)
             }
         } else if let Some(ref wrapper) = f.valtype_wrapper {
             // Check if the getter is an optional variant
@@ -126,7 +126,7 @@ pub(super) fn emit_row_struct(out: &mut String, struct_name: &str, fields: &[Row
             getter_expr,
         ));
     }
-    out.push_str("        }\n");
+    out.push_str("        })\n");
     out.push_str("    }\n");
     out.push_str("}\n\n");
 }
@@ -147,7 +147,7 @@ pub(super) fn emit_query_fn_no_params(
         sql.replace('\"', "\\\"")
     ));
     out.push_str(&format!(
-        "    Ok(rows.iter().map(|row| {}::from_row(row)).collect())\n",
+        "    rows.iter().map(|row| {}::from_row(row)).collect()\n",
         row_struct
     ));
     out.push_str("}\n\n");
@@ -318,7 +318,7 @@ pub(super) fn emit_query_fn_individual_params(
         bindings.join(", "),
     ));
     out.push_str(&format!(
-        "    Ok(rows.iter().map(|row| {}::from_row(row)).collect())\n",
+        "    rows.iter().map(|row| {}::from_row(row)).collect()\n",
         row_struct,
     ));
     out.push_str("}\n\n");
@@ -608,7 +608,7 @@ pub(super) fn emit_dynamic_query_fn_individual_params(
 
     out.push_str("    let rows = client.query(&sql, &bind_params).await?;\n");
     out.push_str(&format!(
-        "    Ok(rows.iter().map(|row| {}::from_row(row)).collect())\n",
+        "    rows.iter().map(|row| {}::from_row(row)).collect()\n",
         row_struct
     ));
     out.push_str("}\n\n");
