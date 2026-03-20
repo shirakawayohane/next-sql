@@ -1437,7 +1437,7 @@ dependencies = [
 
 [[package]]
 name = "nextsql-backend-rust"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "nextsql-backend-rust-runtime",
  "nextsql-core",
@@ -1445,7 +1445,7 @@ dependencies = [
 
 [[package]]
 name = "nextsql-backend-rust-runtime"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "bytes",
  "chrono",
@@ -1457,7 +1457,7 @@ dependencies = [
 
 [[package]]
 name = "nextsql-cli"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "chrono",
  "clap",
@@ -1479,7 +1479,7 @@ dependencies = [
 
 [[package]]
 name = "nextsql-codegen"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "glob",
  "nextsql-backend-rust",
@@ -1490,7 +1490,7 @@ dependencies = [
 
 [[package]]
 name = "nextsql-core"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "chrono",
  "pest",
@@ -1517,7 +1517,7 @@ dependencies = [
 
 [[package]]
 name = "nextsql-lsp"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "glob",
  "nextsql-core",
@@ -1535,7 +1535,7 @@ dependencies = [
 
 [[package]]
 name = "nextsql-tokio-postgres-adapter"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "deadpool-postgres",
  "nextsql-backend-rust-runtime",
