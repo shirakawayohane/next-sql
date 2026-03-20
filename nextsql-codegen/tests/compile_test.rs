@@ -33,6 +33,7 @@ fn test_generated_code_compiles() {
         update_params_pattern: None,
         package_name: None,
         type_files: vec!["types.nsql".to_string()],
+        runtime_crate_path: Some(project_root().join("nextsql-backend-rust/runtime")),
     };
     let result = nextsql_codegen::generate(&config, &schema);
     assert!(
@@ -76,6 +77,7 @@ fn test_generated_function_signatures() {
         update_params_pattern: None,
         package_name: None,
         type_files: vec!["types.nsql".to_string()],
+        runtime_crate_path: Some(project_root().join("nextsql-backend-rust/runtime")),
     };
     let result = nextsql_codegen::generate(&config, &schema);
     assert!(result.errors.is_empty(), "Errors: {:?}", result.errors);

@@ -445,6 +445,7 @@ fn handle_generate_command(
             .and_then(|c| c.update_params.clone()),
         package_name: nsql_config.target.package_name.clone(),
         type_files: nsql_config.files.type_files.clone(),
+        runtime_crate_path: None,
     };
 
     let result = nextsql_codegen::generate(&config, &db_schema);

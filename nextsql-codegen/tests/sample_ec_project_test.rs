@@ -31,6 +31,7 @@ fn run_codegen(test_name: &str) -> (nextsql_codegen::CodegenResult, PathBuf) {
         update_params_pattern: None,
         package_name: None,
         type_files: vec!["types.nsql".to_string()],
+        runtime_crate_path: None,
     };
 
     let result = generate(&config, &schema);

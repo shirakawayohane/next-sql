@@ -271,6 +271,15 @@ pub fn generate(config: &CodegenConfig, schema: &DatabaseSchema) -> CodegenResul
         return result;
     }
 
+    // Collect existing .rs files so we can delete stale ones after generation
+    let existing_rs_files: Vec<PathBuf> = std::fs::read_dir(&generated_dir)
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().and_then(|e| e.to_str()) == Some("rs"))
+        .collect();
+
     // 4. Parse all .nsql files (except types.nsql), validate, then collect
     let mut parsed_modules: Vec<(String, nextsql_core::ast::Module)> = Vec::new();
     let types_line_offset = types_content.as_ref().map(|t| t.lines().count() + 1).unwrap_or(0);
@@ -463,7 +472,14 @@ pub fn generate(config: &CodegenConfig, schema: &DatabaseSchema) -> CodegenResul
         }
     }
 
-    // 7. Generate Cargo.toml for Rust backend
+    // 7. Delete stale .rs files from generated_dir that were not part of this generation
+    for old_file in &existing_rs_files {
+        if !result.generated_files.iter().any(|gf| gf == old_file) {
+            let _ = std::fs::remove_file(old_file);
+        }
+    }
+
+    // 8. Generate Cargo.toml for Rust backend
     if config.backend == "rust" {
         let cargo_dir = config.output_dir.parent().unwrap_or(&config.output_dir);
         let package_name = config.package_name.clone().unwrap_or_else(|| {
