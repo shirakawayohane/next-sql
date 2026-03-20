@@ -510,6 +510,18 @@ pub fn generate(config: &CodegenConfig, schema: &DatabaseSchema) -> CodegenResul
                     .errors
                     .push(format!("Failed to write Cargo.toml: {}", e)),
             }
+        } else if config.runtime_crate_path.is_none() {
+            // Update nextsql-backend-rust-runtime version in existing Cargo.toml
+            if let Ok(content) = std::fs::read_to_string(&cargo_path) {
+                let updated = update_runtime_version_in_cargo_toml(&content, RUNTIME_CRATE_VERSION);
+                if updated != content {
+                    if let Err(e) = std::fs::write(&cargo_path, &updated) {
+                        result
+                            .errors
+                            .push(format!("Failed to update Cargo.toml: {}", e));
+                    }
+                }
+            }
         }
     }
 
@@ -596,6 +608,55 @@ serde_json = "1"
 rust_decimal = "1"
 "#
     )
+}
+
+/// Update the nextsql-backend-rust-runtime version in an existing Cargo.toml.
+/// Handles both `nextsql-backend-rust-runtime = "VERSION"` and
+/// `nextsql-backend-rust-runtime = { version = "VERSION", ... }` formats.
+fn update_runtime_version_in_cargo_toml(content: &str, new_version: &str) -> String {
+    let mut result = String::with_capacity(content.len());
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("nextsql-backend-rust-runtime") {
+            // Find `version = "X.Y.Z"` or just `= "X.Y.Z"` and replace the version
+            // Look for the pattern: `"` <old_version> `"`  that follows `version` or `=`
+            if let Some(replaced) = replace_version_in_dep_line(trimmed, new_version) {
+                result.push_str(&replaced);
+            } else {
+                result.push_str(line);
+            }
+        } else {
+            result.push_str(line);
+        }
+        result.push('\n');
+    }
+    result
+}
+
+/// Replace the version string in a dependency line.
+/// Supports: `dep = "VERSION"` and `dep = { version = "VERSION", ... }`
+fn replace_version_in_dep_line(line: &str, new_version: &str) -> Option<String> {
+    // Find the quoted version string to replace.
+    // For inline table, look for `version = "..."` first.
+    // For simple format, look for `= "..."`.
+    let search_start = if let Some(ver_pos) = line.find("version") {
+        ver_pos
+    } else {
+        0
+    };
+    let rest = &line[search_start..];
+    // Find opening quote
+    let open_quote = rest.find('"')?;
+    // Find closing quote
+    let close_quote = open_quote + 1 + rest[open_quote + 1..].find('"')?;
+    // Reconstruct: everything before opening quote + 1 (include the quote), new version, closing quote onward
+    let abs_open = search_start + open_quote;
+    let abs_close = search_start + close_quote;
+    let mut new_line = String::new();
+    new_line.push_str(&line[..abs_open + 1]); // up to and including opening quote
+    new_line.push_str(new_version);
+    new_line.push_str(&line[abs_close..]); // from closing quote onward (includes it)
+    Some(new_line)
 }
 
 /// Generate a mod.rs file that declares all generated modules.
@@ -706,6 +767,40 @@ mod tests {
         // Old module removed, new modules present
         assert!(!result.contains("old_module"));
         assert!(result.contains("pub use generated::users;"));
+    }
+
+    #[test]
+    fn test_update_runtime_version_simple_string() {
+        let input = r#"[dependencies]
+nextsql-backend-rust-runtime = "0.1.0"
+chrono = "0.4"
+"#;
+        let result = update_runtime_version_in_cargo_toml(input, "0.3.2");
+        assert!(result.contains(r#"nextsql-backend-rust-runtime = "0.3.2""#));
+        assert!(result.contains(r#"chrono = "0.4""#));
+    }
+
+    #[test]
+    fn test_update_runtime_version_inline_table() {
+        let input = r#"[dependencies]
+nextsql-backend-rust-runtime = { version = "0.1.0", default-features = false }
+chrono = "0.4"
+"#;
+        let result = update_runtime_version_in_cargo_toml(input, "0.3.2");
+        // Verify the exact line format is preserved with proper quoting
+        assert!(result.contains(
+            r#"nextsql-backend-rust-runtime = { version = "0.3.2", default-features = false }"#
+        ));
+        assert!(!result.contains("\"0.1.0\""));
+    }
+
+    #[test]
+    fn test_update_runtime_version_no_match() {
+        let input = r#"[dependencies]
+chrono = "0.4"
+"#;
+        let result = update_runtime_version_in_cargo_toml(input, "0.3.2");
+        assert_eq!(result, format!("{}\n", input.lines().collect::<Vec<_>>().join("\n")));
     }
 
     #[test]
