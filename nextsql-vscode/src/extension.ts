@@ -128,9 +128,19 @@ export function activate(context: vscode.ExtensionContext) {
     }
   );
 
-  // クライアントを開始
-  client.start();
-  console.log("Language client started");
+  // Restart Server コマンド
+  const restartCommand = vscode.commands.registerCommand(
+    "nextsql.restartServer",
+    async () => {
+      if (client) {
+        if (client.isRunning()) {
+          await client.stop();
+        }
+        await client.start();
+        vscode.window.showInformationMessage("NextSQL Language Server restarted.");
+      }
+    }
+  );
 
   // 補完が呼ばれているかを確認するため、VSCodeの補完イベントを監視（デバッグ用）
   const completionDisposable = vscode.languages.registerCompletionItemProvider(
@@ -150,30 +160,24 @@ export function activate(context: vscode.ExtensionContext) {
     "." // トリガー文字
   );
 
-  // Restart Server コマンド
-  const restartCommand = vscode.commands.registerCommand(
-    "nextsql.restartServer",
-    async () => {
-      if (client) {
-        if (client.isRunning()) {
-          await client.stop();
-        }
-        await client.start();
-        vscode.window.showInformationMessage("NextSQL Language Server restarted.");
-      }
-    }
-  );
-
   // 拡張機能が非アクティブ化されるときにクライアントを停止
-  context.subscriptions.push(completionDisposable);
   context.subscriptions.push(restartCommand);
   context.subscriptions.push(openSchemaCommand);
+  context.subscriptions.push(completionDisposable);
   context.subscriptions.push({
     dispose: () => {
       if (client) {
         client.stop();
       }
     },
+  });
+
+  // クライアントを開始
+  client.start().catch((e) => {
+    console.error("Failed to start NextSQL Language Server:", e);
+    vscode.window.showWarningMessage(
+      `NextSQL Language Server failed to start: ${e.message}`
+    );
   });
 }
 
