@@ -60,6 +60,8 @@ enum Commands {
         #[arg(default_value = ".")]
         dir: PathBuf,
     },
+    /// Update nsql to the latest version
+    Update,
 }
 
 #[derive(Subcommand)]
@@ -212,6 +214,12 @@ async fn main() {
         }
         Commands::Watch { dir } => {
             if let Err(e) = handle_watch_command(dir) {
+                eprintln!("Error: {}", e);
+                std::process::exit(1);
+            }
+        }
+        Commands::Update => {
+            if let Err(e) = handle_update_command().await {
                 eprintln!("Error: {}", e);
                 std::process::exit(1);
             }
@@ -753,6 +761,196 @@ fn handle_check_command(
         )
         .into())
     }
+}
+
+async fn handle_update_command() -> Result<(), Box<dyn std::error::Error>> {
+    const REPO: &str = "shirakawayohane/next-sql";
+    const GITHUB_API: &str = "https://api.github.com/repos";
+
+    let current_version = env!("CARGO_PKG_VERSION");
+    println!("Current version: v{}", current_version);
+    println!("Checking for updates...");
+
+    let target_triple = get_target_triple()?;
+
+    let client = reqwest::Client::builder()
+        .user_agent("nsql-updater")
+        .build()?;
+
+    let release: serde_json::Value = client
+        .get(format!("{}/{}/releases/latest", GITHUB_API, REPO))
+        .send()
+        .await?
+        .error_for_status()
+        .map_err(|e| format!("Failed to fetch latest release: {}", e))?
+        .json()
+        .await?;
+
+    let tag_name = release["tag_name"]
+        .as_str()
+        .ok_or("Missing tag_name in release")?;
+
+    let latest_version = tag_name.trim_start_matches('v');
+    if latest_version == current_version {
+        println!("Already up to date (v{}).", current_version);
+        return Ok(());
+    }
+
+    println!("New version available: {} (current: v{})", tag_name, current_version);
+
+    let assets = release["assets"]
+        .as_array()
+        .ok_or("Missing assets in release")?;
+
+    // Find the asset matching the current platform
+    // cargo-dist names assets like: nextsql-cli-aarch64-apple-darwin.tar.xz
+    let asset = assets
+        .iter()
+        .find(|a| {
+            let name = a["name"].as_str().unwrap_or("");
+            name.starts_with("nextsql-cli-")
+                && name.contains(&target_triple)
+                && !name.ends_with(".sha256")
+        })
+        .ok_or_else(|| format!("No release asset found for target: {}", target_triple))?;
+
+    let asset_name = asset["name"].as_str().unwrap_or("unknown");
+    let download_url = asset["browser_download_url"]
+        .as_str()
+        .ok_or("Missing download URL")?;
+
+    println!("Downloading {}...", asset_name);
+
+    let response = client
+        .get(download_url)
+        .send()
+        .await?
+        .error_for_status()
+        .map_err(|e| format!("Failed to download: {}", e))?;
+
+    let bytes = response.bytes().await?;
+
+    let current_exe = std::env::current_exe()?;
+    let tmp_dir = tempfile::tempdir()?;
+
+    // Write archive to temp directory
+    let archive_path = tmp_dir.path().join(asset_name);
+    std::fs::write(&archive_path, &bytes)?;
+
+    // Extract
+    println!("Extracting...");
+    if asset_name.ends_with(".tar.xz") || asset_name.ends_with(".tar.gz") {
+        let status = std::process::Command::new("tar")
+            .args(["xf", &archive_path.to_string_lossy(), "-C", &tmp_dir.path().to_string_lossy()])
+            .status()?;
+        if !status.success() {
+            return Err("Failed to extract archive".into());
+        }
+    } else if asset_name.ends_with(".zip") {
+        let archive_str = archive_path.to_string_lossy().into_owned();
+        let dest_str = tmp_dir.path().to_string_lossy().into_owned();
+        let status = std::process::Command::new("unzip")
+            .args([&archive_str, "-d", &dest_str])
+            .status()?;
+        if !status.success() {
+            return Err("Failed to extract archive".into());
+        }
+    } else {
+        return Err(format!("Unsupported archive format: {}", asset_name).into());
+    }
+
+    // Find the nsql binary in extracted files
+    let new_binary = find_binary_in_dir(tmp_dir.path(), "nsql")?;
+
+    // Replace the current binary atomically
+    // First, make the new binary executable
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&new_binary, std::fs::Permissions::from_mode(0o755))?;
+    }
+
+    // Use rename for atomic replacement. If cross-device, fall back to copy.
+    let backup_path = current_exe.with_extension("old");
+    // Move current binary to backup
+    std::fs::rename(&current_exe, &backup_path)
+        .or_else(|_| std::fs::copy(&current_exe, &backup_path).map(|_| ()))?;
+
+    match std::fs::rename(&new_binary, &current_exe) {
+        Ok(()) => {}
+        Err(_) => {
+            // Cross-device: copy instead
+            if let Err(e) = std::fs::copy(&new_binary, &current_exe) {
+                // Restore backup
+                let _ = std::fs::rename(&backup_path, &current_exe);
+                return Err(format!("Failed to install new binary: {}", e).into());
+            }
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&current_exe, std::fs::Permissions::from_mode(0o755))?;
+            }
+        }
+    }
+
+    // Remove backup
+    let _ = std::fs::remove_file(&backup_path);
+
+    println!("Successfully updated to {}!", tag_name);
+    Ok(())
+}
+
+fn get_target_triple() -> Result<String, Box<dyn std::error::Error>> {
+    let arch = std::env::consts::ARCH;
+    let os = std::env::consts::OS;
+
+    let triple = match (arch, os) {
+        ("aarch64", "macos") => "aarch64-apple-darwin",
+        ("x86_64", "macos") => "x86_64-apple-darwin",
+        ("x86_64", "linux") => "x86_64-unknown-linux-gnu",
+        ("x86_64", "windows") => "x86_64-pc-windows-msvc",
+        _ => return Err(format!("Unsupported platform: {}-{}", arch, os).into()),
+    };
+
+    Ok(triple.to_string())
+}
+
+fn find_binary_in_dir(dir: &Path, name: &str) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    for entry in walkdir(dir)? {
+        let entry = entry?;
+        if entry.file_name().to_string_lossy() == name
+            || entry.file_name().to_string_lossy() == format!("{}.exe", name)
+        {
+            return Ok(entry.path().to_path_buf());
+        }
+    }
+    Err(format!("Binary '{}' not found in extracted archive", name).into())
+}
+
+fn walkdir(
+    dir: &Path,
+) -> Result<
+    impl Iterator<Item = Result<std::fs::DirEntry, std::io::Error>>,
+    Box<dyn std::error::Error>,
+> {
+    let mut entries = Vec::new();
+    collect_entries(dir, &mut entries)?;
+    Ok(entries.into_iter().map(Ok))
+}
+
+fn collect_entries(
+    dir: &Path,
+    entries: &mut Vec<std::fs::DirEntry>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        if entry.file_type()?.is_dir() {
+            collect_entries(&entry.path(), entries)?;
+        } else {
+            entries.push(entry);
+        }
+    }
+    Ok(())
 }
 
 fn handle_parse_command(file: PathBuf) -> Result<(), Box<dyn std::error::Error>> {

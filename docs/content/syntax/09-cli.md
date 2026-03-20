@@ -75,6 +75,16 @@ nsql validate-config
 nsql validate-config path/to/next-sql.toml
 ```
 
+### update
+
+Update `nsql` to the latest version by downloading the latest release from GitHub:
+
+```bash
+nsql update
+```
+
+This checks the current version against the latest GitHub release and, if a newer version is available, downloads and replaces the binary automatically.
+
 ## Migration Commands
 
 ### Initialize
