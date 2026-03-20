@@ -424,3 +424,52 @@ fn is_in_expression_method_context(full_text: &str, trimmed: &str) -> bool {
 
     false
 }
+
+/// Check if the cursor is inside an expression body (.where(), .having(), .orderBy(), join condition)
+/// using the full document text. Returns true if table name completions should be offered.
+pub fn is_in_expression_body(full_text: &str) -> bool {
+    let expression_contexts = [
+        ".where(", ".having(", ".orderBy(",
+    ];
+
+    for context in &expression_contexts {
+        if let Some(pos) = full_text.rfind(context) {
+            let after_context = &full_text[pos + context.len()..];
+            let mut paren_count = 1;
+            let mut still_inside = true;
+            for ch in after_context.chars() {
+                match ch {
+                    '(' => paren_count += 1,
+                    ')' => {
+                        paren_count -= 1;
+                        if paren_count == 0 {
+                            still_inside = false;
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            if still_inside {
+                return true;
+            }
+        }
+    }
+
+    // Also check join condition context: .leftJoin(table, <here>)
+    let join_methods = ["innerJoin(", "leftJoin(", "rightJoin(", "fullOuterJoin(", "crossJoin("];
+    for method in &join_methods {
+        if let Some(pos) = full_text.rfind(method) {
+            let after_method = &full_text[pos + method.len()..];
+            // Check if we're after the comma (second parameter = join condition)
+            if let Some(comma_pos) = after_method.find(',') {
+                let after_comma = &after_method[comma_pos + 1..];
+                if !after_comma.contains(')') {
+                    return true;
+                }
+            }
+        }
+    }
+
+    false
+}

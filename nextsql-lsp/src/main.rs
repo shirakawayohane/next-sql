@@ -47,7 +47,7 @@ impl LanguageServer for NextSqlLanguageServer {
                     TextDocumentSyncKind::FULL,
                 )),
                 completion_provider: Some(CompletionOptions {
-                    resolve_provider: Some(false),
+                    resolve_provider: Some(true),
                     trigger_characters: Some(vec![".".to_string(), "=".to_string(), " ".to_string(), "$".to_string(), ":".to_string()]),
                     work_done_progress_options: Default::default(),
                     all_commit_characters: None,
@@ -271,17 +271,32 @@ impl LanguageServer for NextSqlLanguageServer {
             let uri_str = uri.clone();
 
             // Run completion in a separate task
-            let completions = tokio::task::spawn(async move {
+            let mut completions = tokio::task::spawn(async move {
                 let provider = CompletionProvider::with_schema_cache(&text_owned, schema_cache, uri_str);
                 provider.get_completions(position).await
             })
             .await
             .unwrap_or_else(|_| Vec::new());
 
+            // メソッド補完アイテムに補完後の括弧クリーンアップコマンドを付与
+            for item in &mut completions {
+                if item.kind == Some(CompletionItemKind::METHOD) {
+                    item.command = Some(Command {
+                        title: "Cleanup duplicate parens".to_string(),
+                        command: "nextsql.cleanupDuplicateParens".to_string(),
+                        arguments: None,
+                    });
+                }
+            }
+
             return Ok(Some(CompletionResponse::Array(completions)));
         }
 
         Ok(None)
+    }
+
+    async fn completion_resolve(&self, item: CompletionItem) -> Result<CompletionItem> {
+        Ok(item)
     }
 }
 

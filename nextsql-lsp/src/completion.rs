@@ -13,7 +13,7 @@ mod utils;
 
 use context::{
     CompletionContext, FunctionContext, analyze_context_before_dot, check_function_context,
-    is_after_insertable_angle_bracket, is_after_variable_colon
+    is_after_insertable_angle_bracket, is_after_variable_colon, is_in_expression_body
 };
 use field_completion::FieldCompletionProvider;
 use method_completion::MethodCompletionProvider;
@@ -206,7 +206,15 @@ impl<'a> CompletionProvider<'a> {
 
         let before_cursor = &current_line[..byte_position.min(current_line.len())];
         let after_cursor = &current_line[byte_position.min(current_line.len())..];
-        
+
+        // カーソル位置までのテキスト（複数行のExpression判定用）
+        let text_up_to_cursor = if position.line > 0 {
+            let previous_lines: String = lines[..position.line as usize].join("\n");
+            format!("{}\n{}", previous_lines, before_cursor)
+        } else {
+            before_cursor.to_string()
+        };
+
         eprintln!("LSP: Text before cursor: '{}'", before_cursor);
         eprintln!("LSP: Text after cursor: '{}'", after_cursor);
 
@@ -230,7 +238,7 @@ impl<'a> CompletionProvider<'a> {
         }
         // "." が直前にある場合のメソッド補完
         else if before_cursor.ends_with('.') {
-            let context = analyze_context_before_dot(self.text, before_cursor);
+            let context = analyze_context_before_dot(&text_up_to_cursor, before_cursor);
             match &context {
                 CompletionContext::TableField(table_name) => {
                     // For field completions, table_name has already been resolved from alias
@@ -266,6 +274,10 @@ impl<'a> CompletionProvider<'a> {
                     completions.extend(self.get_table_completions().await);
                 }
             }
+        }
+        // Expression内（.where(), .having(), .orderBy(), join条件）でのテーブル名補完
+        else if is_in_expression_body(&text_up_to_cursor) {
+            completions.extend(self.get_table_completions().await);
         }
 
         completions

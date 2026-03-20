@@ -128,6 +128,36 @@ export function activate(context: vscode.ExtensionContext) {
     }
   );
 
+  // メソッド補完後の重複括弧クリーンアップコマンド
+  const cleanupParensCommand = vscode.commands.registerCommand(
+    "nextsql.cleanupDuplicateParens",
+    () => {
+      const editor = vscode.window.activeTextEditor;
+      if (!editor) return;
+
+      const position = editor.selection.active;
+      const line = editor.document.lineAt(position.line);
+      const textAfterCursor = line.text.substring(position.character);
+
+      // カーソル直後に () があれば削除
+      if (textAfterCursor.startsWith("()")) {
+        editor.edit((editBuilder) => {
+          editBuilder.delete(
+            new vscode.Range(position, position.translate(0, 2))
+          );
+        });
+      } else if (textAfterCursor.startsWith(")")) {
+        // 括弧が1つだけ余分な場合
+        editor.edit((editBuilder) => {
+          editBuilder.delete(
+            new vscode.Range(position, position.translate(0, 1))
+          );
+        });
+      }
+    }
+  );
+  context.subscriptions.push(cleanupParensCommand);
+
   // Restart Server コマンド
   const restartCommand = vscode.commands.registerCommand(
     "nextsql.restartServer",

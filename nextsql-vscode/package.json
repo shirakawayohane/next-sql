@@ -76,13 +76,13 @@
           {
             "scope": "variable.other.table.nextsql",
             "settings": {
-              "foreground": "#7EB8DA"
+              "foreground": "#FFFFFF"
             }
           },
           {
             "scope": "variable.other.field.nextsql",
             "settings": {
-              "foreground": "#9CCDE6"
+              "foreground": "#FFFFFF"
             }
           }
         ]
