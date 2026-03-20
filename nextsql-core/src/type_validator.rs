@@ -770,6 +770,15 @@ impl<'a> TypeValidator<'a> {
                     return a_base == e_base
                         || (self.is_numeric_builtin_type(a_base) && self.is_numeric_builtin_type(e_base));
                 }
+                // Enum name matching: case-insensitive comparison (PascalCase vs snake_case)
+                // e.g., "CsAdminRoleEnum" matches "cs_admin_role_enum"
+                {
+                    let a_normalized = a.to_lowercase().replace('_', "");
+                    let e_normalized = e.to_lowercase().replace('_', "");
+                    if a_normalized == e_normalized {
+                        return true;
+                    }
+                }
                 false
             }
             // ValType (registered UserDefined) vs BuiltIn → resolve and compare base types
