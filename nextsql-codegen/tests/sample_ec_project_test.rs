@@ -402,10 +402,11 @@ fn test_params_use_valtypes() {
 
     let content = std::fs::read_to_string(output_dir.join("customers.rs")).unwrap();
 
-    // FindCustomerByIdParams should use CustomerId, not uuid::Uuid
+    // findCustomerById should use CustomerId valtype for the id parameter, not uuid::Uuid
     assert!(
-        content.contains("pub struct FindCustomerByIdParams {\n    pub id: CustomerId,\n}"),
-        "FindCustomerByIdParams should use CustomerId type"
+        content.contains("id: &CustomerId,"),
+        "findCustomerById param should use CustomerId type, got:\n{}",
+        content
     );
 }
 

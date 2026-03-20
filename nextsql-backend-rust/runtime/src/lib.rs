@@ -134,5 +134,64 @@ pub trait Transaction: Send {
     fn rollback(self) -> impl Future<Output = Result<(), Self::Error>> + Send;
 }
 
+// ---- ToSqlParam implementations for primitive types ----
+
+macro_rules! impl_to_sql_param {
+    ($($ty:ty),*) => {
+        $(
+            impl ToSqlParam for $ty {
+                fn as_any(&self) -> &(dyn std::any::Any + Send + Sync) {
+                    self
+                }
+            }
+        )*
+    };
+}
+
+impl_to_sql_param!(
+    i16, i32, i64, f32, f64, bool, String,
+    uuid::Uuid, chrono::NaiveDateTime, chrono::NaiveDate,
+    rust_decimal::Decimal
+);
+
+impl ToSqlParam for chrono::DateTime<chrono::Utc> {
+    fn as_any(&self) -> &(dyn std::any::Any + Send + Sync) {
+        self
+    }
+}
+
+impl ToSqlParam for serde_json::Value {
+    fn as_any(&self) -> &(dyn std::any::Any + Send + Sync) {
+        self
+    }
+}
+
+impl ToSqlParam for &'static str {
+    fn as_any(&self) -> &(dyn std::any::Any + Send + Sync) {
+        self
+    }
+}
+
+impl<T: ToSqlParam + 'static> ToSqlParam for Option<T> {
+    fn as_any(&self) -> &(dyn std::any::Any + Send + Sync) {
+        self
+    }
+}
+
+impl<T: ToSqlParam + 'static> ToSqlParam for Vec<T> {
+    fn as_any(&self) -> &(dyn std::any::Any + Send + Sync) {
+        self
+    }
+}
+
+impl<T: ToSqlParam + 'static> ToSqlParam for UpdateField<T> {
+    fn as_any(&self) -> &(dyn std::any::Any + Send + Sync) {
+        match self {
+            UpdateField::Set(v) => v.as_any(),
+            UpdateField::Unchanged => panic!("Unchanged fields should not be passed as SQL params"),
+        }
+    }
+}
+
 #[cfg(feature = "backend-tokio-postgres")]
 pub mod tokio_postgres_impl;

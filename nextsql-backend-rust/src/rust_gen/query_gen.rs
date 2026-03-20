@@ -530,19 +530,19 @@ pub(super) fn generate_insertable_mutation(
     if has_returning {
         let row_type = effective_row.as_ref().unwrap();
         out.push_str(&format!(
-            "pub async fn {}(\n    client: &(impl super::runtime::Client + ?Sized),\n    params: &{},\n) -> Result<Vec<{}>, Box<dyn std::error::Error + Send + Sync>> {{\n",
+            "pub async fn {}(\n    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),\n    params: &{},\n) -> Result<Vec<{}>, Box<dyn std::error::Error + Send + Sync>> {{\n",
             fn_name, actual_params_struct, row_type,
         ));
     } else {
         out.push_str(&format!(
-            "pub async fn {}(\n    client: &(impl super::runtime::Client + ?Sized),\n    params: &{},\n) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {{\n",
+            "pub async fn {}(\n    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),\n    params: &{},\n) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {{\n",
             fn_name, actual_params_struct,
         ));
     }
 
     // Build columns and params dynamically
     out.push_str("    let mut columns: Vec<&str> = Vec::new();\n");
-    out.push_str("    let mut bind_params: Vec<&dyn super::runtime::ToSqlParam> = Vec::new();\n\n");
+    out.push_str("    let mut bind_params: Vec<&dyn nextsql_backend_rust_runtime::ToSqlParam> = Vec::new();\n\n");
 
     for col in &insertable_columns {
         let col_snake = to_snake_case(&col.name);
@@ -673,7 +673,7 @@ pub(super) fn generate_updatable_mutation(
     for col in &updatable_columns {
         let inner_type = column_to_rust_type(col, &table.name, registry, schema);
         out.push_str(&format!(
-            "    pub {}: super::runtime::UpdateField<{}>,\n",
+            "    pub {}: nextsql_backend_rust_runtime::UpdateField<{}>,\n",
             to_snake_case(&col.name),
             inner_type,
         ));
@@ -686,7 +686,7 @@ pub(super) fn generate_updatable_mutation(
     out.push_str("        Self {\n");
     for col in &updatable_columns {
         out.push_str(&format!(
-            "            {}: super::runtime::UpdateField::Unchanged,\n",
+            "            {}: nextsql_backend_rust_runtime::UpdateField::Unchanged,\n",
             to_snake_case(&col.name),
         ));
     }
@@ -738,18 +738,18 @@ pub(super) fn generate_updatable_mutation(
     if has_returning {
         let row_type = effective_row.as_ref().unwrap();
         out.push_str(&format!(
-            "pub async fn {}(\n    client: &(impl super::runtime::Client + ?Sized),\n    params: &{},\n) -> Result<Vec<{}>, Box<dyn std::error::Error + Send + Sync>> {{\n",
+            "pub async fn {}(\n    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),\n    params: &{},\n) -> Result<Vec<{}>, Box<dyn std::error::Error + Send + Sync>> {{\n",
             fn_name, params_struct, row_type,
         ));
     } else {
         out.push_str(&format!(
-            "pub async fn {}(\n    client: &(impl super::runtime::Client + ?Sized),\n    params: &{},\n) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {{\n",
+            "pub async fn {}(\n    client: &(impl nextsql_backend_rust_runtime::Client + ?Sized),\n    params: &{},\n) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {{\n",
             fn_name, params_struct,
         ));
     }
 
     out.push_str("    let mut set_parts: Vec<String> = Vec::new();\n");
-    out.push_str("    let mut bind_params: Vec<&dyn super::runtime::ToSqlParam> = Vec::new();\n");
+    out.push_str("    let mut bind_params: Vec<&dyn nextsql_backend_rust_runtime::ToSqlParam> = Vec::new();\n");
     out.push_str("    let mut idx = 1usize;\n\n");
 
     // Collect non-updatable params that appear in WHERE clause.

@@ -359,19 +359,24 @@ pub fn generate(config: &CodegenConfig, schema: &DatabaseSchema) -> CodegenResul
 
     match config.backend.as_str() {
         "rust" => {
-            // Check if any modules have valtypes that need deduplication
+            // Check if shared types.rs is needed (multi-file with valtypes or shared enums)
+            let module_refs: Vec<&nextsql_core::ast::Module> =
+                parsed_modules.iter().map(|(_, m)| m).collect();
             let has_valtypes = parsed_modules.iter().any(|(_, m)| {
                 m.toplevels.iter().any(|tl| matches!(tl, nextsql_core::ast::TopLevel::ValType(_)))
             });
             let multi_file = parsed_modules.len() > 1;
-            let skip_inline_valtypes = has_valtypes && multi_file;
+            let shared_enums = if multi_file {
+                nextsql_backend_rust::rust_gen::compute_shared_enums(&module_refs, schema)
+            } else {
+                std::collections::HashSet::new()
+            };
+            let needs_shared_types = (has_valtypes && multi_file) || !shared_enums.is_empty();
 
-            // Generate shared types.rs if needed (Bug 4 fix: avoid duplicate valtypes)
-            if skip_inline_valtypes {
-                let module_refs: Vec<&nextsql_core::ast::Module> =
-                    parsed_modules.iter().map(|(_, m)| m).collect();
+            // Generate shared types.rs if needed
+            if needs_shared_types {
                 let types_file =
-                    nextsql_backend_rust::rust_gen::generate_valtype_file(&module_refs);
+                    nextsql_backend_rust::rust_gen::generate_valtype_file(&module_refs, schema);
                 let types_path = generated_dir.join("types.rs");
                 match std::fs::write(&types_path, &types_file.content) {
                     Ok(_) => {
@@ -381,24 +386,6 @@ pub fn generate(config: &CodegenConfig, schema: &DatabaseSchema) -> CodegenResul
                     Err(e) => {
                         result.errors.push(format!(
                             "Failed to write types.rs: {}",
-                            e
-                        ));
-                    }
-                }
-            }
-
-            // Generate runtime.rs with embedded runtime definitions
-            {
-                let runtime_content = nextsql_backend_rust::runtime_gen::generate_runtime();
-                let runtime_path = generated_dir.join("runtime.rs");
-                match std::fs::write(&runtime_path, &runtime_content) {
-                    Ok(_) => {
-                        result.generated_files.push(runtime_path);
-                        module_names.push("runtime".to_string());
-                    }
-                    Err(e) => {
-                        result.errors.push(format!(
-                            "Failed to write runtime.rs: {}",
                             e
                         ));
                     }
@@ -421,7 +408,7 @@ pub fn generate(config: &CodegenConfig, schema: &DatabaseSchema) -> CodegenResul
             for (module_name, module) in &parsed_modules {
                 let generated =
                     nextsql_backend_rust::rust_gen::generate_rust_file_full(
-                        module, schema, skip_inline_valtypes, &naming,
+                        module, schema, needs_shared_types, &naming, &shared_enums,
                     );
 
                 // Collect codegen errors (e.g., duplicate field names)
@@ -572,6 +559,7 @@ edition = "2021"
 all = "allow"
 
 [dependencies]
+nextsql-backend-rust-runtime = {{ version = "0.1", default-features = false }}
 chrono = {{ version = "0.4", features = ["serde"] }}
 uuid = {{ version = "1", features = ["v4", "serde"] }}
 serde_json = "1"
@@ -657,12 +645,11 @@ mod tests {
 
     #[test]
     fn test_generate_lib_rs_section() {
-        let names = vec!["users".to_string(), "posts".to_string(), "runtime".to_string()];
+        let names = vec!["users".to_string(), "posts".to_string()];
         let content = generate_lib_rs_section(&names);
         assert!(content.contains("mod generated;"));
         assert!(content.contains("pub use generated::users;"));
         assert!(content.contains("pub use generated::posts;"));
-        assert!(content.contains("pub use generated::runtime;"));
         assert!(content.starts_with(NEXTSQL_BEGIN_MARKER));
         assert!(content.ends_with(NEXTSQL_END_MARKER));
     }
@@ -680,7 +667,7 @@ mod tests {
         );
         std::fs::write(&lib_path, &existing).unwrap();
 
-        let names = vec!["users".to_string(), "runtime".to_string()];
+        let names = vec!["users".to_string()];
         let result = update_lib_rs(&lib_path, &names);
 
         // User code preserved
@@ -689,7 +676,6 @@ mod tests {
         // Old module removed, new modules present
         assert!(!result.contains("old_module"));
         assert!(result.contains("pub use generated::users;"));
-        assert!(result.contains("pub use generated::runtime;"));
     }
 
     #[test]
