@@ -592,7 +592,7 @@ pub(super) fn generate_insertable_mutation(
         let row_type = effective_row.as_ref().unwrap();
         out.push_str("    let rows = client.query(&sql, &bind_params).await?;\n");
         out.push_str(&format!(
-            "    Ok(rows.iter().map(|row| {}::from_row(row)).collect())\n",
+            "    rows.iter().map(|row| {}::from_row(row)).collect()\n",
             row_type,
         ));
     } else {
@@ -654,7 +654,14 @@ pub(super) fn generate_updatable_mutation(
 
     let table_pascal = table_name_to_model_name(updatable_table_name);
     let changes_struct = naming.update_struct_name(&table_pascal);
-    let params_struct = format!("{}Params", pascal);
+    let params_struct = {
+        let candidate = format!("{}Params", pascal);
+        if candidate == changes_struct {
+            format!("{}Input", pascal)
+        } else {
+            candidate
+        }
+    };
 
     let table = match schema.get_table(updatable_table_name) {
         Some(t) => t,
@@ -849,7 +856,7 @@ pub(super) fn generate_updatable_mutation(
         let row_type = effective_row.as_ref().unwrap();
         out.push_str("    let rows = client.query(&sql, &bind_params).await?;\n");
         out.push_str(&format!(
-            "    Ok(rows.iter().map(|row| {}::from_row(row)).collect())\n",
+            "    rows.iter().map(|row| {}::from_row(row)).collect()\n",
             row_type,
         ));
     } else {
@@ -910,6 +917,60 @@ pub(super) fn generate_where_sql_template(
                         Literal::Null => out.push_str("NULL"),
                         _ => {}
                     }
+                }
+                AtomicExpression::MethodCall(mc) => {
+                    let mut target_sql = String::new();
+                    generate_where_sql_template(&mut target_sql, &mc.target, non_updatable_args);
+                    match mc.method.as_str() {
+                        "isNull" => out.push_str(&format!("{} IS NULL", target_sql)),
+                        "isNotNull" => out.push_str(&format!("{} IS NOT NULL", target_sql)),
+                        "like" => {
+                            let mut arg_sql = String::new();
+                            generate_where_sql_template(&mut arg_sql, &mc.args[0], non_updatable_args);
+                            out.push_str(&format!("{} LIKE {}", target_sql, arg_sql));
+                        }
+                        "ilike" => {
+                            let mut arg_sql = String::new();
+                            generate_where_sql_template(&mut arg_sql, &mc.args[0], non_updatable_args);
+                            out.push_str(&format!("{} ILIKE {}", target_sql, arg_sql));
+                        }
+                        "between" => {
+                            let mut lo = String::new();
+                            let mut hi = String::new();
+                            generate_where_sql_template(&mut lo, &mc.args[0], non_updatable_args);
+                            generate_where_sql_template(&mut hi, &mc.args[1], non_updatable_args);
+                            out.push_str(&format!("{} BETWEEN {} AND {}", target_sql, lo, hi));
+                        }
+                        "eqAny" => {
+                            let mut arg_sql = String::new();
+                            generate_where_sql_template(&mut arg_sql, &mc.args[0], non_updatable_args);
+                            out.push_str(&format!("{} = ANY({})", target_sql, arg_sql));
+                        }
+                        "contains" => {
+                            let mut arg_sql = String::new();
+                            generate_where_sql_template(&mut arg_sql, &mc.args[0], non_updatable_args);
+                            out.push_str(&format!("{} @> {}", target_sql, arg_sql));
+                        }
+                        other => {
+                            // Generic fallback: METHOD(target, args...)
+                            let mut all_args = vec![target_sql];
+                            for arg in &mc.args {
+                                let mut arg_sql = String::new();
+                                generate_where_sql_template(&mut arg_sql, arg, non_updatable_args);
+                                all_args.push(arg_sql);
+                            }
+                            out.push_str(&format!("{}({})", other, all_args.join(", ")));
+                        }
+                    }
+                }
+                AtomicExpression::Call(call) => {
+                    let mut args = Vec::new();
+                    for arg in &call.args {
+                        let mut arg_sql = String::new();
+                        generate_where_sql_template(&mut arg_sql, arg, non_updatable_args);
+                        args.push(arg_sql);
+                    }
+                    out.push_str(&format!("{}({})", call.callee, args.join(", ")));
                 }
                 _ => {}
             }
