@@ -191,4 +191,7 @@ valtype_column_ref = { ident ~ "." ~ ident }
 valtype_binding = { "for" ~ valtype_column_ref }
 valtype_decl = { "valtype" ~ ident ~ "=" ~ builtin_type ~ valtype_binding? }
 
-module = { SOI ~ (valtype_decl | relation | with_statement | query | mutation)* ~ EOI }
+input_field = { ident ~ ":" ~ type }
+input_decl = { "input" ~ ident ~ "{" ~ input_field ~ (s* ~ "," ~ input_field)* ~ ","? ~ "}" }
+
+module = { SOI ~ (input_decl | valtype_decl | relation | with_statement | query | mutation)* ~ EOI }

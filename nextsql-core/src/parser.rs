@@ -49,6 +49,9 @@ pub fn parse_module(input: &str) -> Result<Module, Error<Rule>> {
                         Rule::valtype_decl => {
                             toplevels.push(TopLevel::ValType(parse_valtype_decl(inner_pair)));
                         }
+                        Rule::input_decl => {
+                            toplevels.push(TopLevel::Input(parse_input_decl(inner_pair)));
+                        }
                         Rule::EOI => break,
                         _ => {
                             // Skip unexpected rules instead of panicking
@@ -250,6 +253,21 @@ fn parse_valtype_decl(pair: pest::iterators::Pair<Rule>) -> ValType {
     });
 
     ValType { name, base_type, source_column }
+}
+
+fn parse_input_decl(pair: pest::iterators::Pair<Rule>) -> InputType {
+    let mut inner = pair.into_inner();
+    let name = inner.next().unwrap().as_str().to_string();
+    let mut fields = Vec::new();
+    for field_pair in inner {
+        if field_pair.as_rule() == Rule::input_field {
+            let mut field_inner = field_pair.into_inner();
+            let field_name = field_inner.next().unwrap().as_str().to_string();
+            let field_type = parse_type(field_inner.next().unwrap().into_inner());
+            fields.push(InputField { name: field_name, typ: field_type });
+        }
+    }
+    InputType { name, fields }
 }
 
 fn parse_type(pairs: pest::iterators::Pairs<Rule>) -> Type {
@@ -2117,7 +2135,7 @@ aggregation comment_count for posts returning i32 {
                             TopLevel::Mutation(_) => mutations += 1,
                             TopLevel::With(_) => with_statements += 1,
                             TopLevel::Relation(_) => relations += 1,
-                            TopLevel::ValType(_) => {}
+                            TopLevel::ValType(_) | TopLevel::Input(_) => {}
                         }
                     }
 

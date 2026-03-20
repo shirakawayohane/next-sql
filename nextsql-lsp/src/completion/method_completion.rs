@@ -128,6 +128,7 @@ pub trait MethodCompletionProvider {
             }
             CompletionContext::Unknown => vec![],
             CompletionContext::TableField(_) => vec![], // フィールド補完は別メソッドで処理
+            CompletionContext::InputField(_) => vec![], // Input field補完は別メソッドで処理
             CompletionContext::TableJoinMethod(_) => {
                 vec![
                     self.create_method_completion(

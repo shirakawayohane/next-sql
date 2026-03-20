@@ -6,10 +6,38 @@ use crate::type_mapping::nextsql_type_to_rust;
 
 use super::RowField;
 use super::NamingConfig;
+use super::InputTypeRegistry;
 use super::valtype::ValTypeRegistry;
 use super::naming::{to_snake_case, to_pascal_case, table_name_to_model_name};
 use super::type_resolve::*;
 use super::emit::*;
+
+/// How parameters are passed to generated functions.
+enum ParamStyle {
+    /// No parameters
+    None,
+    /// All args are plain types — use individual function parameters
+    Individual,
+    /// Has Insertable<T> — keep existing struct generation
+    Insertable,
+    /// Has ChangeSet<T> — keep existing struct generation
+    ChangeSet,
+}
+
+/// Determine the parameter style for a query/mutation.
+fn determine_param_style(args: &[Argument]) -> ParamStyle {
+    if args.is_empty() {
+        return ParamStyle::None;
+    }
+    for arg in args {
+        match &arg.typ {
+            Type::Utility(UtilityType::Insertable(_)) => return ParamStyle::Insertable,
+            Type::Utility(UtilityType::ChangeSet(_)) => return ParamStyle::ChangeSet,
+            _ => {}
+        }
+    }
+    ParamStyle::Individual
+}
 
 /// Walk query clauses to find the select expressions and aggregate expressions.
 pub(super) fn find_select_and_aggregate_clauses(
@@ -27,11 +55,10 @@ pub(super) fn find_select_and_aggregate_clauses(
     (select, aggregate)
 }
 
-pub(super) fn generate_query(out: &mut String, query: &Query, schema: &DatabaseSchema, model_tables: &mut HashSet<String>, registry: &ValTypeRegistry, rel_registry: &sql_gen::RelationRegistry, errors: &mut Vec<String>) {
+pub(super) fn generate_query(out: &mut String, query: &Query, schema: &DatabaseSchema, model_tables: &mut HashSet<String>, registry: &ValTypeRegistry, rel_registry: &sql_gen::RelationRegistry, errors: &mut Vec<String>, input_registry: &InputTypeRegistry) {
     let name = &query.decl.name;
     let fn_name = to_snake_case(name);
     let pascal = to_pascal_case(name);
-    let params_struct = format!("{}Params", pascal);
     let row_struct = format!("{}Row", pascal);
 
     // We only handle the first statement in the body for code generation.
@@ -43,13 +70,7 @@ pub(super) fn generate_query(out: &mut String, query: &Query, schema: &DatabaseS
     // Generate SQL
     let gen = sql_gen::generate_select_sql_with_relations(stmt, rel_registry);
 
-    // Params struct (skip if no arguments)
-    let has_params = !query.decl.arguments.is_empty();
-    if has_params {
-        // For dynamic queries, use all_params so the struct includes when-clause params too
-        let param_order = if gen.is_dynamic { &gen.all_params } else { &gen.params };
-        emit_params_struct(out, &params_struct, &query.decl.arguments, param_order, registry);
-    }
+    let param_style = determine_param_style(&query.decl.arguments);
 
     // Determine row fields
     let (select_clause, aggregate_clause) = find_select_and_aggregate_clauses(&stmt.clauses);
@@ -133,23 +154,30 @@ pub(super) fn generate_query(out: &mut String, query: &Query, schema: &DatabaseS
     };
 
     // Executor function
-    if gen.is_dynamic && !gen.when_clauses.is_empty() {
-        emit_dynamic_query_fn(out, &fn_name, &params_struct, &effective_row_struct, &gen, &query.decl.arguments, registry);
-    } else if has_params {
-        let conversion = generate_params_with_conversions(&gen.params, &query.decl.arguments, registry);
-        let conv_ref = if conversion.0.is_empty() { None } else { Some(&conversion) };
-        emit_query_fn(out, &fn_name, &params_struct, &effective_row_struct, &gen.sql, conv_ref);
-    } else {
-        emit_query_fn_no_params(out, &fn_name, &effective_row_struct, &gen.sql);
+    match param_style {
+        ParamStyle::None => {
+            emit_query_fn_no_params(out, &fn_name, &effective_row_struct, &gen.sql);
+        }
+        ParamStyle::Individual => {
+            if gen.is_dynamic && !gen.when_clauses.is_empty() {
+                emit_dynamic_query_fn_individual_params(out, &fn_name, &query.decl.arguments, &effective_row_struct, &gen, registry, input_registry);
+            } else {
+                emit_query_fn_individual_params(out, &fn_name, &query.decl.arguments, &gen.params, &effective_row_struct, &gen.sql, registry, input_registry);
+            }
+        }
+        _ => {
+            // Insertable/ChangeSet shouldn't appear in queries, but handle gracefully
+            emit_query_fn_no_params(out, &fn_name, &effective_row_struct, &gen.sql);
+        }
     }
 }
 
-pub(super) fn generate_mutation(out: &mut String, mutation: &Mutation, schema: &DatabaseSchema, model_tables: &mut HashSet<String>, registry: &ValTypeRegistry, rel_registry: &sql_gen::RelationRegistry, naming: &NamingConfig) {
+pub(super) fn generate_mutation(out: &mut String, mutation: &Mutation, schema: &DatabaseSchema, model_tables: &mut HashSet<String>, registry: &ValTypeRegistry, rel_registry: &sql_gen::RelationRegistry, naming: &NamingConfig, input_registry: &InputTypeRegistry) {
     let name = &mutation.decl.name;
     let fn_name = to_snake_case(name);
     let pascal = to_pascal_case(name);
-    let params_struct = format!("{}Params", pascal);
     let row_struct = format!("{}Row", pascal);
+    let param_style = determine_param_style(&mutation.decl.arguments);
 
     for item in &mutation.body.items {
         match item {
@@ -167,21 +195,6 @@ pub(super) fn generate_mutation(out: &mut String, mutation: &Mutation, schema: &
                         }
 
                         let gen = sql_gen::generate_insert_sql_with_relations(insert, rel_registry);
-                        let has_params = !mutation.decl.arguments.is_empty();
-                        if has_params {
-                            emit_params_struct(
-                                out,
-                                &params_struct,
-                                &mutation.decl.arguments,
-                                &gen.params,
-                                registry,
-                            );
-                        }
-
-                        let conversion = if has_params {
-                            let c = generate_params_with_conversions(&gen.params, &mutation.decl.arguments, registry);
-                            if c.0.is_empty() { None } else { Some(c) }
-                        } else { None };
 
                         if let Some(ref returning) = insert.returning {
                             let use_model = is_simple_wildcard_returning(returning, &insert.into.name);
@@ -194,22 +207,25 @@ pub(super) fn generate_mutation(out: &mut String, mutation: &Mutation, schema: &
                                 emit_row_struct(out, &row_struct, &fields);
                                 row_struct.clone()
                             };
-                            if has_params {
-                                emit_mutation_query_fn(
-                                    out,
-                                    &fn_name,
-                                    &params_struct,
-                                    &effective_row,
-                                    &gen.sql,
-                                    conversion.as_ref(),
-                                );
-                            } else {
-                                emit_query_fn_no_params(out, &fn_name, &effective_row, &gen.sql);
+                            match param_style {
+                                ParamStyle::None => {
+                                    emit_query_fn_no_params(out, &fn_name, &effective_row, &gen.sql);
+                                }
+                                ParamStyle::Individual => {
+                                    emit_query_fn_individual_params(out, &fn_name, &mutation.decl.arguments, &gen.params, &effective_row, &gen.sql, registry, input_registry);
+                                }
+                                _ => unreachable!(),
                             }
-                        } else if has_params {
-                            emit_execute_fn(out, &fn_name, &params_struct, &gen.sql, conversion.as_ref());
                         } else {
-                            emit_execute_fn_no_params(out, &fn_name, &gen.sql);
+                            match param_style {
+                                ParamStyle::None => {
+                                    emit_execute_fn_no_params(out, &fn_name, &gen.sql);
+                                }
+                                ParamStyle::Individual => {
+                                    emit_execute_fn_individual_params(out, &fn_name, &mutation.decl.arguments, &gen.params, &gen.sql, registry, input_registry);
+                                }
+                                _ => unreachable!(),
+                            }
                         }
                     }
                     MutationStatement::Update(update) => {
@@ -234,21 +250,6 @@ pub(super) fn generate_mutation(out: &mut String, mutation: &Mutation, schema: &
                             );
                         } else {
                             let gen = sql_gen::generate_update_sql_with_relations(update, rel_registry);
-                            let has_params = !mutation.decl.arguments.is_empty();
-                            if has_params {
-                                emit_params_struct(
-                                    out,
-                                    &params_struct,
-                                    &mutation.decl.arguments,
-                                    &gen.params,
-                                    registry,
-                                );
-                            }
-
-                            let conversion = if has_params {
-                                let c = generate_params_with_conversions(&gen.params, &mutation.decl.arguments, registry);
-                                if c.0.is_empty() { None } else { Some(c) }
-                            } else { None };
 
                             if let Some(ref returning) = update.returning {
                                 let use_model = is_simple_wildcard_returning(returning, &update.target.name);
@@ -265,42 +266,30 @@ pub(super) fn generate_mutation(out: &mut String, mutation: &Mutation, schema: &
                                     emit_row_struct(out, &row_struct, &fields);
                                     row_struct.clone()
                                 };
-                                if has_params {
-                                    emit_mutation_query_fn(
-                                        out,
-                                        &fn_name,
-                                        &params_struct,
-                                        &effective_row,
-                                        &gen.sql,
-                                        conversion.as_ref(),
-                                    );
-                                } else {
-                                    emit_query_fn_no_params(out, &fn_name, &effective_row, &gen.sql);
+                                match param_style {
+                                    ParamStyle::None => {
+                                        emit_query_fn_no_params(out, &fn_name, &effective_row, &gen.sql);
+                                    }
+                                    ParamStyle::Individual => {
+                                        emit_query_fn_individual_params(out, &fn_name, &mutation.decl.arguments, &gen.params, &effective_row, &gen.sql, registry, input_registry);
+                                    }
+                                    _ => unreachable!(),
                                 }
-                            } else if has_params {
-                                emit_execute_fn(out, &fn_name, &params_struct, &gen.sql, conversion.as_ref());
                             } else {
-                                emit_execute_fn_no_params(out, &fn_name, &gen.sql);
+                                match param_style {
+                                    ParamStyle::None => {
+                                        emit_execute_fn_no_params(out, &fn_name, &gen.sql);
+                                    }
+                                    ParamStyle::Individual => {
+                                        emit_execute_fn_individual_params(out, &fn_name, &mutation.decl.arguments, &gen.params, &gen.sql, registry, input_registry);
+                                    }
+                                    _ => unreachable!(),
+                                }
                             }
                         }
                     }
                     MutationStatement::Delete(delete) => {
                         let gen = sql_gen::generate_delete_sql_with_relations(delete, rel_registry);
-                        let has_params = !mutation.decl.arguments.is_empty();
-                        if has_params {
-                            emit_params_struct(
-                                out,
-                                &params_struct,
-                                &mutation.decl.arguments,
-                                &gen.params,
-                                registry,
-                            );
-                        }
-
-                        let conversion = if has_params {
-                            let c = generate_params_with_conversions(&gen.params, &mutation.decl.arguments, registry);
-                            if c.0.is_empty() { None } else { Some(c) }
-                        } else { None };
 
                         if let Some(ref returning) = delete.returning {
                             let use_model = is_simple_wildcard_returning(returning, &delete.target.name);
@@ -317,22 +306,25 @@ pub(super) fn generate_mutation(out: &mut String, mutation: &Mutation, schema: &
                                 emit_row_struct(out, &row_struct, &fields);
                                 row_struct.clone()
                             };
-                            if has_params {
-                                emit_mutation_query_fn(
-                                    out,
-                                    &fn_name,
-                                    &params_struct,
-                                    &effective_row,
-                                    &gen.sql,
-                                    conversion.as_ref(),
-                                );
-                            } else {
-                                emit_query_fn_no_params(out, &fn_name, &effective_row, &gen.sql);
+                            match param_style {
+                                ParamStyle::None => {
+                                    emit_query_fn_no_params(out, &fn_name, &effective_row, &gen.sql);
+                                }
+                                ParamStyle::Individual => {
+                                    emit_query_fn_individual_params(out, &fn_name, &mutation.decl.arguments, &gen.params, &effective_row, &gen.sql, registry, input_registry);
+                                }
+                                _ => unreachable!(),
                             }
-                        } else if has_params {
-                            emit_execute_fn(out, &fn_name, &params_struct, &gen.sql, conversion.as_ref());
                         } else {
-                            emit_execute_fn_no_params(out, &fn_name, &gen.sql);
+                            match param_style {
+                                ParamStyle::None => {
+                                    emit_execute_fn_no_params(out, &fn_name, &gen.sql);
+                                }
+                                ParamStyle::Individual => {
+                                    emit_execute_fn_individual_params(out, &fn_name, &mutation.decl.arguments, &gen.params, &gen.sql, registry, input_registry);
+                                }
+                                _ => unreachable!(),
+                            }
                         }
                     }
                 }

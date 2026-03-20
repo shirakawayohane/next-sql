@@ -18,20 +18,24 @@ fn load_schema() -> DatabaseSchema {
 fn run_codegen(test_name: &str) -> (nextsql_codegen::CodegenResult, PathBuf) {
     let schema = load_schema();
     let source_dir = project_root().join("examples/sample-ec-project");
-    let output_dir = std::env::temp_dir().join(format!("nextsql-test-ec-{}", test_name));
-    let _ = std::fs::remove_dir_all(&output_dir);
+    let temp_dir = std::env::temp_dir().join(format!("nextsql-test-ec-{}", test_name));
+    let _ = std::fs::remove_dir_all(&temp_dir);
+    let src_dir = temp_dir.join("src");
+    std::fs::create_dir_all(&src_dir).unwrap();
 
     let config = CodegenConfig {
         source_dir,
-        output_dir: output_dir.clone(),
+        output_dir: src_dir.clone(),
         backend: "rust".to_string(),
         insert_params_pattern: None,
         update_params_pattern: None,
         package_name: None,
+        type_files: vec!["types.nsql".to_string()],
     };
 
     let result = generate(&config, &schema);
-    (result, output_dir)
+    let generated_dir = src_dir.join("generated");
+    (result, generated_dir)
 }
 
 #[test]
@@ -353,14 +357,21 @@ fn test_mod_rs_has_all_modules() {
     let (result, output_dir) = run_codegen("mod");
     assert!(result.errors.is_empty(), "Errors: {:?}", result.errors);
 
-    let content = std::fs::read_to_string(output_dir.join("lib.rs")).unwrap();
+    // generated/mod.rs should declare all modules
+    let mod_content = std::fs::read_to_string(output_dir.join("mod.rs")).unwrap();
+    assert!(mod_content.contains("pub mod types;"), "Should declare types (shared valtypes)");
+    assert!(mod_content.contains("pub mod analytics;"), "Should declare analytics");
+    assert!(mod_content.contains("pub mod customers;"), "Should declare customers");
+    assert!(mod_content.contains("pub mod orders;"), "Should declare orders");
+    assert!(mod_content.contains("pub mod products;"), "Should declare products");
+    assert!(mod_content.contains("pub mod reviews;"), "Should declare reviews");
 
-    assert!(content.contains("pub mod types;"), "Should export types (shared valtypes)");
-    assert!(content.contains("pub mod analytics;"), "Should export analytics");
-    assert!(content.contains("pub mod customers;"), "Should export customers");
-    assert!(content.contains("pub mod orders;"), "Should export orders");
-    assert!(content.contains("pub mod products;"), "Should export products");
-    assert!(content.contains("pub mod reviews;"), "Should export reviews");
+    // lib.rs should re-export from generated module
+    let lib_content = std::fs::read_to_string(output_dir.parent().unwrap().join("lib.rs")).unwrap();
+    assert!(lib_content.contains("mod generated;"), "Should declare generated module");
+    assert!(lib_content.contains("pub use generated::types;"), "Should re-export types");
+    assert!(lib_content.contains("pub use generated::analytics;"), "Should re-export analytics");
+    assert!(lib_content.contains("pub use generated::customers;"), "Should re-export customers");
 }
 
 #[test]

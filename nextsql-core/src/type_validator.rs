@@ -1,4 +1,4 @@
-use crate::ast::{Module, MutationBody, MutationBodyItem, MutationStatement, Expression, Type, BuiltInType, Literal, CallExpression, AtomicExpression, Column, PropertyAccess, FromExpr, Span, RelationReturnType, UtilityType, Target};
+use crate::ast::{Module, MutationBody, MutationBodyItem, MutationStatement, Expression, Type, BuiltInType, Literal, CallExpression, AtomicExpression, Column, PropertyAccess, FromExpr, Span, RelationReturnType, UtilityType, Target, InputType};
 use crate::schema::DatabaseSchema;
 use std::collections::{HashMap, HashSet};
 
@@ -23,6 +23,7 @@ pub struct TypeValidator<'a> {
     errors: Vec<ValidationError>,
     relations: HashMap<String, RelationInfo>,  // relation name -> relation info
     valtypes: HashMap<String, BuiltInType>,  // valtype name -> base type
+    input_types: HashMap<String, InputType>,  // input type name -> input type definition
 }
 
 impl<'a> TypeValidator<'a> {
@@ -40,6 +41,7 @@ impl<'a> TypeValidator<'a> {
             errors: Vec::new(),
             relations: HashMap::new(),
             valtypes: HashMap::new(),
+            input_types: HashMap::new(),
         }
     }
 
@@ -59,9 +61,16 @@ impl<'a> TypeValidator<'a> {
         }
         
         // Collect valtype definitions (keep externally registered ones)
+        // Collect input type definitions
         for toplevel in &module.toplevels {
-            if let crate::ast::TopLevel::ValType(vt) = toplevel {
-                self.valtypes.insert(vt.name.clone(), vt.base_type.clone());
+            match toplevel {
+                crate::ast::TopLevel::ValType(vt) => {
+                    self.valtypes.insert(vt.name.clone(), vt.base_type.clone());
+                }
+                crate::ast::TopLevel::Input(input) => {
+                    self.input_types.insert(input.name.clone(), input.clone());
+                }
+                _ => {}
             }
         }
 
@@ -226,8 +235,26 @@ impl<'a> TypeValidator<'a> {
                         }
                     }
                 }
+                Expression::Atomic(AtomicExpression::Variable(var)) => {
+                    // Check if the variable's type is a known input type
+                    if let Some(var_type) = self.variables.get(&var.name) {
+                        if let Type::UserDefined(type_name) = var_type {
+                            if let Some(input_type) = self.input_types.get(type_name).cloned() {
+                                if !input_type.fields.iter().any(|f| f.name == property_access.property) {
+                                    self.errors.push(ValidationError {
+                                        message: format!(
+                                            "Field '{}' not found in input type '{}'",
+                                            property_access.property, type_name
+                                        ),
+                                        span: var.span.clone(),
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
                 _ => {
-                    // Other types of property access (e.g., on variables)
+                    // Other types of property access
                 }
             }
         }

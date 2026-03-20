@@ -25,6 +25,17 @@ pub struct CodegenConfig {
 #[serde(deny_unknown_fields)]
 pub struct FilesConfig {
     pub includes: Vec<String>,
+    /// Glob patterns for type definition files (valtypes, relations, input types).
+    /// These files are prepended to every other .nsql file before parsing.
+    /// Default: ["queries/types.nsql"]
+    #[serde(default = "FilesConfig::default_type_files")]
+    pub type_files: Vec<String>,
+}
+
+impl FilesConfig {
+    fn default_type_files() -> Vec<String> {
+        vec!["queries/types.nsql".to_string()]
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -45,6 +56,7 @@ impl Default for NextSqlConfig {
             database_url: None,
             files: FilesConfig {
                 includes: vec!["**".to_string()],
+                type_files: FilesConfig::default_type_files(),
             },
             target: TargetConfig {
                 target_language: "rust".to_string(),

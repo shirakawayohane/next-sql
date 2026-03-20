@@ -150,6 +150,56 @@ Use `.doNothing()` to ignore conflicts:
 
 All mutation types support `.returning(table.*, col1, col2)`.
 
+## Parameters
+
+### Individual Parameters (Default)
+
+By default, each parameter declared in a query or mutation signature becomes an individual function argument in the generated code:
+
+```nsql
+query findUserById($id: uuid) {
+  from(users).where(users.id == $id).select(users.*)
+}
+```
+
+This generates a function like `fn find_user_by_id(client, id: &uuid::Uuid)` with `id` as a direct parameter.
+
+### Input Types
+
+Use `input` to group multiple parameters into a named struct:
+
+```nsql
+input CreateUserInput {
+  name: string,
+  email: string
+}
+```
+
+Reference an input type as a parameter type:
+
+```nsql
+mutation createUser($input: CreateUserInput) {
+  insert(users)
+  .value({
+    name: $input.name,
+    email: $input.email,
+  })
+  .returning(users.*)
+}
+```
+
+Access input fields using dot notation: `$input.name`, `$input.email`.
+
+You can mix individual parameters with input parameters:
+
+```nsql
+query findByOwner($orgId: uuid, $filter: UserFilter) {
+  from(users)
+  .where(users.org_id == $orgId && users.status == $filter.status)
+  .select(users.*)
+}
+```
+
 ## Type System
 
 ### Built-in Types
@@ -197,7 +247,7 @@ query findUser($id: UserId) {
 
 ### The `types.nsql` Convention
 
-Projects should place shared type definitions (valtypes, relations, aggregations) in a `types.nsql` file to centralize reusable definitions across query/mutation files.
+Projects should place shared type definitions (valtypes, input types, relations, aggregations) in a `types.nsql` file to centralize reusable definitions across query/mutation files.
 
 ## Expressions
 

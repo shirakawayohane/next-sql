@@ -7,6 +7,7 @@ pub enum CompletionContext {
     TableJoinMethod(String), // テーブル名の後のjoinメソッド補完
     ExpressionMethod,  // Expression-level methods (isNull, like, between, etc.)
     OnConflictAction,  // After .onConflict(...), offer doUpdate/doNothing
+    InputField(String), // Input type name - for $variable. where variable is an input type
     Unknown,
 }
 
@@ -23,6 +24,12 @@ pub enum FunctionContext {
 pub fn analyze_context_before_dot(full_text: &str, text_before_dot: &str) -> CompletionContext {
     let trimmed = text_before_dot.trim_end_matches('.');
     eprintln!("LSP: analyze_context_before_dot - trimmed: '{}'", trimmed);
+
+    // Check if we're after a $variable. pattern where the variable is an input type
+    if let Some(input_type_name) = check_input_field_context(full_text, trimmed) {
+        eprintln!("LSP: Detected input field context for type: {}", input_type_name);
+        return CompletionContext::InputField(input_type_name);
+    }
 
     // Check if we're in a context where table join methods should be offered
     if is_in_join_method_context(trimmed) {
@@ -315,6 +322,45 @@ pub fn is_after_variable_colon(before_cursor: &str) -> bool {
     false
 }
 
+
+/// Check if text ends with `$variable` and that variable's declared type is an input type.
+/// Returns the input type name if so.
+fn check_input_field_context(full_text: &str, text: &str) -> Option<String> {
+    use std::sync::LazyLock;
+
+    // Extract the $variable at the end of text
+    static VAR_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+        regex::Regex::new(r"\$(\w+)$").unwrap()
+    });
+    let var_name = VAR_RE.captures(text).map(|c| c[1].to_string())?;
+    eprintln!("LSP: check_input_field_context - var_name: '{}'", var_name);
+
+    // Find the variable's type declaration in query/mutation arguments: $varName: TypeName
+    static ARG_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+        regex::Regex::new(r"\$(\w+)\s*:\s*(\w+)").unwrap()
+    });
+    let mut var_type = None;
+    for cap in ARG_RE.captures_iter(full_text) {
+        if &cap[1] == var_name {
+            var_type = Some(cap[2].to_string());
+            break;
+        }
+    }
+    let var_type = var_type?;
+    eprintln!("LSP: check_input_field_context - var_type: '{}'", var_type);
+
+    // Check if that type is an input type declared in the file
+    static INPUT_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+        regex::Regex::new(r"input\s+(\w+)\s*\{").unwrap()
+    });
+    for cap in INPUT_RE.captures_iter(full_text) {
+        if &cap[1] == var_type {
+            return Some(var_type);
+        }
+    }
+
+    None
+}
 
 /// Check if we're inside an expression context (where, having, orderBy)
 /// and the dot is after a column reference (e.g., "users.name.")

@@ -50,6 +50,129 @@ impl<'a> CompletionProvider<'a> {
         }
     }
 
+    /// Get field completions for an input type by parsing the file text
+    fn get_input_field_completions(&self, input_type_name: &str) -> Vec<CompletionItem> {
+        use std::sync::LazyLock;
+        let mut completions = Vec::new();
+
+        // Parse input type fields using regex: input TypeName { field1: type1, field2: type2 }
+        static INPUT_BODY_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+            regex::Regex::new(r"input\s+(\w+)\s*\{([^}]*)\}").unwrap()
+        });
+        static FIELD_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+            regex::Regex::new(r"(\w+)\s*:\s*([^\s,}]+)").unwrap()
+        });
+
+        for cap in INPUT_BODY_RE.captures_iter(self.text) {
+            if &cap[1] == input_type_name {
+                let body = &cap[2];
+                for field_cap in FIELD_RE.captures_iter(body) {
+                    let field_name = &field_cap[1];
+                    let field_type = &field_cap[2];
+                    completions.push(CompletionItem {
+                        label: field_name.to_string(),
+                        kind: Some(CompletionItemKind::FIELD),
+                        detail: Some(format!("{}: {}", field_name, field_type)),
+                        documentation: Some(Documentation::String(format!(
+                            "Field '{}' of input type '{}'",
+                            field_name, input_type_name
+                        ))),
+                        insert_text: Some(field_name.to_string()),
+                        ..Default::default()
+                    });
+                }
+                break;
+            }
+        }
+
+        completions
+    }
+
+    /// Check if cursor is after '$' for variable name completion
+    /// e.g., "$" or "$na" (typing variable reference, not declaration)
+    fn is_variable_completion_context(before_cursor: &str) -> bool {
+        // Match "$" at end, or "$" followed by partial identifier
+        let trimmed = before_cursor.trim_end();
+        if trimmed.ends_with('$') {
+            return true;
+        }
+        // Check for $partialName pattern
+        if let Some(dollar_pos) = trimmed.rfind('$') {
+            let after_dollar = &trimmed[dollar_pos + 1..];
+            if !after_dollar.is_empty()
+                && after_dollar.chars().all(|c| c.is_alphanumeric() || c == '_')
+            {
+                // Make sure this is not a declaration context ($var: type)
+                // by checking that there's no ':' after the variable name on the same segment
+                let rest_of_line = &before_cursor[dollar_pos + 1 + after_dollar.len()..];
+                if !rest_of_line.trim_start().starts_with(':') {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    /// Extract variables from the enclosing query/mutation's argument list
+    fn get_variable_completions(full_text: &str, position: Position) -> Vec<CompletionItem> {
+        use std::sync::LazyLock;
+
+        // Find the enclosing query/mutation declaration by scanning backwards from cursor
+        let lines: Vec<&str> = full_text.lines().collect();
+        let cursor_line = position.line as usize;
+
+        // Find the nearest query/mutation declaration before the cursor
+        static DECL_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+            regex::Regex::new(r"(?:query|mutation)\s+\w+\s*\(([^)]*)\)").unwrap()
+        });
+
+        let mut best_match: Option<regex::Captures> = None;
+        let mut best_line = 0usize;
+
+        // Scan from beginning to cursor to find the last (closest) declaration
+        let text_up_to_cursor: String = lines[..=cursor_line.min(lines.len() - 1)].join("\n");
+        for cap in DECL_RE.captures_iter(&text_up_to_cursor) {
+            let match_start = cap.get(0).unwrap().start();
+            // Count line number of this match
+            let line_num = text_up_to_cursor[..match_start].matches('\n').count();
+            if line_num <= cursor_line {
+                best_match = Some(cap);
+                best_line = line_num;
+            }
+        }
+
+        let mut completions = Vec::new();
+        let _ = best_line; // used for finding the closest match
+
+        if let Some(cap) = best_match {
+            let args_str = &cap[1];
+            // Parse arguments: $name: Type, $name2: Type2
+            static ARG_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+                regex::Regex::new(r"\$(\w+)\s*:\s*([^\s,)]+(?:<[^>]+>)?\??)").unwrap()
+            });
+
+            for arg_cap in ARG_RE.captures_iter(args_str) {
+                let var_name = &arg_cap[1];
+                let var_type = &arg_cap[2];
+                completions.push(CompletionItem {
+                    label: format!("${}", var_name),
+                    kind: Some(CompletionItemKind::VARIABLE),
+                    detail: Some(format!("{}: {}", var_name, var_type)),
+                    documentation: Some(Documentation::String(format!(
+                        "Parameter '{}' of type '{}'",
+                        var_name, var_type
+                    ))),
+                    // filter_text allows matching when user types "$na" -> matches "$name"
+                    filter_text: Some(format!("${}", var_name)),
+                    insert_text: Some(var_name.to_string()),
+                    ..Default::default()
+                });
+            }
+        }
+
+        completions
+    }
+
     pub async fn get_completions(&self, position: Position) -> Vec<CompletionItem> {
         let mut completions = Vec::new();
 
@@ -87,6 +210,13 @@ impl<'a> CompletionProvider<'a> {
         eprintln!("LSP: Text before cursor: '{}'", before_cursor);
         eprintln!("LSP: Text after cursor: '{}'", after_cursor);
 
+        // "$" の後でのvariable名補完
+        if Self::is_variable_completion_context(before_cursor) {
+            eprintln!("LSP: Detected $variable completion context");
+            completions.extend(Self::get_variable_completions(self.text, position));
+            return completions;
+        }
+
         // "Insertable<" の後でのモデル名補完
         if is_after_insertable_angle_bracket(before_cursor) {
             eprintln!("LSP: Detected Insertable< context");
@@ -106,6 +236,9 @@ impl<'a> CompletionProvider<'a> {
                     // For field completions, table_name has already been resolved from alias
                     // We trust the context analyzer to only provide valid table references
                     completions.extend(self.get_field_completions(table_name).await);
+                }
+                CompletionContext::InputField(input_type_name) => {
+                    completions.extend(self.get_input_field_completions(input_type_name));
                 }
                 CompletionContext::TableJoinMethod(_) => {
                     completions.extend(self.get_method_completions(context));

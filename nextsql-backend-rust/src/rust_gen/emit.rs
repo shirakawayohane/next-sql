@@ -1,9 +1,10 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use nextsql_core::ast::*;
 use crate::sql_gen::{GeneratedSql, WhenClauseType};
 use crate::type_mapping::nextsql_type_to_rust;
 
 use super::RowField;
+use super::InputTypeRegistry;
 use super::valtype::ValTypeRegistry;
 use super::naming::to_snake_case;
 
@@ -21,41 +22,6 @@ fn resolve_param_rust_type(typ: &Type, registry: &ValTypeRegistry) -> String {
         }
         other => nextsql_type_to_rust(other),
     }
-}
-
-/// Emit a Params struct + its `to_params` impl.
-pub(super) fn emit_params_struct(
-    out: &mut String,
-    struct_name: &str,
-    args: &[Argument],
-    param_order: &[String],
-    registry: &ValTypeRegistry,
-) {
-    // Struct definition
-    out.push_str(&format!("pub struct {} {{\n", struct_name));
-    for arg in args {
-        let rust_type = resolve_param_rust_type(&arg.typ, registry);
-        out.push_str(&format!(
-            "    pub {}: {},\n",
-            to_snake_case(&arg.name),
-            rust_type
-        ));
-    }
-    out.push_str("}\n\n");
-
-    // to_params impl – order must match SQL $1, $2, ...
-    out.push_str(&format!("impl {} {{\n", struct_name));
-    out.push_str("    pub fn to_params(&self) -> Vec<&dyn super::runtime::ToSqlParam> {\n");
-    out.push_str("        vec![");
-    for (i, pname) in param_order.iter().enumerate() {
-        if i > 0 {
-            out.push_str(", ");
-        }
-        out.push_str(&format!("&self.{}", to_snake_case(pname)));
-    }
-    out.push_str("]\n");
-    out.push_str("    }\n");
-    out.push_str("}\n\n");
 }
 
 /// Kind of valtype unwrapping needed for a parameter.
@@ -123,63 +89,6 @@ pub(super) fn find_valtype_params(args: &[Argument], param_order: &[String], reg
     result
 }
 
-/// Generate the parameter list expression, handling ValType conversions.
-/// When there are ValType params, generates local variables for the conversions
-/// and returns code that must be placed before the query call + the param refs expression.
-pub(super) fn generate_params_with_conversions(
-    param_order: &[String],
-    args: &[Argument],
-    registry: &ValTypeRegistry,
-) -> (String, String) {
-    let vt_params = find_valtype_params(args, param_order, registry);
-    if vt_params.is_empty() {
-        return (String::new(), "params.to_params()".to_string());
-    }
-
-    // Generate local conversion variables
-    let mut prelude = String::new();
-    for vtp in &vt_params {
-        match vtp.kind {
-            ValtypeParamKind::Vec => {
-                prelude.push_str(&format!(
-                    "    let __{}_inner: Vec<{}> = params.{}.iter().map(|v| v.0.clone()).collect();\n",
-                    vtp.field_name, vtp.inner_rust_type, vtp.field_name
-                ));
-            }
-            ValtypeParamKind::Optional => {
-                prelude.push_str(&format!(
-                    "    let __{}_inner: Option<{}> = params.{}.as_ref().map(|v| v.0.clone());\n",
-                    vtp.field_name, vtp.inner_rust_type, vtp.field_name
-                ));
-            }
-            ValtypeParamKind::Plain => {
-                // No prelude needed, we reference .0 inline
-            }
-        }
-    }
-
-    // Build the param list inline
-    let mut refs = Vec::new();
-    for pname in param_order {
-        let field = to_snake_case(pname);
-        if let Some(vtp) = vt_params.iter().find(|v| v.field_name == field) {
-            match vtp.kind {
-                ValtypeParamKind::Vec | ValtypeParamKind::Optional => {
-                    refs.push(format!("&__{}_inner as &dyn super::runtime::ToSqlParam", field));
-                }
-                ValtypeParamKind::Plain => {
-                    refs.push(format!("&params.{}.0 as &dyn super::runtime::ToSqlParam", field));
-                }
-            }
-        } else {
-            refs.push(format!("&params.{} as &dyn super::runtime::ToSqlParam", field));
-        }
-    }
-
-    let params_expr = format!("vec![{}]", refs.join(", "));
-    (prelude, params_expr)
-}
-
 /// Emit a Row struct + its `from_row` impl.
 pub(super) fn emit_row_struct(out: &mut String, struct_name: &str, fields: &[RowField]) {
     out.push_str(&format!("pub struct {} {{\n", struct_name));
@@ -213,40 +122,6 @@ pub(super) fn emit_row_struct(out: &mut String, struct_name: &str, fields: &[Row
     out.push_str("}\n\n");
 }
 
-/// Emit an async executor function that calls `client.query()` and returns `Vec<Row>`.
-/// If `param_conversion` is Some, it contains (prelude_code, params_expression) for
-/// handling Vec<ValType> conversions. Otherwise uses `params.to_params()`.
-pub(super) fn emit_query_fn(
-    out: &mut String,
-    fn_name: &str,
-    params_struct: &str,
-    row_struct: &str,
-    sql: &str,
-    param_conversion: Option<&(String, String)>,
-) {
-    out.push_str(&format!(
-        "pub async fn {}(\n    client: &(impl super::runtime::Client + ?Sized),\n    params: &{},\n) -> Result<Vec<{}>, Box<dyn std::error::Error + Send + Sync>> {{\n",
-        fn_name, params_struct, row_struct
-    ));
-    if let Some((prelude, params_expr)) = param_conversion {
-        out.push_str(prelude);
-        out.push_str(&format!(
-            "    let rows = client.query(\n        \"{}\",\n        &{},\n    ).await?;\n",
-            sql.replace('\"', "\\\""), params_expr
-        ));
-    } else {
-        out.push_str(&format!(
-            "    let rows = client.query(\n        \"{}\",\n        &params.to_params(),\n    ).await?;\n",
-            sql.replace('\"', "\\\"")
-        ));
-    }
-    out.push_str(&format!(
-        "    Ok(rows.iter().map(|row| {}::from_row(row)).collect())\n",
-        row_struct
-    ));
-    out.push_str("}\n\n");
-}
-
 /// Emit an async executor function that calls `client.query()` without params.
 pub(super) fn emit_query_fn_no_params(
     out: &mut String,
@@ -269,34 +144,6 @@ pub(super) fn emit_query_fn_no_params(
     out.push_str("}\n\n");
 }
 
-/// Emit an async executor function that calls `client.execute()` and returns `u64`.
-pub(super) fn emit_execute_fn(
-    out: &mut String,
-    fn_name: &str,
-    params_struct: &str,
-    sql: &str,
-    param_conversion: Option<&(String, String)>,
-) {
-    out.push_str(&format!(
-        "pub async fn {}(\n    client: &(impl super::runtime::Client + ?Sized),\n    params: &{},\n) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {{\n",
-        fn_name, params_struct
-    ));
-    if let Some((prelude, params_expr)) = param_conversion {
-        out.push_str(prelude);
-        out.push_str(&format!(
-            "    let count = client.execute(\n        \"{}\",\n        &{},\n    ).await?;\n",
-            sql.replace('\"', "\\\""), params_expr
-        ));
-    } else {
-        out.push_str(&format!(
-            "    let count = client.execute(\n        \"{}\",\n        &params.to_params(),\n    ).await?;\n",
-            sql.replace('\"', "\\\"")
-        ));
-    }
-    out.push_str("    Ok(count)\n");
-    out.push_str("}\n\n");
-}
-
 /// Emit an async executor function that calls `client.execute()` without params.
 pub(super) fn emit_execute_fn_no_params(
     out: &mut String,
@@ -315,23 +162,209 @@ pub(super) fn emit_execute_fn_no_params(
     out.push_str("}\n\n");
 }
 
-/// Emit an async query function with dynamic SQL building for when-clause queries.
-/// This generates runtime SQL construction where:
-/// - Static params always get indices $1..$M
-/// - Dynamic (when-clause) params get indices $M+1.. based on which clauses are active
-pub(super) fn emit_dynamic_query_fn(
-    out: &mut String,
-    fn_name: &str,
-    params_struct: &str,
-    row_struct: &str,
-    gen: &GeneratedSql,
+// ── Input struct emission ──────────────────────────────────────────────
+
+/// Emit a struct definition for an `input` type declaration.
+pub(super) fn emit_input_struct(out: &mut String, input: &InputType, registry: &ValTypeRegistry) {
+    out.push_str(&format!("pub struct {} {{\n", input.name));
+    for field in &input.fields {
+        let rust_type = resolve_param_rust_type(&field.typ, registry);
+        out.push_str(&format!("    pub {}: {},\n", to_snake_case(&field.name), rust_type));
+    }
+    out.push_str("}\n\n");
+}
+
+// ── Individual parameters emission ─────────────────────────────────────
+
+/// Determine if a parameter key refers to an input field (contains a dot).
+fn is_input_param(param_key: &str) -> bool {
+    param_key.contains('.')
+}
+
+/// Split a dotted param key like "input.id" into (var_name, field_name).
+fn split_input_param(param_key: &str) -> (&str, &str) {
+    let dot = param_key.find('.').unwrap();
+    (&param_key[..dot], &param_key[dot + 1..])
+}
+
+/// Generate a single parameter binding expression for use in the param array.
+/// For plain args: `&arg_name as &dyn super::runtime::ToSqlParam`
+/// For input field args: `&input_name.field_name as &dyn super::runtime::ToSqlParam`
+/// Handles ValType unwrapping inline.
+fn gen_param_binding(
+    param_key: &str,
     args: &[Argument],
     registry: &ValTypeRegistry,
+    input_registry: &InputTypeRegistry,
+) -> String {
+    if is_input_param(param_key) {
+        let (var_name, field_name) = split_input_param(param_key);
+        let var_snake = to_snake_case(var_name);
+        let field_snake = to_snake_case(field_name);
+        // Look up input type to check for ValType wrapping on the field
+        let needs_valtype_unwrap = args.iter()
+            .find(|a| a.name == var_name)
+            .and_then(|a| match &a.typ {
+                Type::UserDefined(name) => input_registry.get(name),
+                _ => None,
+            })
+            .and_then(|input_type| input_type.fields.iter().find(|f| f.name == field_name))
+            .map(|f| match &f.typ {
+                Type::UserDefined(name) => registry.is_valtype(name),
+                _ => false,
+            })
+            .unwrap_or(false);
+
+        if needs_valtype_unwrap {
+            format!("&{}.{}.0 as &dyn super::runtime::ToSqlParam", var_snake, field_snake)
+        } else {
+            format!("&{}.{} as &dyn super::runtime::ToSqlParam", var_snake, field_snake)
+        }
+    } else {
+        let arg = args.iter().find(|a| a.name == param_key);
+        let field = to_snake_case(param_key);
+        match arg.map(|a| &a.typ) {
+            Some(Type::UserDefined(name)) if registry.is_valtype(name) => {
+                format!("&{}.0 as &dyn super::runtime::ToSqlParam", field)
+            }
+            Some(Type::Array(inner)) if matches!(inner.as_ref(), Type::UserDefined(name) if registry.is_valtype(name)) => {
+                // Vec<ValType> needs conversion — handled via prelude
+                format!("&__{}_inner as &dyn super::runtime::ToSqlParam", field)
+            }
+            Some(Type::Optional(inner)) if matches!(inner.as_ref(), Type::UserDefined(name) if registry.is_valtype(name)) => {
+                format!("&__{}_inner as &dyn super::runtime::ToSqlParam", field)
+            }
+            _ => {
+                format!("&{} as &dyn super::runtime::ToSqlParam", field)
+            }
+        }
+    }
+}
+
+/// Generate ValType conversion prelude for individual params (Vec/Optional ValType unwrapping).
+fn gen_individual_valtype_prelude(
+    args: &[Argument],
+    param_order: &[String],
+    registry: &ValTypeRegistry,
+) -> String {
+    let mut prelude = String::new();
+    let vt_params = find_valtype_params(args, param_order, registry);
+    for vtp in &vt_params {
+        match vtp.kind {
+            ValtypeParamKind::Vec => {
+                prelude.push_str(&format!(
+                    "    let __{}_inner: Vec<{}> = {}.iter().map(|v| v.0.clone()).collect();\n",
+                    vtp.field_name, vtp.inner_rust_type, vtp.field_name
+                ));
+            }
+            ValtypeParamKind::Optional => {
+                prelude.push_str(&format!(
+                    "    let __{}_inner: Option<{}> = {}.as_ref().map(|v| v.0.clone());\n",
+                    vtp.field_name, vtp.inner_rust_type, vtp.field_name
+                ));
+            }
+            ValtypeParamKind::Plain => {} // handled inline
+        }
+    }
+    prelude
+}
+
+/// Emit an async query function with individual parameters (no Params struct).
+pub(super) fn emit_query_fn_individual_params(
+    out: &mut String,
+    fn_name: &str,
+    args: &[Argument],
+    param_order: &[String],
+    row_struct: &str,
+    sql: &str,
+    registry: &ValTypeRegistry,
+    input_registry: &InputTypeRegistry,
 ) {
     // Function signature
     out.push_str(&format!(
-        "#[allow(unused_assignments)]\npub async fn {}(\n    client: &(impl super::runtime::Client + ?Sized),\n    params: &{},\n) -> Result<Vec<{}>, Box<dyn std::error::Error + Send + Sync>> {{\n",
-        fn_name, params_struct, row_struct
+        "pub async fn {}(\n    client: &(impl super::runtime::Client + ?Sized),\n",
+        fn_name,
+    ));
+    emit_individual_fn_params(out, args, registry, input_registry);
+    out.push_str(&format!(
+        ") -> Result<Vec<{}>, Box<dyn std::error::Error + Send + Sync>> {{\n",
+        row_struct,
+    ));
+
+    // ValType conversion prelude
+    let prelude = gen_individual_valtype_prelude(args, param_order, registry);
+    out.push_str(&prelude);
+
+    // Build params array
+    let bindings: Vec<String> = param_order.iter()
+        .map(|p| gen_param_binding(p, args, registry, input_registry))
+        .collect();
+
+    out.push_str(&format!(
+        "    let rows = client.query(\n        \"{}\",\n        &[{}],\n    ).await?;\n",
+        sql.replace('\"', "\\\""),
+        bindings.join(", "),
+    ));
+    out.push_str(&format!(
+        "    Ok(rows.iter().map(|row| {}::from_row(row)).collect())\n",
+        row_struct,
+    ));
+    out.push_str("}\n\n");
+}
+
+/// Emit an async execute function with individual parameters (no Params struct).
+pub(super) fn emit_execute_fn_individual_params(
+    out: &mut String,
+    fn_name: &str,
+    args: &[Argument],
+    param_order: &[String],
+    sql: &str,
+    registry: &ValTypeRegistry,
+    input_registry: &InputTypeRegistry,
+) {
+    out.push_str(&format!(
+        "pub async fn {}(\n    client: &(impl super::runtime::Client + ?Sized),\n",
+        fn_name,
+    ));
+    emit_individual_fn_params(out, args, registry, input_registry);
+    out.push_str(") -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {\n");
+
+    let prelude = gen_individual_valtype_prelude(args, param_order, registry);
+    out.push_str(&prelude);
+
+    let bindings: Vec<String> = param_order.iter()
+        .map(|p| gen_param_binding(p, args, registry, input_registry))
+        .collect();
+
+    out.push_str(&format!(
+        "    let count = client.execute(\n        \"{}\",\n        &[{}],\n    ).await?;\n",
+        sql.replace('\"', "\\\""),
+        bindings.join(", "),
+    ));
+    out.push_str("    Ok(count)\n");
+    out.push_str("}\n\n");
+}
+
+/// Emit an async query function with dynamic SQL building for when-clause queries,
+/// using individual parameters instead of a Params struct.
+pub(super) fn emit_dynamic_query_fn_individual_params(
+    out: &mut String,
+    fn_name: &str,
+    args: &[Argument],
+    row_struct: &str,
+    gen: &GeneratedSql,
+    registry: &ValTypeRegistry,
+    input_registry: &InputTypeRegistry,
+) {
+    // Function signature
+    out.push_str(&format!(
+        "#[allow(unused_assignments)]\npub async fn {}(\n    client: &(impl super::runtime::Client + ?Sized),\n",
+        fn_name,
+    ));
+    emit_individual_fn_params(out, args, registry, input_registry);
+    out.push_str(&format!(
+        ") -> Result<Vec<{}>, Box<dyn std::error::Error + Send + Sync>> {{\n",
+        row_struct,
     ));
 
     // Build a map of arg name -> Argument for type lookups
@@ -348,47 +381,15 @@ pub(super) fn emit_dynamic_query_fn(
     // Static params - always bound
     out.push_str("    let mut bind_params: Vec<&dyn super::runtime::ToSqlParam> = Vec::new();\n");
 
-    // Check if any static param needs ValType conversion
-    let vt_params = find_valtype_params(args, &gen.params, registry);
-    let vt_fields: HashSet<String> = vt_params.iter().map(|v| v.field_name.clone()).collect();
-
-    // Generate ValType conversion prelude for static params
-    for vtp in &vt_params {
-        match vtp.kind {
-            ValtypeParamKind::Vec => {
-                out.push_str(&format!(
-                    "    let __{}_inner: Vec<{}> = params.{}.iter().map(|v| v.0.clone()).collect();\n",
-                    vtp.field_name, vtp.inner_rust_type, vtp.field_name
-                ));
-            }
-            ValtypeParamKind::Optional => {
-                out.push_str(&format!(
-                    "    let __{}_inner: Option<{}> = params.{}.as_ref().map(|v| v.0.clone());\n",
-                    vtp.field_name, vtp.inner_rust_type, vtp.field_name
-                ));
-            }
-            ValtypeParamKind::Plain => {
-                // No prelude needed
-            }
-        }
-    }
+    // ValType conversion prelude
+    let prelude = gen_individual_valtype_prelude(args, &gen.params, registry);
+    out.push_str(&prelude);
 
     // Bind static params
     let static_param_count = gen.params.len();
     for pname in &gen.params {
-        let field = to_snake_case(pname);
-        if let Some(vtp) = vt_params.iter().find(|v| v.field_name == field) {
-            match vtp.kind {
-                ValtypeParamKind::Vec | ValtypeParamKind::Optional => {
-                    out.push_str(&format!("    bind_params.push(&__{}_inner as &dyn super::runtime::ToSqlParam);\n", field));
-                }
-                ValtypeParamKind::Plain => {
-                    out.push_str(&format!("    bind_params.push(&params.{}.0 as &dyn super::runtime::ToSqlParam);\n", field));
-                }
-            }
-        } else {
-            out.push_str(&format!("    bind_params.push(&params.{});\n", field));
-        }
+        let binding = gen_param_binding(pname, args, registry, input_registry);
+        out.push_str(&format!("    bind_params.push({});\n", binding));
     }
 
     out.push_str(&format!("    let mut idx = {}usize;\n\n", static_param_count + 1));
@@ -403,22 +404,18 @@ pub(super) fn emit_dynamic_query_fn(
                 None => continue,
             };
 
-            // Check if the condition variable's type is Optional
             let is_optional = if let Some(arg) = arg_map.get(wc.condition_var.as_deref().unwrap_or("")) {
                 matches!(&arg.typ, Type::Optional(_))
             } else {
-                true // assume optional if not found
+                true
             };
 
             if is_optional {
-                out.push_str(&format!("    if params.{}.is_some() {{\n", condition_var));
+                out.push_str(&format!("    if {}.is_some() {{\n", condition_var));
             } else {
-                // For non-optional types, always include
                 out.push_str("    {\n");
             }
 
-            // Build the condition SQL with dynamic param indices
-            // The template has `${}` placeholders that need to be replaced with `idx`
             let param_count = wc.params_in_clause.len();
             if param_count == 0 {
                 out.push_str(&format!(
@@ -430,26 +427,10 @@ pub(super) fn emit_dynamic_query_fn(
                     "        conditions.push(format!(\"{}\", idx));\n",
                     wc.clause_sql,
                 ));
-                // Bind the param
-                let param_field = to_snake_case(&wc.params_in_clause[0]);
-                // Check if this param needs ValType conversion
-                if vt_fields.contains(&param_field) {
-                    if let Some(vtp) = vt_params.iter().find(|v| v.field_name == param_field) {
-                        match vtp.kind {
-                            ValtypeParamKind::Vec | ValtypeParamKind::Optional => {
-                                out.push_str(&format!("        bind_params.push(&__{}_inner as &dyn super::runtime::ToSqlParam);\n", param_field));
-                            }
-                            ValtypeParamKind::Plain => {
-                                out.push_str(&format!("        bind_params.push(&params.{}.0 as &dyn super::runtime::ToSqlParam);\n", param_field));
-                            }
-                        }
-                    }
-                } else {
-                    out.push_str(&format!("        bind_params.push(&params.{});\n", param_field));
-                }
+                let binding = gen_param_binding(&wc.params_in_clause[0], args, registry, input_registry);
+                out.push_str(&format!("        bind_params.push({});\n", binding));
                 out.push_str("        idx += 1;\n");
             } else {
-                // Multiple params in clause
                 out.push_str(&format!(
                     "        conditions.push(format!(\"{}\"",
                     wc.clause_sql,
@@ -462,23 +443,9 @@ pub(super) fn emit_dynamic_query_fn(
                     }
                 }
                 out.push_str("));\n");
-                // Bind all params
                 for p in &wc.params_in_clause {
-                    let param_field = to_snake_case(p);
-                    if vt_fields.contains(&param_field) {
-                        if let Some(vtp) = vt_params.iter().find(|v| v.field_name == param_field) {
-                            match vtp.kind {
-                                ValtypeParamKind::Vec | ValtypeParamKind::Optional => {
-                                    out.push_str(&format!("        bind_params.push(&__{}_inner as &dyn super::runtime::ToSqlParam);\n", param_field));
-                                }
-                                ValtypeParamKind::Plain => {
-                                    out.push_str(&format!("        bind_params.push(&params.{}.0 as &dyn super::runtime::ToSqlParam);\n", param_field));
-                                }
-                            }
-                        }
-                    } else {
-                        out.push_str(&format!("        bind_params.push(&params.{});\n", param_field));
-                    }
+                    let binding = gen_param_binding(p, args, registry, input_registry);
+                    out.push_str(&format!("        bind_params.push({});\n", binding));
                 }
                 out.push_str(&format!("        idx += {};\n", param_count));
             }
@@ -487,16 +454,8 @@ pub(super) fn emit_dynamic_query_fn(
         }
     }
 
-    // Build the SQL string dynamically
-    // Extract the static SQL parts. The gen.sql has the complete static SQL
-    // (without when-clause contributions). For dynamic queries, we need to
-    // reconstruct the SQL with dynamic WHERE conditions.
-    //
-    // Strategy: Split the static SQL at " WHERE " and " ORDER BY " to insert
-    // dynamic conditions.
+    // Build the SQL string dynamically (same logic as emit_dynamic_query_fn)
     let static_sql = &gen.sql;
-
-    // Find the positions of WHERE and ORDER BY in the static SQL
     let where_pos = static_sql.find(" WHERE ");
     let order_by_pos = static_sql.find(" ORDER BY ");
     let group_by_pos = static_sql.find(" GROUP BY ");
@@ -504,22 +463,19 @@ pub(super) fn emit_dynamic_query_fn(
     let offset_pos = static_sql.find(" OFFSET ");
     let for_update_pos = static_sql.find(" FOR UPDATE");
 
-    // Find the first "tail" keyword position after WHERE
     let tail_start = [order_by_pos, group_by_pos, limit_pos, offset_pos, for_update_pos]
         .iter()
         .filter_map(|p| *p)
         .min();
 
-    // Extract parts
     let (before_where, static_where, after_where) = if let Some(wp) = where_pos {
         let before = &static_sql[..wp];
         if let Some(ts) = tail_start {
             if ts > wp {
-                let where_content = &static_sql[wp + 7..ts]; // skip " WHERE "
+                let where_content = &static_sql[wp + 7..ts];
                 let after = &static_sql[ts..];
                 (before, Some(where_content.to_string()), after.to_string())
             } else {
-                // tail is before WHERE - shouldn't happen normally
                 let where_content = &static_sql[wp + 7..];
                 (before, Some(where_content.to_string()), String::new())
             }
@@ -535,27 +491,22 @@ pub(super) fn emit_dynamic_query_fn(
         (static_sql.as_str(), None, String::new())
     };
 
-    // Build the WHERE clause
     out.push_str("\n    // Build WHERE clause\n");
-
     let has_static_where = static_where.is_some();
     let has_dynamic_wheres = !when_wheres.is_empty();
 
     if has_static_where || has_dynamic_wheres {
         out.push_str("    let where_clause = {\n");
         out.push_str("        let mut parts: Vec<String> = Vec::new();\n");
-
         if let Some(ref sw) = static_where {
             out.push_str(&format!(
                 "        parts.push(\"{}\".to_string());\n",
                 sw.replace('\"', "\\\""),
             ));
         }
-
         if has_dynamic_wheres {
             out.push_str("        parts.extend(conditions);\n");
         }
-
         out.push_str("        if parts.is_empty() {\n");
         out.push_str("            String::new()\n");
         out.push_str("        } else {\n");
@@ -564,17 +515,12 @@ pub(super) fn emit_dynamic_query_fn(
         out.push_str("    };\n");
     }
 
-    // Handle dynamic ORDER BY (when clauses with orderBy type)
     let has_static_order_by = order_by_pos.is_some();
     if !when_order_bys.is_empty() {
-        // If there are dynamic order-by when-clauses, we need to handle them
-        // For now, extract the static ORDER BY and make it conditional
         out.push_str("\n    // Build ORDER BY clause\n");
         out.push_str("    let order_by_clause = {\n");
-
         if has_static_order_by {
-            // Extract the static ORDER BY content
-            let ob_start = order_by_pos.unwrap() + 10; // skip " ORDER BY "
+            let ob_start = order_by_pos.unwrap() + 10;
             let ob_end = [group_by_pos, limit_pos, offset_pos, for_update_pos]
                 .iter()
                 .filter_map(|p| *p)
@@ -589,7 +535,6 @@ pub(super) fn emit_dynamic_query_fn(
         } else {
             out.push_str("        let mut ob = String::new();\n");
         }
-
         for wc in &when_order_bys {
             if let Some(ref cv) = wc.condition_var {
                 let cond_field = to_snake_case(cv);
@@ -599,7 +544,7 @@ pub(super) fn emit_dynamic_query_fn(
                     true
                 };
                 if is_optional {
-                    out.push_str(&format!("        if params.{}.is_some() {{\n", cond_field));
+                    out.push_str(&format!("        if {}.is_some() {{\n", cond_field));
                 } else {
                     out.push_str("        {\n");
                 }
@@ -610,24 +555,17 @@ pub(super) fn emit_dynamic_query_fn(
                 out.push_str("        }\n");
             }
         }
-
         out.push_str("        if ob.is_empty() { String::new() } else { format!(\" ORDER BY {}\", ob) }\n");
         out.push_str("    };\n");
     }
 
     // Build the final SQL string
     out.push_str("\n    let sql = format!(\n        \"{}");
-
-    // The format string: base_sql + {} for where + {} for order_by + rest
     if has_static_where || has_dynamic_wheres {
-        out.push_str("{}"); // where_clause placeholder
+        out.push_str("{}");
     }
-
-    // Handle the tail (ORDER BY, LIMIT, etc.) from the static SQL
-    // We need to exclude ORDER BY if it's being handled dynamically
     let mut tail = after_where.clone();
     if !when_order_bys.is_empty() {
-        // Remove the static ORDER BY from the tail - we handle it dynamically
         if let Some(ob_pos_in_tail) = tail.find(" ORDER BY ") {
             let ob_end_in_tail = [
                 tail.find(" GROUP BY ").filter(|p| *p > ob_pos_in_tail),
@@ -641,25 +579,19 @@ pub(super) fn emit_dynamic_query_fn(
             .unwrap_or(tail.len());
             tail = format!("{}{}", &tail[..ob_pos_in_tail], &tail[ob_end_in_tail..]);
         }
-        out.push_str("{}"); // order_by_clause placeholder
+        out.push_str("{}");
     }
-
-    // Add remaining static tail
     out.push_str(&tail.replace('\"', "\\\"").replace('{', "{{").replace('}', "}}"));
-
     out.push_str("\",\n");
     out.push_str(&format!("        \"{}\",\n", before_where.replace('\"', "\\\"")));
-
     if has_static_where || has_dynamic_wheres {
         out.push_str("        where_clause,\n");
     }
     if !when_order_bys.is_empty() {
         out.push_str("        order_by_clause,\n");
     }
-
     out.push_str("    );\n");
 
-    // Execute query
     out.push_str("    let rows = client.query(&sql, &bind_params).await?;\n");
     out.push_str(&format!(
         "    Ok(rows.iter().map(|row| {}::from_row(row)).collect())\n",
@@ -668,14 +600,21 @@ pub(super) fn emit_dynamic_query_fn(
     out.push_str("}\n\n");
 }
 
-/// Emit an async mutation function that calls `client.query()` with returning and returns `Vec<Row>`.
-pub(super) fn emit_mutation_query_fn(
+/// Helper to emit individual function parameter declarations.
+fn emit_individual_fn_params(
     out: &mut String,
-    fn_name: &str,
-    params_struct: &str,
-    row_struct: &str,
-    sql: &str,
-    param_conversion: Option<&(String, String)>,
+    args: &[Argument],
+    registry: &ValTypeRegistry,
+    input_registry: &InputTypeRegistry,
 ) {
-    emit_query_fn(out, fn_name, params_struct, row_struct, sql, param_conversion);
+    for arg in args {
+        let rust_type = resolve_param_rust_type(&arg.typ, registry);
+        // Check if this is an input type (pass by reference)
+        let is_input = matches!(&arg.typ, Type::UserDefined(name) if input_registry.get(name).is_some());
+        if is_input {
+            out.push_str(&format!("    {}: &{},\n", to_snake_case(&arg.name), rust_type));
+        } else {
+            out.push_str(&format!("    {}: &{},\n", to_snake_case(&arg.name), rust_type));
+        }
+    }
 }

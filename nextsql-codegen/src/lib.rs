@@ -16,6 +16,9 @@ pub struct CodegenConfig {
     /// If set, generate a project manifest (Cargo.toml for Rust) with this package name.
     /// The manifest is placed in output_dir's parent directory (e.g. output_dir=src/ → Cargo.toml at crate root).
     pub package_name: Option<String>,
+    /// Glob patterns for type definition files (valtypes, relations, input types).
+    /// These files are prepended to every other .nsql file before parsing.
+    pub type_files: Vec<String>,
 }
 
 pub struct CodegenResult {
@@ -66,45 +69,41 @@ pub fn check(config: &CheckConfig, schema: &DatabaseSchema) -> CheckResult {
 
     let nsql_files = find_nsql_files(&config.source_dir);
 
-    // Read types.nsql content if it exists
-    let types_path = config.source_dir.join("types.nsql");
-    let types_content = if types_path.exists() {
-        match std::fs::read_to_string(&types_path) {
-            Ok(content) => Some(content),
-            Err(e) => {
-                result.diagnostics.push(CheckDiagnostic {
-                    file: types_path.clone(),
-                    line: None,
-                    column: None,
-                    message: format!("Failed to read file: {}", e),
-                    source: DiagnosticSource::Io,
-                });
-                return result;
-            }
+    // Read type definition files
+    let type_file_paths = find_type_files(&config.source_dir, &config.type_files);
+    let types_content = match read_type_files_content(&type_file_paths) {
+        Ok(content) => content,
+        Err((path, e)) => {
+            result.diagnostics.push(CheckDiagnostic {
+                file: path,
+                line: None,
+                column: None,
+                message: format!("Failed to read file: {}", e),
+                source: DiagnosticSource::Io,
+            });
+            return result;
         }
-    } else {
-        None
     };
 
-    // If types.nsql exists, validate it parses
+    // If type files exist, validate they parse
     if let Some(ref types_src) = types_content {
         result.files_checked += 1;
         if let Err(e) = nextsql_core::parser::parse_module(types_src) {
             let (line, col) = extract_pest_line_col(&e);
+            let file = type_file_paths.first().cloned().unwrap_or_else(|| config.source_dir.join("types.nsql"));
             result.diagnostics.push(CheckDiagnostic {
-                file: types_path.clone(),
+                file,
                 line: Some(line),
                 column: Some(col),
                 message: format_pest_error(&e),
                 source: DiagnosticSource::Parse,
             });
-            return result; // types.nsql is fatal
+            return result; // type files parse error is fatal
         }
     }
 
     for nsql_path in &nsql_files {
-        let filename = nsql_path.file_name().unwrap().to_str().unwrap();
-        if filename == "types.nsql" {
+        if type_file_paths.iter().any(|tp| tp == nsql_path) {
             continue;
         }
 
@@ -190,6 +189,8 @@ pub fn check(config: &CheckConfig, schema: &DatabaseSchema) -> CheckResult {
 
 pub struct CheckConfig {
     pub source_dir: PathBuf,
+    /// Glob patterns for type definition files.
+    pub type_files: Vec<String>,
 }
 
 fn extract_pest_line_col(error: &pest::error::Error<nextsql_core::Rule>) -> (usize, usize) {
@@ -236,33 +237,31 @@ pub fn generate(config: &CodegenConfig, schema: &DatabaseSchema) -> CodegenResul
     // 1. Find all .nsql files
     let nsql_files = find_nsql_files(&config.source_dir);
 
-    // 2. Read types.nsql content (if exists) for merging into other files
-    let types_path = config.source_dir.join("types.nsql");
-    let types_content = if types_path.exists() {
-        match std::fs::read_to_string(&types_path) {
-            Ok(content) => {
-                // Validate that types.nsql parses successfully
-                if let Err(e) = nextsql_core::parser::parse_module(&content) {
-                    result
-                        .errors
-                        .push(format!("Failed to parse types.nsql: {}", e));
+    // 2. Read type definition files (valtypes, relations, input types) for merging
+    let type_file_paths = find_type_files(&config.source_dir, &config.type_files);
+    let types_content = match read_type_files_content(&type_file_paths) {
+        Ok(content) => {
+            if let Some(ref c) = content {
+                if let Err(e) = nextsql_core::parser::parse_module(c) {
+                    result.errors.push(format!("Failed to parse type files: {}", e));
                     return result;
                 }
-                Some(content)
             }
-            Err(e) => {
-                result
-                    .errors
-                    .push(format!("Failed to read types.nsql: {}", e));
-                return result;
-            }
+            content
         }
-    } else {
-        None
+        Err((path, e)) => {
+            result.errors.push(format!("Failed to read {}: {}", path.display(), e));
+            return result;
+        }
     };
 
     // 3. Ensure output directory exists
-    if let Err(e) = std::fs::create_dir_all(&config.output_dir) {
+    let generated_dir = if config.backend == "rust" {
+        config.output_dir.join("generated")
+    } else {
+        config.output_dir.clone()
+    };
+    if let Err(e) = std::fs::create_dir_all(&generated_dir) {
         result
             .errors
             .push(format!("Failed to create output directory: {}", e));
@@ -275,7 +274,7 @@ pub fn generate(config: &CodegenConfig, schema: &DatabaseSchema) -> CodegenResul
 
     for nsql_path in &nsql_files {
         let filename = nsql_path.file_name().unwrap().to_str().unwrap();
-        if filename == "types.nsql" {
+        if type_file_paths.iter().any(|tp| tp == nsql_path) {
             continue; // Already processed
         }
 
@@ -373,7 +372,7 @@ pub fn generate(config: &CodegenConfig, schema: &DatabaseSchema) -> CodegenResul
                     parsed_modules.iter().map(|(_, m)| m).collect();
                 let types_file =
                     nextsql_backend_rust::rust_gen::generate_valtype_file(&module_refs);
-                let types_path = config.output_dir.join("types.rs");
+                let types_path = generated_dir.join("types.rs");
                 match std::fs::write(&types_path, &types_file.content) {
                     Ok(_) => {
                         result.generated_files.push(types_path);
@@ -391,7 +390,7 @@ pub fn generate(config: &CodegenConfig, schema: &DatabaseSchema) -> CodegenResul
             // Generate runtime.rs with embedded runtime definitions
             {
                 let runtime_content = nextsql_backend_rust::runtime_gen::generate_runtime();
-                let runtime_path = config.output_dir.join("runtime.rs");
+                let runtime_path = generated_dir.join("runtime.rs");
                 match std::fs::write(&runtime_path, &runtime_content) {
                     Ok(_) => {
                         result.generated_files.push(runtime_path);
@@ -429,7 +428,7 @@ pub fn generate(config: &CodegenConfig, schema: &DatabaseSchema) -> CodegenResul
                 result.errors.extend(generated.errors);
 
                 let output_filename = format!("{}.rs", module_name);
-                let output_path = config.output_dir.join(&output_filename);
+                let output_path = generated_dir.join(&output_filename);
                 match std::fs::write(&output_path, &generated.content) {
                     Ok(_) => {
                         result.generated_files.push(output_path);
@@ -451,10 +450,21 @@ pub fn generate(config: &CodegenConfig, schema: &DatabaseSchema) -> CodegenResul
         }
     }
 
-    // 6. Generate lib.rs that re-exports all generated modules.
+    // 6. Generate mod.rs and lib.rs for Rust backend.
     if !module_names.is_empty() && config.backend == "rust" {
-        let lib_content = generate_mod_rs(&module_names);
+        // Generate generated/mod.rs with module declarations
+        let mod_content = generate_mod_rs(&module_names);
+        let mod_path = generated_dir.join("mod.rs");
+        match std::fs::write(&mod_path, &mod_content) {
+            Ok(_) => result.generated_files.push(mod_path),
+            Err(e) => result
+                .errors
+                .push(format!("Failed to write generated/mod.rs: {}", e)),
+        }
+
+        // Update lib.rs: only replace the nextsql-managed section, preserving user code
         let lib_path = config.output_dir.join("lib.rs");
+        let lib_content = update_lib_rs(&lib_path, &module_names);
         match std::fs::write(&lib_path, &lib_content) {
             Ok(_) => result.generated_files.push(lib_path),
             Err(e) => result
@@ -463,17 +473,27 @@ pub fn generate(config: &CodegenConfig, schema: &DatabaseSchema) -> CodegenResul
         }
     }
 
-    // 7. Generate Cargo.toml if package_name is specified
-    if let Some(ref package_name) = config.package_name {
-        if config.backend == "rust" {
-            let cargo_content = generate_cargo_toml(package_name);
-            let cargo_dir = config.output_dir.parent().unwrap_or(&config.output_dir);
+    // 7. Generate Cargo.toml for Rust backend
+    if config.backend == "rust" {
+        let cargo_dir = config.output_dir.parent().unwrap_or(&config.output_dir);
+        let package_name = config.package_name.clone().unwrap_or_else(|| {
+            // Canonicalize to resolve "." and ".." before extracting the directory name
+            cargo_dir
+                .canonicalize()
+                .ok()
+                .and_then(|p| p.file_name().map(|n| n.to_os_string()))
+                .and_then(|n| n.to_str().map(|s| s.to_string()))
+                .unwrap_or_else(|| "generated".to_string())
+                .replace('-', "_")
+        });
+        let cargo_path = cargo_dir.join("Cargo.toml");
+        if !cargo_path.exists() {
+            let cargo_content = generate_cargo_toml(&package_name);
             if let Err(e) = std::fs::create_dir_all(cargo_dir) {
                 result
                     .errors
                     .push(format!("Failed to create crate root directory: {}", e));
             }
-            let cargo_path = cargo_dir.join("Cargo.toml");
             match std::fs::write(&cargo_path, &cargo_content) {
                 Ok(_) => result.generated_files.push(cargo_path),
                 Err(e) => result
@@ -484,6 +504,47 @@ pub fn generate(config: &CodegenConfig, schema: &DatabaseSchema) -> CodegenResul
     }
 
     result
+}
+
+/// Find type definition files by resolving glob patterns from config against source_dir.
+/// Returns all matching files in sorted order.
+fn find_type_files(source_dir: &Path, type_file_patterns: &[String]) -> Vec<PathBuf> {
+    let mut files = Vec::new();
+    for pattern in type_file_patterns {
+        let full_pattern = source_dir.join(pattern);
+        let pattern_str = full_pattern.to_str().unwrap_or("");
+        if let Ok(paths) = glob::glob(pattern_str) {
+            for path in paths.filter_map(|p| p.ok()).filter(|p| p.is_file()) {
+                if !files.contains(&path) {
+                    files.push(path);
+                }
+            }
+        }
+    }
+    files.sort();
+    files
+}
+
+/// Read and concatenate all type definition files into a single string.
+fn read_type_files_content(type_files: &[PathBuf]) -> Result<Option<String>, (PathBuf, std::io::Error)> {
+    if type_files.is_empty() {
+        return Ok(None);
+    }
+    let mut combined = String::new();
+    for path in type_files {
+        if path.exists() {
+            let content = std::fs::read_to_string(path).map_err(|e| (path.clone(), e))?;
+            if !combined.is_empty() {
+                combined.push('\n');
+            }
+            combined.push_str(&content);
+        }
+    }
+    if combined.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(combined))
+    }
 }
 
 /// Recursively find all .nsql files in a directory.
@@ -519,7 +580,7 @@ rust_decimal = "1"
     )
 }
 
-/// Generate a lib.rs file that re-exports all generated modules.
+/// Generate a mod.rs file that declares all generated modules.
 fn generate_mod_rs(module_names: &[String]) -> String {
     let mut out = String::new();
     out.push_str("// AUTO-GENERATED by nextsql. Do not edit.\n\n");
@@ -527,6 +588,48 @@ fn generate_mod_rs(module_names: &[String]) -> String {
         out.push_str(&format!("pub mod {};\n", name));
     }
     out
+}
+
+const NEXTSQL_BEGIN_MARKER: &str = "// nextsql:begin";
+const NEXTSQL_END_MARKER: &str = "// nextsql:end";
+
+/// Generate the nextsql-managed section content for lib.rs.
+fn generate_lib_rs_section(module_names: &[String]) -> String {
+    let mut out = String::new();
+    out.push_str(NEXTSQL_BEGIN_MARKER);
+    out.push('\n');
+    out.push_str("mod generated;\n");
+    for name in module_names {
+        out.push_str(&format!("pub use generated::{};\n", name));
+    }
+    out.push_str(NEXTSQL_END_MARKER);
+    out
+}
+
+/// Read existing lib.rs (if any) and replace only the nextsql-managed section.
+/// User code outside the markers is preserved.
+fn update_lib_rs(lib_path: &Path, module_names: &[String]) -> String {
+    let section = generate_lib_rs_section(module_names);
+
+    let existing = std::fs::read_to_string(lib_path).unwrap_or_default();
+    if existing.is_empty() {
+        return format!("{}\n", section);
+    }
+
+    if let (Some(begin), Some(end)) = (
+        existing.find(NEXTSQL_BEGIN_MARKER),
+        existing.find(NEXTSQL_END_MARKER),
+    ) {
+        let end = end + NEXTSQL_END_MARKER.len();
+        let mut result = String::with_capacity(existing.len());
+        result.push_str(&existing[..begin]);
+        result.push_str(&section);
+        result.push_str(&existing[end..]);
+        result
+    } else {
+        // No markers found: prepend the section
+        format!("{}\n{}", section, existing)
+    }
 }
 
 #[cfg(test)]
@@ -550,5 +653,60 @@ mod tests {
         assert!(content.contains("pub mod users;"));
         assert!(content.contains("pub mod posts;"));
         assert!(content.contains("AUTO-GENERATED"));
+    }
+
+    #[test]
+    fn test_generate_lib_rs_section() {
+        let names = vec!["users".to_string(), "posts".to_string(), "runtime".to_string()];
+        let content = generate_lib_rs_section(&names);
+        assert!(content.contains("mod generated;"));
+        assert!(content.contains("pub use generated::users;"));
+        assert!(content.contains("pub use generated::posts;"));
+        assert!(content.contains("pub use generated::runtime;"));
+        assert!(content.starts_with(NEXTSQL_BEGIN_MARKER));
+        assert!(content.ends_with(NEXTSQL_END_MARKER));
+    }
+
+    #[test]
+    fn test_update_lib_rs_preserves_user_code() {
+        let dir = std::env::temp_dir().join("nextsql_update_lib_test");
+        let _ = std::fs::create_dir_all(&dir);
+        let lib_path = dir.join("lib.rs");
+
+        // Simulate existing lib.rs with user code and markers
+        let existing = format!(
+            "use some_crate::Thing;\n\n{}\nmod generated;\npub use generated::old_module;\n{}\n\nfn my_custom_fn() {{}}\n",
+            NEXTSQL_BEGIN_MARKER, NEXTSQL_END_MARKER
+        );
+        std::fs::write(&lib_path, &existing).unwrap();
+
+        let names = vec!["users".to_string(), "runtime".to_string()];
+        let result = update_lib_rs(&lib_path, &names);
+
+        // User code preserved
+        assert!(result.contains("use some_crate::Thing;"));
+        assert!(result.contains("fn my_custom_fn() {}"));
+        // Old module removed, new modules present
+        assert!(!result.contains("old_module"));
+        assert!(result.contains("pub use generated::users;"));
+        assert!(result.contains("pub use generated::runtime;"));
+    }
+
+    #[test]
+    fn test_update_lib_rs_no_markers_prepends() {
+        let dir = std::env::temp_dir().join("nextsql_update_lib_no_marker");
+        let _ = std::fs::create_dir_all(&dir);
+        let lib_path = dir.join("lib.rs");
+
+        let existing = "fn user_code() {}\n";
+        std::fs::write(&lib_path, existing).unwrap();
+
+        let names = vec!["users".to_string()];
+        let result = update_lib_rs(&lib_path, &names);
+
+        assert!(result.contains("fn user_code() {}"));
+        assert!(result.contains("pub use generated::users;"));
+        // Markers should be at the top
+        assert!(result.starts_with(NEXTSQL_BEGIN_MARKER));
     }
 }

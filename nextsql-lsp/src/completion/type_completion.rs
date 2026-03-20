@@ -82,6 +82,28 @@ pub trait TypeCompletionProvider {
             }
         }
 
+        // Add input type names defined in the current file
+        {
+            use std::sync::LazyLock;
+            static RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+                regex::Regex::new(r"input\s+(\w+)\s*\{").unwrap()
+            });
+            for cap in RE.captures_iter(self.get_text()) {
+                let input_name = &cap[1];
+                completions.push(CompletionItem {
+                    label: input_name.to_string(),
+                    kind: Some(CompletionItemKind::STRUCT),
+                    detail: Some(format!("input {}", input_name)),
+                    documentation: Some(Documentation::String(format!(
+                        "Input type '{}'",
+                        input_name
+                    ))),
+                    insert_text: Some(input_name.to_string()),
+                    ..Default::default()
+                });
+            }
+        }
+
         completions
     }
 }

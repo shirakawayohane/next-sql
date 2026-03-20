@@ -444,6 +444,7 @@ fn handle_generate_command(
         update_params_pattern: nsql_config.codegen.as_ref()
             .and_then(|c| c.update_params.clone()),
         package_name: nsql_config.target.package_name.clone(),
+        type_files: nsql_config.files.type_files.clone(),
     };
 
     let result = nextsql_codegen::generate(&config, &db_schema);
@@ -608,8 +609,12 @@ fn handle_check_command(
 
     let db_schema = resolve_schema(&dir)?;
 
+    let nsql_config_path = dir.join("next-sql.toml");
+    let nsql_config = config::NextSqlConfig::load_from_file(&nsql_config_path)?;
+
     let config = CheckConfig {
         source_dir: dir,
+        type_files: nsql_config.files.type_files.clone(),
     };
 
     let use_color = std::io::IsTerminal::is_terminal(&std::io::stderr());

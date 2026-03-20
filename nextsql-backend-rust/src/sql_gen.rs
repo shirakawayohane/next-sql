@@ -414,7 +414,11 @@ impl<'a> SqlGenContext<'a> {
                 }
             }
             AtomicExpression::PropertyAccess(pa) => {
-                self.collect_params_from_expr(&pa.target);
+                if let Expression::Atomic(AtomicExpression::Variable(var)) = &*pa.target {
+                    self.add_param(&format!("{}.{}", var.name, pa.property));
+                } else {
+                    self.collect_params_from_expr(&pa.target);
+                }
             }
             AtomicExpression::IndexAccess(ia) => {
                 self.collect_params_from_expr(&ia.target);
@@ -571,7 +575,11 @@ impl<'a> SqlGenContext<'a> {
             }
             AtomicExpression::MethodCall(mc) => self.gen_method_call(mc),
             AtomicExpression::PropertyAccess(pa) => {
-                self.resolve_property_access(pa)
+                if let Expression::Atomic(AtomicExpression::Variable(var)) = &*pa.target {
+                    self.add_param(&format!("{}.{}", var.name, pa.property))
+                } else {
+                    self.resolve_property_access(pa)
+                }
             }
             AtomicExpression::IndexAccess(ia) => {
                 let target = self.gen_expr(&ia.target);

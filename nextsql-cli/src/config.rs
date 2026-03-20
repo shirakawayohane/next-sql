@@ -27,6 +27,10 @@ database_url = ""
 # Glob patterns for NextSQL files to include
 includes = ["queries/**/*.nsql"]
 
+# Glob patterns for type definition files (valtypes, relations, input types).
+# These are prepended to every other .nsql file before parsing.
+type_files = ["queries/types.nsql"]
+
 [target]
 # Target language for code generation
 target_language = "rust"
@@ -127,6 +131,7 @@ mod tests {
             database_url: Some("postgresql://localhost:5432/test".to_string()),
             files: FilesConfig {
                 includes: vec!["src/**".to_string()],
+                type_files: vec!["queries/types.nsql".to_string()],
             },
             target: TargetConfig {
                 target_language: "rust".to_string(),
@@ -145,6 +150,7 @@ mod tests {
             database_url: None,
             files: FilesConfig {
                 includes: vec!["src/**".to_string()],
+                type_files: vec!["queries/types.nsql".to_string()],
             },
             target: TargetConfig {
                 target_language: "invalid_language".to_string(),
@@ -206,6 +212,7 @@ target_directory = "../generated"
             database_url: None,
             files: FilesConfig {
                 includes: vec!["src/**".to_string()],
+                type_files: vec!["queries/types.nsql".to_string()],
             },
             target: TargetConfig {
                 target_language: "rust".to_string(),
@@ -221,6 +228,7 @@ target_directory = "../generated"
             database_url: None,
             files: FilesConfig {
                 includes: vec!["src/**".to_string()],
+                type_files: vec!["queries/types.nsql".to_string()],
             },
             target: TargetConfig {
                 target_language: "invalid".to_string(),

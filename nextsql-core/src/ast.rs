@@ -19,6 +19,18 @@ pub struct ValType {
     pub source_column: Option<ColumnRef>,
 }
 
+#[derive(Debug, PartialEq, Clone)]
+pub struct InputField {
+    pub name: String,
+    pub typ: Type,
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct InputType {
+    pub name: String,
+    pub fields: Vec<InputField>,
+}
+
 #[derive(Debug, PartialEq)]
 pub enum TopLevel {
     Query(Query),
@@ -26,6 +38,7 @@ pub enum TopLevel {
     With(WithStatement),
     Relation(Relation),
     ValType(ValType),
+    Input(InputType),
 }
 
 #[derive(Debug, PartialEq)]

@@ -48,7 +48,7 @@ impl LanguageServer for NextSqlLanguageServer {
                 )),
                 completion_provider: Some(CompletionOptions {
                     resolve_provider: Some(false),
-                    trigger_characters: Some(vec![".".to_string(), "=".to_string(), " ".to_string()]),
+                    trigger_characters: Some(vec![".".to_string(), "=".to_string(), " ".to_string(), "$".to_string()]),
                     work_done_progress_options: Default::default(),
                     all_commit_characters: None,
                     completion_item: None,
@@ -161,6 +161,20 @@ impl LanguageServer for NextSqlLanguageServer {
             Some(name) => name,
             None => return Ok(None),
         };
+
+        // 0. Variable reference: $varName -> jump to its declaration in query/mutation arguments
+        let doc_uri = params.text_document_position_params.text_document.uri.clone();
+        if Self::is_variable_at_position(&text, position) {
+            if let Some((decl_line, decl_start, decl_end)) = Self::find_variable_declaration(&text, &word) {
+                return Ok(Some(GotoDefinitionResponse::Scalar(Location {
+                    uri: doc_uri,
+                    range: Range {
+                        start: Position { line: decl_line, character: decl_start },
+                        end: Position { line: decl_line, character: decl_end },
+                    },
+                })));
+            }
+        }
 
         // Load schema
         let file_path = params.text_document_position_params.text_document.uri.path().to_string();
@@ -323,6 +337,51 @@ impl NextSqlLanguageServer {
         }
 
         Some(line[start..end].to_string())
+    }
+
+    /// カーソル位置が$variableの上にあるかを判定する
+    fn is_variable_at_position(text: &str, position: Position) -> bool {
+        let lines: Vec<&str> = text.lines().collect();
+        let line = match lines.get(position.line as usize) {
+            Some(l) => l,
+            None => return false,
+        };
+        let char_pos = position.character as usize;
+        if char_pos > line.len() {
+            return false;
+        }
+
+        // Find the start of the current word
+        let bytes = line.as_bytes();
+        let mut start = char_pos;
+        while start > 0 && (bytes[start - 1].is_ascii_alphanumeric() || bytes[start - 1] == b'_') {
+            start -= 1;
+        }
+
+        // Check if '$' is immediately before the word
+        start > 0 && bytes[start - 1] == b'$'
+    }
+
+    /// variableの宣言位置を見つける（query/mutationの引数リスト内）
+    /// 戻り値: (行番号, 開始カラム, 終了カラム) - $を含む範囲
+    fn find_variable_declaration(text: &str, var_name: &str) -> Option<(u32, u32, u32)> {
+        // Search for $varName in argument declarations: $varName: Type
+        let pattern = format!("${}", var_name);
+        for (line_num, line) in text.lines().enumerate() {
+            // Look for $varName followed by optional whitespace and ':'
+            if let Some(pos) = line.find(&pattern) {
+                let after = &line[pos + pattern.len()..];
+                let after_trimmed = after.trim_start();
+                if after_trimmed.starts_with(':') {
+                    return Some((
+                        line_num as u32,
+                        pos as u32,
+                        (pos + pattern.len()) as u32,
+                    ));
+                }
+            }
+        }
+        None
     }
 
     /// カーソル位置がオブジェクトリテラル内のフィールドキーかを判定し、
