@@ -94,6 +94,7 @@ pub(super) fn find_valtype_params(args: &[Argument], param_order: &[String], reg
 
 /// Emit a Row struct + its `from_row` impl.
 pub(super) fn emit_row_struct(out: &mut String, struct_name: &str, fields: &[RowField]) {
+    out.push_str("#[derive(Debug, Clone)]\n");
     out.push_str(&format!("pub struct {} {{\n", struct_name));
     for f in fields {
         out.push_str(&format!("    pub {}: {},\n", to_snake_case(&f.name), f.rust_type));
@@ -176,6 +177,7 @@ pub(super) fn emit_execute_fn_no_params(
 
 /// Emit a struct definition for an `input` type declaration.
 pub(super) fn emit_input_struct(out: &mut String, input: &InputType, registry: &ValTypeRegistry, input_registry: &InputTypeRegistry, schema: &DatabaseSchema) {
+    out.push_str("#[derive(Debug, Clone)]\n");
     out.push_str(&format!("pub struct {} {{\n", input.name));
     for field in &input.fields {
         let rust_type = resolve_param_rust_type(&field.typ, registry, input_registry, schema);

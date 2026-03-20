@@ -382,6 +382,7 @@ pub(super) fn generate_insertable_mutation(
         .collect();
 
     // ── Insertable struct ──
+    out.push_str("#[derive(Debug, Clone)]\n");
     out.push_str(&format!("pub struct {} {{\n", insertable_struct));
     for col in &insertable_columns {
         let base_type = column_to_rust_type(col, &table.name, registry, schema);
@@ -403,6 +404,7 @@ pub(super) fn generate_insertable_mutation(
 
     // ── Builder struct ──
     let builder_struct = format!("{}Builder", insertable_struct);
+    out.push_str("#[derive(Debug, Clone)]\n");
     out.push_str(&format!("pub struct {} {{\n", builder_struct));
     for col in &insertable_columns {
         let base_type = column_to_rust_type(col, &table.name, registry, schema);
@@ -482,6 +484,7 @@ pub(super) fn generate_insertable_mutation(
     let has_other_params = !other_args.is_empty();
 
     if has_other_params {
+        out.push_str("#[derive(Debug, Clone)]\n");
         out.push_str(&format!("pub struct {} {{\n", params_struct));
         for arg in &mutation.decl.arguments {
             if arg.name == insertable_var_name {
@@ -676,6 +679,7 @@ pub(super) fn generate_updatable_mutation(
         .collect();
 
     // ── Changes struct ──
+    out.push_str("#[derive(Debug, Clone)]\n");
     out.push_str(&format!("pub struct {} {{\n", changes_struct));
     for col in &updatable_columns {
         let inner_type = column_to_rust_type(col, &table.name, registry, schema);
@@ -703,6 +707,7 @@ pub(super) fn generate_updatable_mutation(
 
     // ── Params struct ──
     // Non-updatable args get normal types, the updatable arg gets the Changes struct type.
+    out.push_str("#[derive(Debug, Clone)]\n");
     out.push_str(&format!("pub struct {} {{\n", params_struct));
     for arg in &mutation.decl.arguments {
         if arg.name == updatable_var_name {

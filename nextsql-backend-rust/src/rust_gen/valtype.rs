@@ -102,6 +102,7 @@ pub(super) fn generate_valtype_structs(out: &mut String, registry: &ValTypeRegis
 
     for (name, base_type) in valtypes {
         let rust_base = nextsql_type_to_rust(&Type::BuiltIn(base_type.clone()));
+        out.push_str("#[derive(Debug, Clone, PartialEq)]\n");
         out.push_str(&format!("pub struct {}(pub {});\n\n", name, rust_base));
         out.push_str(&format!("impl nextsql_backend_rust_runtime::ToSqlParam for {} {{\n", name));
         out.push_str("    fn as_any(&self) -> &(dyn std::any::Any + Send + Sync) {\n");
