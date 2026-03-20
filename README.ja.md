@@ -117,7 +117,7 @@ target_language = "rust"
 target_directory = "../generated"
 ```
 
-`nextsql init`コマンドは、デフォルト設定で新しいNextSQLプロジェクトを作成します：
+`nsql init`コマンドは、デフォルト設定で新しいNextSQLプロジェクトを作成します：
 
 ```bash
 # 現在のディレクトリで初期化

@@ -15,7 +15,7 @@ name = "nextsql_cli"
 path = "src/lib.rs"
 
 [[bin]]
-name = "nextsql"
+name = "nsql"
 path = "src/main.rs"
 
 [dependencies]

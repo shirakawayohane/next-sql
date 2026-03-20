@@ -222,13 +222,13 @@
             <div class="step-content">
               <h3>Install NextSQL CLI</h3>
               <p>
-                Install from the
+                Download from the
                 <a
                   href="https://github.com/shirakawayohane/next-sql/releases"
                   target="_blank"
-                  >GitHub releases</a
+                  >GitHub Releases</a
                 >
-                or build from source.
+                page, or install with cargo:
               </p>
               <div class="step-code">
                 <span class="prompt">$ </span>cargo install nextsql-cli
@@ -246,7 +246,7 @@
                 structure.
               </p>
               <div class="step-code">
-                <span class="prompt">$ </span>nextsql init my-project
+                <span class="prompt">$ </span>nsql init my-project
               </div>
             </div>
           </div>
@@ -279,8 +279,7 @@
                 Run the generator and get type-safe Rust modules ready for use.
               </p>
               <div class="step-code">
-                <span class="prompt">$ </span>nextsql generate -s src/ -o
-                generated/ -b rust
+                <span class="prompt">$ </span>nsql gen
               </div>
             </div>
           </div>

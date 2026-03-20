@@ -1,10 +1,10 @@
 # CLI Reference
 
-The `nextsql` command-line tool provides project initialization, validation, code generation, and migration management.
+The `nsql` command-line tool provides project initialization, validation, code generation, and migration management.
 
 ## Installation
 
-Install from [GitHub Releases](https://github.com/shirakawayohane/next-sql/releases) or build from source:
+Download pre-built binaries from [GitHub Releases](https://github.com/shirakawayohane/next-sql/releases), or install with cargo:
 
 ```bash
 cargo install nextsql-cli
@@ -18,10 +18,10 @@ Create a new NextSQL project with default configuration:
 
 ```bash
 # Initialize in current directory
-nextsql init
+nsql init
 
 # Initialize in a specific directory
-nextsql init my-project
+nsql init my-project
 ```
 
 This creates a `next-sql.toml` file and the recommended directory structure.
@@ -31,7 +31,7 @@ This creates a `next-sql.toml` file and the recommended directory structure.
 Parse and validate a single `.nsql` file:
 
 ```bash
-nextsql parse queries.nsql
+nsql parse queries.nsql
 ```
 
 ### check
@@ -39,58 +39,58 @@ nextsql parse queries.nsql
 Validate all `.nsql` files without generating code:
 
 ```bash
-nextsql check -s src/
-nextsql check -s src/ --schema schema.json
+nsql check
 ```
 
-### generate
+### gen
 
 Generate code from `.nsql` files:
 
 ```bash
-nextsql generate -s src/ -o generated/ -b rust
-nextsql generate -s src/ -o generated/ --schema schema.json
+nsql gen
 ```
 
-| Flag | Description |
-|------|-------------|
-| `-s, --source` | Source directory containing `.nsql` files |
-| `-o, --output` | Output directory for generated code |
-| `-b, --backend` | Target language backend (default: `rust`) |
-| `--schema` | Path to database schema JSON file |
+### validate-config
+
+Validate a NextSQL configuration file:
+
+```bash
+nsql validate-config
+nsql validate-config path/to/next-sql.toml
+```
 
 ## Migration Commands
 
 ### Initialize
 
 ```bash
-nextsql migration init
+nsql migration init
 ```
 
 ### Generate
 
 ```bash
-nextsql migration generate create_users_table -d "Create users table"
+nsql migration generate create_users_table -d "Create users table"
 ```
 
 ### List
 
 ```bash
-nextsql migration list
+nsql migration list
 ```
 
 ### Run Migrations
 
 ```bash
 # File-based
-nextsql migration up
-nextsql migration up <timestamp>
-nextsql migration down <timestamp>
+nsql migration up
+nsql migration up <timestamp>
+nsql migration down <timestamp>
 
 # Against database
-nextsql migration db-up --host localhost --port 5432 --database mydb --username user --password pass
-nextsql migration db-down <timestamp> --host localhost --port 5432 --database mydb --username user --password pass
-nextsql migration db-status --host localhost --port 5432 --database mydb --username user --password pass
+nsql migration db-up --host localhost --port 5432 --database mydb --username user --password pass
+nsql migration db-down <timestamp> --host localhost --port 5432 --database mydb --username user --password pass
+nsql migration db-status --host localhost --port 5432 --database mydb --username user --password pass
 ```
 
 ## VSCode Extension

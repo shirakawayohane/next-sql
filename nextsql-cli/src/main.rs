@@ -11,7 +11,7 @@ use migration::{MigrationDirection, MigrationManager};
 use std::path::{Path, PathBuf};
 
 #[derive(Parser)]
-#[command(name = "nextsql")]
+#[command(name = "nsql")]
 #[command(about = "NextSQL CLI tool")]
 struct Cli {
     #[command(subcommand)]
@@ -36,7 +36,7 @@ enum Commands {
         file: PathBuf,
     },
     /// Generate code from NextSQL files
-    Generate {
+    Gen {
         /// Project directory containing next-sql.toml (default: current directory)
         #[arg(default_value = ".")]
         dir: PathBuf,
@@ -185,7 +185,7 @@ async fn main() {
                 std::process::exit(1);
             }
         }
-        Commands::Generate { dir } => {
+        Commands::Gen { dir } => {
             if let Err(e) = handle_generate_command(dir) {
                 eprintln!("Error: {}", e);
                 std::process::exit(1);

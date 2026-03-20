@@ -10,7 +10,7 @@ echo "Building release version..."
 cargo build --release
 
 # Create symlink
-NSQL_PATH="$(pwd)/target/release/nextsql"
+NSQL_PATH="$(pwd)/target/release/nsql"
 SYMLINK_PATH="$HOME/.local/bin/nsql"
 
 # Create ~/.local/bin if it doesn't exist

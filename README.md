@@ -117,7 +117,7 @@ target_language = "rust"
 target_directory = "../generated"
 ```
 
-The `nextsql init` command creates a new NextSQL project with default configuration:
+The `nsql init` command creates a new NextSQL project with default configuration:
 
 ```bash
 # Initialize in current directory

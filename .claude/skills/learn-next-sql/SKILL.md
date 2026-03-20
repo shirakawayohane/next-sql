@@ -398,7 +398,7 @@ Use like regular columns:
 
 ```bash
 # Initialize a new NextSQL project (creates next-sql.toml)
-nextsql init [dir]
+nsql init [dir]
 ```
 
 ### Configuration (`next-sql.toml`)
@@ -419,37 +419,37 @@ target_directory = "../generated"  # Output directory for generated code
 
 ```bash
 # Generate code from .nsql files
-nextsql generate -s <source_dir> -o <output_dir> [-b rust] [--schema schema.json]
+nsql gen
 
 # Check .nsql files for errors without generating code
-nextsql check -s <source_dir> [--schema schema.json]
+nsql check
 
 # Parse and validate a single .nsql file
-nextsql parse <file.nsql>
+nsql parse <file.nsql>
 ```
 
 ### Migrations
 
 ```bash
 # Initialize migrations directory
-nextsql migration init
+nsql migration init
 
 # Generate a new migration
-nextsql migration generate <name> [-d "description"]
+nsql migration generate <name> [-d "description"]
 
 # List migrations
-nextsql migration list
+nsql migration list
 
 # Run migrations (file-based)
-nextsql migration up [timestamp]
-nextsql migration down <timestamp>
+nsql migration up [timestamp]
+nsql migration down <timestamp>
 
 # Run migrations against database
-nextsql migration db-up [timestamp] --host localhost --port 5432 --database mydb --username user --password pass
-nextsql migration db-down <timestamp> --host localhost --port 5432 --database mydb --username user --password pass
+nsql migration db-up [timestamp] --host localhost --port 5432 --database mydb --username user --password pass
+nsql migration db-down <timestamp> --host localhost --port 5432 --database mydb --username user --password pass
 
 # Show database migration status
-nextsql migration db-status --host localhost --port 5432 --database mydb --username user --password pass
+nsql migration db-status --host localhost --port 5432 --database mydb --username user --password pass
 ```
 
 ## References
