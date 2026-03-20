@@ -227,7 +227,6 @@ pub enum BuiltInType {
     Uuid,
     String,
     Bool,
-    Numeric,
     Decimal,
     Json,
 }
@@ -261,7 +260,6 @@ impl Display for BuiltInType {
                 BuiltInType::Uuid => "uuid",
                 BuiltInType::String => "string",
                 BuiltInType::Bool => "bool",
-                BuiltInType::Numeric => "numeric",
                 BuiltInType::Decimal => "decimal",
                 BuiltInType::Json => "json",
             }

@@ -1,23 +1,25 @@
 use std::collections::HashMap;
 use nextsql_core::ast::*;
+use nextsql_core::schema::DatabaseSchema;
 use crate::sql_gen::{GeneratedSql, WhenClauseType};
-use crate::type_mapping::nextsql_type_to_rust;
+use crate::type_mapping::{nextsql_type_to_rust, is_enum_type, enum_rust_type};
 
 use super::RowField;
 use super::InputTypeRegistry;
 use super::valtype::ValTypeRegistry;
 use super::naming::to_snake_case;
 
-/// Resolve the Rust type for a parameter, handling ValType wrappers in Array and Optional.
-fn resolve_param_rust_type(typ: &Type, registry: &ValTypeRegistry) -> String {
+/// Resolve the Rust type for a parameter, handling ValType wrappers, enums, Array and Optional.
+fn resolve_param_rust_type(typ: &Type, registry: &ValTypeRegistry, schema: &DatabaseSchema) -> String {
     match typ {
         Type::UserDefined(name) if registry.is_valtype(name) => name.clone(),
+        Type::UserDefined(name) if is_enum_type(name, schema) => enum_rust_type(name),
         Type::Array(inner) => {
-            let inner_type = resolve_param_rust_type(inner, registry);
+            let inner_type = resolve_param_rust_type(inner, registry, schema);
             format!("Vec<{}>", inner_type)
         }
         Type::Optional(inner) => {
-            let inner_type = resolve_param_rust_type(inner, registry);
+            let inner_type = resolve_param_rust_type(inner, registry, schema);
             format!("Option<{}>", inner_type)
         }
         other => nextsql_type_to_rust(other),
@@ -101,7 +103,14 @@ pub(super) fn emit_row_struct(out: &mut String, struct_name: &str, fields: &[Row
     out.push_str("    pub fn from_row(row: &dyn super::runtime::Row) -> Self {\n");
     out.push_str("        Self {\n");
     for (i, f) in fields.iter().enumerate() {
-        let getter_expr = if let Some(ref wrapper) = f.valtype_wrapper {
+        let getter_expr = if f.enum_parse {
+            // Enum field: parse from string
+            if f.getter.contains("get_opt_") {
+                format!("row.{}({}).map(|s| s.parse().unwrap())", f.getter, i)
+            } else {
+                format!("row.{}({}).parse().unwrap()", f.getter, i)
+            }
+        } else if let Some(ref wrapper) = f.valtype_wrapper {
             // Check if the getter is an optional variant
             if f.getter.contains("get_opt_") {
                 format!("row.{}({}).map({})", f.getter, i, wrapper)
@@ -165,10 +174,10 @@ pub(super) fn emit_execute_fn_no_params(
 // ── Input struct emission ──────────────────────────────────────────────
 
 /// Emit a struct definition for an `input` type declaration.
-pub(super) fn emit_input_struct(out: &mut String, input: &InputType, registry: &ValTypeRegistry) {
+pub(super) fn emit_input_struct(out: &mut String, input: &InputType, registry: &ValTypeRegistry, schema: &DatabaseSchema) {
     out.push_str(&format!("pub struct {} {{\n", input.name));
     for field in &input.fields {
-        let rust_type = resolve_param_rust_type(&field.typ, registry);
+        let rust_type = resolve_param_rust_type(&field.typ, registry, schema);
         out.push_str(&format!("    pub {}: {},\n", to_snake_case(&field.name), rust_type));
     }
     out.push_str("}\n\n");
@@ -281,13 +290,14 @@ pub(super) fn emit_query_fn_individual_params(
     sql: &str,
     registry: &ValTypeRegistry,
     input_registry: &InputTypeRegistry,
+    schema: &DatabaseSchema,
 ) {
     // Function signature
     out.push_str(&format!(
         "pub async fn {}(\n    client: &(impl super::runtime::Client + ?Sized),\n",
         fn_name,
     ));
-    emit_individual_fn_params(out, args, registry, input_registry);
+    emit_individual_fn_params(out, args, registry, input_registry, schema);
     out.push_str(&format!(
         ") -> Result<Vec<{}>, Box<dyn std::error::Error + Send + Sync>> {{\n",
         row_struct,
@@ -323,12 +333,13 @@ pub(super) fn emit_execute_fn_individual_params(
     sql: &str,
     registry: &ValTypeRegistry,
     input_registry: &InputTypeRegistry,
+    schema: &DatabaseSchema,
 ) {
     out.push_str(&format!(
         "pub async fn {}(\n    client: &(impl super::runtime::Client + ?Sized),\n",
         fn_name,
     ));
-    emit_individual_fn_params(out, args, registry, input_registry);
+    emit_individual_fn_params(out, args, registry, input_registry, schema);
     out.push_str(") -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {\n");
 
     let prelude = gen_individual_valtype_prelude(args, param_order, registry);
@@ -357,13 +368,14 @@ pub(super) fn emit_dynamic_query_fn_individual_params(
     gen: &GeneratedSql,
     registry: &ValTypeRegistry,
     input_registry: &InputTypeRegistry,
+    schema: &DatabaseSchema,
 ) {
     // Function signature
     out.push_str(&format!(
         "#[allow(unused_assignments)]\npub async fn {}(\n    client: &(impl super::runtime::Client + ?Sized),\n",
         fn_name,
     ));
-    emit_individual_fn_params(out, args, registry, input_registry);
+    emit_individual_fn_params(out, args, registry, input_registry, schema);
     out.push_str(&format!(
         ") -> Result<Vec<{}>, Box<dyn std::error::Error + Send + Sync>> {{\n",
         row_struct,
@@ -608,9 +620,10 @@ fn emit_individual_fn_params(
     args: &[Argument],
     registry: &ValTypeRegistry,
     input_registry: &InputTypeRegistry,
+    schema: &DatabaseSchema,
 ) {
     for arg in args {
-        let rust_type = resolve_param_rust_type(&arg.typ, registry);
+        let rust_type = resolve_param_rust_type(&arg.typ, registry, schema);
         // Check if this is an input type (pass by reference)
         let is_input = matches!(&arg.typ, Type::UserDefined(name) if input_registry.get(name).is_some());
         if is_input {

@@ -805,7 +805,7 @@ impl<'a> TypeValidator<'a> {
         matches!(builtin,
             BuiltInType::I16 | BuiltInType::I32 | BuiltInType::I64 |
             BuiltInType::F32 | BuiltInType::F64 |
-            BuiltInType::Numeric | BuiltInType::Decimal
+            BuiltInType::Decimal
         )
     }
 

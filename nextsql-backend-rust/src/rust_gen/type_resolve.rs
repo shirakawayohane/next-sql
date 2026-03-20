@@ -1,7 +1,7 @@
 use nextsql_core::ast::*;
 use nextsql_core::schema::DatabaseSchema;
 use crate::sql_gen;
-use crate::type_mapping::{nextsql_type_to_rust, nextsql_type_to_row_getter};
+use crate::type_mapping::{nextsql_type_to_rust, nextsql_type_to_row_getter, is_enum_type, enum_rust_type};
 
 use super::RowField;
 use super::valtype::ValTypeRegistry;
@@ -31,7 +31,7 @@ pub(super) fn resolve_property_access_type(
     let ts = schema.get_table(target_table)?;
     let cs = ts.get_column(column_name)?;
     let typ = effective_type(&cs.column_type, cs.nullable);
-    let field = make_row_field(column_name, target_table, &typ, registry);
+    let field = make_row_field(column_name, target_table, &typ, registry, schema);
     Some((field.rust_type, field.getter, field.valtype_wrapper))
 }
 
@@ -88,6 +88,7 @@ pub(super) fn resolve_select_fields(
                     rust_type: nextsql_type_to_rust(&typ),
                     getter: nextsql_type_to_row_getter(&typ),
                     valtype_wrapper: None,
+                    enum_parse: false,
                 });
             } else {
                 // Try to resolve aliased PropertyAccess via relation
@@ -100,6 +101,7 @@ pub(super) fn resolve_select_fields(
                     rust_type,
                     getter,
                     valtype_wrapper,
+                    enum_parse: false,
                 });
             }
             col_idx += 1;
@@ -114,7 +116,7 @@ pub(super) fn resolve_select_fields(
                         if let Some(table_schema) = schema.get_table(tbl_name) {
                             for c in &table_schema.columns {
                                 let typ = effective_type(&c.column_type, c.nullable);
-                                fields.push(make_row_field(&c.name, tbl_name, &typ, registry));
+                                fields.push(make_row_field(&c.name, tbl_name, &typ, registry, schema));
                                 col_idx += 1;
                             }
                         }
@@ -124,7 +126,7 @@ pub(super) fn resolve_select_fields(
                         if let Some(table_schema) = schema.get_table(tbl_name) {
                             for c in &table_schema.columns {
                                 let typ = effective_type(&c.column_type, c.nullable);
-                                fields.push(make_row_field(&c.name, tbl_name, &typ, registry));
+                                fields.push(make_row_field(&c.name, tbl_name, &typ, registry, schema));
                                 col_idx += 1;
                             }
                         }
@@ -134,7 +136,7 @@ pub(super) fn resolve_select_fields(
                         if let Some(table_schema) = schema.get_table(from_table) {
                             for c in &table_schema.columns {
                                 let typ = effective_type(&c.column_type, c.nullable);
-                                fields.push(make_row_field(&c.name, from_table, &typ, registry));
+                                fields.push(make_row_field(&c.name, from_table, &typ, registry, schema));
                                 col_idx += 1;
                             }
                         }
@@ -165,6 +167,7 @@ pub(super) fn resolve_select_fields(
                     rust_type: nextsql_type_to_rust(&typ),
                     getter: nextsql_type_to_row_getter(&typ),
                     valtype_wrapper: None,
+                    enum_parse: false,
                 });
                 col_idx += 1;
             }
@@ -180,6 +183,7 @@ pub(super) fn resolve_select_fields(
                     rust_type,
                     getter,
                     valtype_wrapper,
+                    enum_parse: false,
                 });
                 col_idx += 1;
             }
@@ -192,6 +196,7 @@ pub(super) fn resolve_select_fields(
                     rust_type: "String".to_string(),
                     getter: "get_string".to_string(),
                     valtype_wrapper: None,
+                    enum_parse: false,
                 });
                 col_idx += 1;
             }
@@ -207,6 +212,7 @@ pub(super) fn resolve_select_fields(
                         rust_type: nextsql_type_to_rust(&typ),
                         getter: nextsql_type_to_row_getter(&typ),
                         valtype_wrapper: None,
+                        enum_parse: false,
                     });
                 } else {
                     fields.push(RowField {
@@ -214,6 +220,7 @@ pub(super) fn resolve_select_fields(
                         rust_type: "String".to_string(),
                         getter: "get_string".to_string(),
                         valtype_wrapper: None,
+                        enum_parse: false,
                     });
                 }
                 col_idx += 1;
@@ -227,6 +234,7 @@ pub(super) fn resolve_select_fields(
                     rust_type: "String".to_string(),
                     getter: "get_string".to_string(),
                     valtype_wrapper: None,
+                    enum_parse: false,
                 });
                 col_idx += 1;
             }
@@ -250,7 +258,7 @@ pub(super) fn resolve_returning_fields(
                 if let Some(ts) = schema.get_table(table) {
                     for c in &ts.columns {
                         let typ = effective_type(&c.column_type, c.nullable);
-                        fields.push(make_row_field(&c.name, table, &typ, registry));
+                        fields.push(make_row_field(&c.name, table, &typ, registry, schema));
                     }
                 }
             }
@@ -258,7 +266,7 @@ pub(super) fn resolve_returning_fields(
                 if let Some(ts) = schema.get_table(table_name) {
                     for c in &ts.columns {
                         let typ = effective_type(&c.column_type, c.nullable);
-                        fields.push(make_row_field(&c.name, table_name, &typ, registry));
+                        fields.push(make_row_field(&c.name, table_name, &typ, registry, schema));
                     }
                 }
             }
@@ -299,6 +307,7 @@ pub(super) fn resolve_aggregate_clause_fields(
                 rust_type: nextsql_type_to_rust(&typ),
                 getter: nextsql_type_to_row_getter(&typ),
                 valtype_wrapper: None,
+                enum_parse: false,
             });
         } else {
             fields.push(RowField {
@@ -306,6 +315,7 @@ pub(super) fn resolve_aggregate_clause_fields(
                 rust_type: "String".to_string(),
                 getter: "get_string".to_string(),
                 valtype_wrapper: None,
+                enum_parse: false,
             });
         }
     }
@@ -440,11 +450,12 @@ pub(super) fn field_from_schema(table: &str, column: &str, schema: &DatabaseSche
     let ts = schema.get_table(table)?;
     let cs = ts.get_column(column)?;
     let typ = effective_type(&cs.column_type, cs.nullable);
-    Some(make_row_field(column, table, &typ, registry))
+    Some(make_row_field(column, table, &typ, registry, schema))
 }
 
-/// Create a RowField, checking the valtype registry for type overrides.
-pub(super) fn make_row_field(column: &str, table: &str, typ: &Type, registry: &ValTypeRegistry) -> RowField {
+/// Create a RowField, checking the valtype registry for type overrides
+/// and the schema for enum type resolution.
+pub(super) fn make_row_field(column: &str, table: &str, typ: &Type, registry: &ValTypeRegistry, schema: &DatabaseSchema) -> RowField {
     if let Some((vt_name, _vt_base)) = registry.lookup(table, column) {
         // Use the valtype wrapper. The getter is still the raw type getter.
         let getter = nextsql_type_to_row_getter(typ);
@@ -457,6 +468,28 @@ pub(super) fn make_row_field(column: &str, table: &str, typ: &Type, registry: &V
             rust_type,
             getter,
             valtype_wrapper: wrapper,
+            enum_parse: false,
+        }
+    } else if let Some(enum_name) = extract_enum_type_name(typ, schema) {
+        // This is a PostgreSQL enum type - use the generated Rust enum
+        let rust_enum = enum_rust_type(&enum_name);
+        let is_optional = matches!(typ, Type::Optional(_));
+        let getter = if is_optional {
+            "get_opt_string".to_string()
+        } else {
+            "get_string".to_string()
+        };
+        let rust_type = if is_optional {
+            format!("Option<{}>", rust_enum)
+        } else {
+            rust_enum
+        };
+        RowField {
+            name: column.to_string(),
+            rust_type,
+            getter,
+            valtype_wrapper: None,
+            enum_parse: true,
         }
     } else {
         RowField {
@@ -464,7 +497,18 @@ pub(super) fn make_row_field(column: &str, table: &str, typ: &Type, registry: &V
             rust_type: nextsql_type_to_rust(typ),
             getter: nextsql_type_to_row_getter(typ),
             valtype_wrapper: None,
+            enum_parse: false,
         }
+    }
+}
+
+/// Extract the enum type name from a Type if it's a UserDefined type that corresponds
+/// to a known enum in the schema. Handles Optional wrapping.
+fn extract_enum_type_name(typ: &Type, schema: &DatabaseSchema) -> Option<String> {
+    match typ {
+        Type::UserDefined(name) if is_enum_type(name, schema) => Some(name.clone()),
+        Type::Optional(inner) => extract_enum_type_name(inner, schema),
+        _ => None,
     }
 }
 
@@ -474,6 +518,7 @@ pub(super) fn fallback_field(name: &str) -> RowField {
         rust_type: "String".to_string(), // type could not be inferred
         getter: "get_string".to_string(),
         valtype_wrapper: None,
+        enum_parse: false,
     }
 }
 
@@ -579,30 +624,38 @@ pub(super) fn is_simple_wildcard_returning(returning: &[Column], table_name: &st
 }
 
 /// Generate a model struct (and from_row impl) for a table schema.
-pub(super) fn generate_model_struct(out: &mut String, table: &nextsql_core::schema::TableSchema, registry: &ValTypeRegistry) {
+pub(super) fn generate_model_struct(out: &mut String, table: &nextsql_core::schema::TableSchema, registry: &ValTypeRegistry, schema: &DatabaseSchema) {
     let model_name = super::naming::table_name_to_model_name(&table.name);
     let fields: Vec<RowField> = table
         .columns
         .iter()
         .map(|c| {
             let typ = effective_type(&c.column_type, c.nullable);
-            make_row_field(&c.name, &table.name, &typ, registry)
+            make_row_field(&c.name, &table.name, &typ, registry, schema)
         })
         .collect();
     emit_row_struct(out, &model_name, &fields);
 }
 
-/// Generate a Rust type string for a column, respecting nullability and valtype overrides.
+/// Generate a Rust type string for a column, respecting nullability, valtype overrides,
+/// and enum type resolution.
 pub(super) fn column_to_rust_type(
     col: &nextsql_core::schema::ColumnSchema,
     table_name: &str,
     registry: &ValTypeRegistry,
+    schema: &DatabaseSchema,
 ) -> String {
     let typ = effective_type(&col.column_type, col.nullable);
     if let Some((vt_name, _)) = registry.lookup(table_name, &col.name) {
         match &typ {
             Type::Optional(_) => format!("Option<{}>", vt_name),
             _ => vt_name.clone(),
+        }
+    } else if let Some(enum_name) = extract_enum_type_name(&typ, schema) {
+        let rust_enum = enum_rust_type(&enum_name);
+        match &typ {
+            Type::Optional(_) => format!("Option<{}>", rust_enum),
+            _ => rust_enum,
         }
     } else {
         nextsql_type_to_rust(&typ)

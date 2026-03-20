@@ -1,4 +1,4 @@
-use crate::schema::{DatabaseSchema, TableSchema, ColumnSchema};
+use crate::schema::{DatabaseSchema, TableSchema, ColumnSchema, EnumSchema};
 use crate::ast::{Type, BuiltInType};
 use postgres::{Client, Error};
 use std::collections::BTreeMap;
@@ -78,6 +78,29 @@ impl SchemaLoader {
             schema.add_table(table);
         }
 
+        // Load enum types
+        let enum_query = r#"
+            SELECT t.typname, e.enumlabel
+            FROM pg_catalog.pg_type t
+            JOIN pg_catalog.pg_enum e ON e.enumtypid = t.oid
+            JOIN pg_catalog.pg_namespace n ON n.oid = t.typnamespace
+            WHERE n.nspname = 'public'
+            ORDER BY t.typname, e.enumsortorder
+        "#;
+
+        let enum_rows = client.query(enum_query, &[])?;
+
+        let mut enums: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        for row in enum_rows {
+            let type_name: String = row.get(0);
+            let variant: String = row.get(1);
+            enums.entry(type_name).or_default().push(variant);
+        }
+
+        for (name, variants) in enums {
+            schema.add_enum(EnumSchema { name, variants });
+        }
+
         Ok(schema)
     }
 
@@ -109,18 +132,33 @@ impl SchemaLoader {
     /// Returns a hash string that changes when any table/column DDL changes.
     pub fn fetch_schema_fingerprint(client: &mut Client) -> Result<String, Error> {
         let query = r#"
-            SELECT md5(string_agg(
-                cls.relname || '.' || att.attname || ':' || typ.typname || ':' || att.attnotnull::text,
-                ',' ORDER BY cls.relname, att.attnum
-            ))
-            FROM pg_catalog.pg_class cls
-            JOIN pg_catalog.pg_namespace nsp ON nsp.oid = cls.relnamespace
-            JOIN pg_catalog.pg_attribute att ON att.attrelid = cls.oid
-            JOIN pg_catalog.pg_type typ ON typ.oid = att.atttypid
-            WHERE nsp.nspname = 'public'
-                AND cls.relkind = 'r'
-                AND att.attnum > 0
-                AND NOT att.attisdropped
+            SELECT md5(
+                COALESCE((
+                    SELECT string_agg(
+                        cls.relname || '.' || att.attname || ':' || typ.typname || ':' || att.attnotnull::text,
+                        ',' ORDER BY cls.relname, att.attnum
+                    )
+                    FROM pg_catalog.pg_class cls
+                    JOIN pg_catalog.pg_namespace nsp ON nsp.oid = cls.relnamespace
+                    JOIN pg_catalog.pg_attribute att ON att.attrelid = cls.oid
+                    JOIN pg_catalog.pg_type typ ON typ.oid = att.atttypid
+                    WHERE nsp.nspname = 'public'
+                        AND cls.relkind = 'r'
+                        AND att.attnum > 0
+                        AND NOT att.attisdropped
+                ), '')
+                || '|' ||
+                COALESCE((
+                    SELECT string_agg(
+                        t.typname || ':' || e.enumlabel,
+                        ',' ORDER BY t.typname, e.enumsortorder
+                    )
+                    FROM pg_catalog.pg_type t
+                    JOIN pg_catalog.pg_enum e ON e.enumtypid = t.oid
+                    JOIN pg_catalog.pg_namespace n ON n.oid = t.typnamespace
+                    WHERE n.nspname = 'public'
+                ), '')
+            )
         "#;
         let row = client.query_one(query, &[])?;
         let hash: Option<String> = row.get(0);

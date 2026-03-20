@@ -109,7 +109,6 @@ fn test_parse_type() {
         "uuid",
         "string",
         "bool",
-        "numeric",
         "decimal",
         "json",
     ];
@@ -227,7 +226,6 @@ fn parse_builtin_type_from_pair(pair: pest::iterators::Pair<Rule>) -> BuiltInTyp
         Rule::uuid_type => BuiltInType::Uuid,
         Rule::string_type => BuiltInType::String,
         Rule::bool_type => BuiltInType::Bool,
-        Rule::numeric_type => BuiltInType::Numeric,
         Rule::decimal_type => BuiltInType::Decimal,
         Rule::json_type => BuiltInType::Json,
         _ => unreachable!(),
@@ -294,7 +292,6 @@ fn parse_type(pairs: pest::iterators::Pairs<Rule>) -> Type {
             Rule::uuid_type => Type::BuiltIn(BuiltInType::Uuid),
             Rule::string_type => Type::BuiltIn(BuiltInType::String),
             Rule::bool_type => Type::BuiltIn(BuiltInType::Bool),
-            Rule::numeric_type => Type::BuiltIn(BuiltInType::Numeric),
             Rule::decimal_type => Type::BuiltIn(BuiltInType::Decimal),
             Rule::json_type => Type::BuiltIn(BuiltInType::Json),
             _ => {
@@ -494,7 +491,6 @@ fn parse_relation_decl(pairs: pest::iterators::Pairs<Rule>) -> RelationDecl {
                     "uuid" => crate::ast::BuiltInType::Uuid,
                     "string" => crate::ast::BuiltInType::String,
                     "bool" => crate::ast::BuiltInType::Bool,
-                    "numeric" => crate::ast::BuiltInType::Numeric,
                     "decimal" => crate::ast::BuiltInType::Decimal,
                     "json" => crate::ast::BuiltInType::Json,
                     _ => unreachable!("Unknown builtin type: {}", pair.as_str()),

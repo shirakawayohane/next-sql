@@ -109,12 +109,11 @@ date_type = @{ "date" }
 uuid_type = @{ "uuid" }
 string_type = @{ "string" }
 bool_type = @{ "bool" }
-numeric_type = @{ "numeric" }
 decimal_type = @{ "decimal" }
 json_type = @{ "json" }
 
 question_mark = @{ "?" }
-builtin_type = { i16_type | i32_type | i64_type | f32_type | f64_type | numeric_type | decimal_type | timestamptz_type | timestamp_type | date_type | uuid_type | json_type | string_type | bool_type }
+builtin_type = { i16_type | i32_type | i64_type | f32_type | f64_type | decimal_type | timestamptz_type | timestamp_type | date_type | uuid_type | json_type | string_type | bool_type }
 user_defined_type = { ident }
 
 insertable = { "Insertable" ~ "<" ~ type ~ ">" }

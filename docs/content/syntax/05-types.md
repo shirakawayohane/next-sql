@@ -17,7 +17,6 @@ NextSQL has a comprehensive type system that ensures type safety from query defi
 | `timestamp` | Timestamp without timezone |
 | `timestamptz` | Timestamp with timezone |
 | `date` | Date |
-| `numeric` | Arbitrary precision number |
 | `decimal` | Decimal number |
 | `json` | JSON value |
 

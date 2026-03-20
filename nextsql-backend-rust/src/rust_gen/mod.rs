@@ -8,10 +8,10 @@ use std::collections::{HashMap, HashSet};
 use nextsql_core::ast::*;
 use nextsql_core::schema::DatabaseSchema;
 use crate::sql_gen;
-use crate::type_mapping::nextsql_type_to_rust;
+use crate::type_mapping::{nextsql_type_to_rust, to_pascal_case_type};
 
 use valtype::ValTypeRegistry;
-use type_resolve::generate_model_struct;
+use type_resolve::{generate_model_struct};
 use valtype::generate_valtype_structs;
 use query_gen::{generate_query, generate_mutation};
 
@@ -63,6 +63,8 @@ struct RowField {
     getter: String,
     /// If set, wrap the getter call with this valtype constructor.
     valtype_wrapper: Option<String>,
+    /// If true, the field is a parsed enum type (use .parse().unwrap() on the string getter).
+    enum_parse: bool,
 }
 
 /// Configuration for struct naming patterns.
@@ -186,10 +188,13 @@ pub fn generate_rust_file_full(module: &Module, schema: &DatabaseSchema, skip_va
         generate_valtype_structs(&mut out, &registry);
     }
 
+    // Generate Rust enums for PostgreSQL enum types in the schema
+    generate_db_enums(&mut out, schema);
+
     // Emit input type structs
     for toplevel in &module.toplevels {
         if let TopLevel::Input(input) = toplevel {
-            emit::emit_input_struct(&mut out, input, &registry);
+            emit::emit_input_struct(&mut out, input, &registry, schema);
         }
     }
 
@@ -211,7 +216,7 @@ pub fn generate_rust_file_full(module: &Module, schema: &DatabaseSchema, skip_va
     sorted_tables.sort();
     for table_name in sorted_tables {
         if let Some(table_schema) = schema.get_table(table_name) {
-            generate_model_struct(&mut out, table_schema, &registry);
+            generate_model_struct(&mut out, table_schema, &registry, schema);
         }
     }
 
@@ -222,6 +227,65 @@ pub fn generate_rust_file_full(module: &Module, schema: &DatabaseSchema, skip_va
         filename: String::new(),
         content: out,
         errors,
+    }
+}
+
+/// Generate Rust enum definitions for all PostgreSQL enum types in the schema.
+fn generate_db_enums(out: &mut String, schema: &DatabaseSchema) {
+    for (enum_name, enum_schema) in &schema.enums {
+        let rust_name = to_pascal_case_type(enum_name);
+
+        // Enum definition
+        out.push_str("#[derive(Debug, Clone, PartialEq)]\n");
+        out.push_str(&format!("pub enum {} {{\n", rust_name));
+        for variant in &enum_schema.variants {
+            out.push_str(&format!("    {},\n", to_pascal_case_type(variant)));
+        }
+        out.push_str("}\n\n");
+
+        // Display impl (for SQL parameter binding - converts to the PostgreSQL string value)
+        out.push_str(&format!("impl std::fmt::Display for {} {{\n", rust_name));
+        out.push_str("    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {\n");
+        out.push_str("        match self {\n");
+        for variant in &enum_schema.variants {
+            out.push_str(&format!(
+                "            {}::{} => write!(f, \"{}\"),\n",
+                rust_name,
+                to_pascal_case_type(variant),
+                variant,
+            ));
+        }
+        out.push_str("        }\n");
+        out.push_str("    }\n");
+        out.push_str("}\n\n");
+
+        // FromStr impl (for parsing from database strings)
+        out.push_str(&format!("impl std::str::FromStr for {} {{\n", rust_name));
+        out.push_str("    type Err = String;\n");
+        out.push_str("    fn from_str(s: &str) -> Result<Self, Self::Err> {\n");
+        out.push_str("        match s {\n");
+        for variant in &enum_schema.variants {
+            out.push_str(&format!(
+                "            \"{}\" => Ok({}::{}),\n",
+                variant,
+                rust_name,
+                to_pascal_case_type(variant),
+            ));
+        }
+        out.push_str(&format!(
+            "            _ => Err(format!(\"Unknown {} variant: {{}}\", s)),\n",
+            rust_name
+        ));
+        out.push_str("        }\n");
+        out.push_str("    }\n");
+        out.push_str("}\n\n");
+
+        // ToSqlParam impl
+        out.push_str(&format!("impl super::runtime::ToSqlParam for {} {{\n", rust_name));
+        out.push_str("    fn as_any(&self) -> &(dyn std::any::Any + Send + Sync) {\n");
+        out.push_str("        self\n");
+        out.push_str("    }\n");
+        out.push_str("}\n\n");
     }
 }
 

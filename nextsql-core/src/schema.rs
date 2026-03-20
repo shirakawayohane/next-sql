@@ -3,8 +3,16 @@ use serde::{Deserialize, Serialize};
 use crate::ast::Type;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EnumSchema {
+    pub name: String,
+    pub variants: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DatabaseSchema {
     pub tables: BTreeMap<String, TableSchema>,
+    #[serde(default)]
+    pub enums: BTreeMap<String, EnumSchema>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -27,6 +35,7 @@ impl DatabaseSchema {
     pub fn new() -> Self {
         Self {
             tables: BTreeMap::new(),
+            enums: BTreeMap::new(),
         }
     }
 
@@ -36,6 +45,14 @@ impl DatabaseSchema {
 
     pub fn add_table(&mut self, table: TableSchema) {
         self.tables.insert(table.name.clone(), table);
+    }
+
+    pub fn add_enum(&mut self, e: EnumSchema) {
+        self.enums.insert(e.name.clone(), e);
+    }
+
+    pub fn get_enum(&self, name: &str) -> Option<&EnumSchema> {
+        self.enums.get(name)
     }
 }
 

@@ -1,4 +1,29 @@
 use nextsql_core::ast::{Type, BuiltInType, UtilityType, Insertable, ChangeSet};
+use nextsql_core::schema::DatabaseSchema;
+
+/// Convert a snake_case or lowercase name to PascalCase.
+/// e.g., "order_status" -> "OrderStatus", "active" -> "Active"
+pub fn to_pascal_case_type(name: &str) -> String {
+    name.split('_')
+        .map(|part| {
+            let mut chars = part.chars();
+            match chars.next() {
+                None => String::new(),
+                Some(c) => c.to_uppercase().to_string() + &chars.as_str().to_lowercase(),
+            }
+        })
+        .collect()
+}
+
+/// Check if a UserDefined type name corresponds to a known enum in the schema.
+pub fn is_enum_type(name: &str, schema: &DatabaseSchema) -> bool {
+    schema.enums.contains_key(name)
+}
+
+/// Get the Rust enum type name for a PostgreSQL enum type.
+pub fn enum_rust_type(name: &str) -> String {
+    to_pascal_case_type(name)
+}
 
 pub fn nextsql_type_to_rust(typ: &Type) -> String {
     match typ {
@@ -14,7 +39,6 @@ pub fn nextsql_type_to_rust(typ: &Type) -> String {
             BuiltInType::Timestamp => "chrono::NaiveDateTime".to_string(),
             BuiltInType::Timestamptz => "chrono::DateTime<chrono::Utc>".to_string(),
             BuiltInType::Date => "chrono::NaiveDate".to_string(),
-            BuiltInType::Numeric => "rust_decimal::Decimal".to_string(),
             BuiltInType::Decimal => "rust_decimal::Decimal".to_string(),
             BuiltInType::Json => "serde_json::Value".to_string(),
         },
@@ -55,7 +79,6 @@ pub fn nextsql_type_to_row_getter(typ: &Type) -> String {
             BuiltInType::Timestamp => "get_timestamp".to_string(),
             BuiltInType::Timestamptz => "get_timestamptz".to_string(),
             BuiltInType::Date => "get_date".to_string(),
-            BuiltInType::Numeric => "get_decimal".to_string(),
             BuiltInType::Decimal => "get_decimal".to_string(),
             BuiltInType::Json => "get_json".to_string(),
         },

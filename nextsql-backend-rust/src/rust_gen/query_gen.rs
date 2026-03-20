@@ -123,7 +123,7 @@ pub(super) fn generate_query(out: &mut String, query: &Query, schema: &DatabaseS
             if let Some(ts) = schema.get_table(&stmt.from.table) {
                 for c in &ts.columns {
                     let typ = effective_type(&c.column_type, c.nullable);
-                    row_fields.push(make_row_field(&c.name, &stmt.from.table, &typ, registry));
+                    row_fields.push(make_row_field(&c.name, &stmt.from.table, &typ, registry, schema));
                 }
             }
         }
@@ -160,9 +160,9 @@ pub(super) fn generate_query(out: &mut String, query: &Query, schema: &DatabaseS
         }
         ParamStyle::Individual => {
             if gen.is_dynamic && !gen.when_clauses.is_empty() {
-                emit_dynamic_query_fn_individual_params(out, &fn_name, &query.decl.arguments, &effective_row_struct, &gen, registry, input_registry);
+                emit_dynamic_query_fn_individual_params(out, &fn_name, &query.decl.arguments, &effective_row_struct, &gen, registry, input_registry, schema);
             } else {
-                emit_query_fn_individual_params(out, &fn_name, &query.decl.arguments, &gen.params, &effective_row_struct, &gen.sql, registry, input_registry);
+                emit_query_fn_individual_params(out, &fn_name, &query.decl.arguments, &gen.params, &effective_row_struct, &gen.sql, registry, input_registry, schema);
             }
         }
         _ => {
@@ -212,7 +212,7 @@ pub(super) fn generate_mutation(out: &mut String, mutation: &Mutation, schema: &
                                     emit_query_fn_no_params(out, &fn_name, &effective_row, &gen.sql);
                                 }
                                 ParamStyle::Individual => {
-                                    emit_query_fn_individual_params(out, &fn_name, &mutation.decl.arguments, &gen.params, &effective_row, &gen.sql, registry, input_registry);
+                                    emit_query_fn_individual_params(out, &fn_name, &mutation.decl.arguments, &gen.params, &effective_row, &gen.sql, registry, input_registry, schema);
                                 }
                                 _ => unreachable!(),
                             }
@@ -222,7 +222,7 @@ pub(super) fn generate_mutation(out: &mut String, mutation: &Mutation, schema: &
                                     emit_execute_fn_no_params(out, &fn_name, &gen.sql);
                                 }
                                 ParamStyle::Individual => {
-                                    emit_execute_fn_individual_params(out, &fn_name, &mutation.decl.arguments, &gen.params, &gen.sql, registry, input_registry);
+                                    emit_execute_fn_individual_params(out, &fn_name, &mutation.decl.arguments, &gen.params, &gen.sql, registry, input_registry, schema);
                                 }
                                 _ => unreachable!(),
                             }
@@ -271,7 +271,7 @@ pub(super) fn generate_mutation(out: &mut String, mutation: &Mutation, schema: &
                                         emit_query_fn_no_params(out, &fn_name, &effective_row, &gen.sql);
                                     }
                                     ParamStyle::Individual => {
-                                        emit_query_fn_individual_params(out, &fn_name, &mutation.decl.arguments, &gen.params, &effective_row, &gen.sql, registry, input_registry);
+                                        emit_query_fn_individual_params(out, &fn_name, &mutation.decl.arguments, &gen.params, &effective_row, &gen.sql, registry, input_registry, schema);
                                     }
                                     _ => unreachable!(),
                                 }
@@ -281,7 +281,7 @@ pub(super) fn generate_mutation(out: &mut String, mutation: &Mutation, schema: &
                                         emit_execute_fn_no_params(out, &fn_name, &gen.sql);
                                     }
                                     ParamStyle::Individual => {
-                                        emit_execute_fn_individual_params(out, &fn_name, &mutation.decl.arguments, &gen.params, &gen.sql, registry, input_registry);
+                                        emit_execute_fn_individual_params(out, &fn_name, &mutation.decl.arguments, &gen.params, &gen.sql, registry, input_registry, schema);
                                     }
                                     _ => unreachable!(),
                                 }
@@ -311,7 +311,7 @@ pub(super) fn generate_mutation(out: &mut String, mutation: &Mutation, schema: &
                                     emit_query_fn_no_params(out, &fn_name, &effective_row, &gen.sql);
                                 }
                                 ParamStyle::Individual => {
-                                    emit_query_fn_individual_params(out, &fn_name, &mutation.decl.arguments, &gen.params, &effective_row, &gen.sql, registry, input_registry);
+                                    emit_query_fn_individual_params(out, &fn_name, &mutation.decl.arguments, &gen.params, &effective_row, &gen.sql, registry, input_registry, schema);
                                 }
                                 _ => unreachable!(),
                             }
@@ -321,7 +321,7 @@ pub(super) fn generate_mutation(out: &mut String, mutation: &Mutation, schema: &
                                     emit_execute_fn_no_params(out, &fn_name, &gen.sql);
                                 }
                                 ParamStyle::Individual => {
-                                    emit_execute_fn_individual_params(out, &fn_name, &mutation.decl.arguments, &gen.params, &gen.sql, registry, input_registry);
+                                    emit_execute_fn_individual_params(out, &fn_name, &mutation.decl.arguments, &gen.params, &gen.sql, registry, input_registry, schema);
                                 }
                                 _ => unreachable!(),
                             }
@@ -384,7 +384,7 @@ pub(super) fn generate_insertable_mutation(
     // ── Insertable struct ──
     out.push_str(&format!("pub struct {} {{\n", insertable_struct));
     for col in &insertable_columns {
-        let base_type = column_to_rust_type(col, &table.name, registry);
+        let base_type = column_to_rust_type(col, &table.name, registry, schema);
         // Fields with defaults or nullable get Option<T>
         let is_optional = col.nullable || col.has_default;
         if is_optional {
@@ -405,7 +405,7 @@ pub(super) fn generate_insertable_mutation(
     let builder_struct = format!("{}Builder", insertable_struct);
     out.push_str(&format!("pub struct {} {{\n", builder_struct));
     for col in &insertable_columns {
-        let base_type = column_to_rust_type(col, &table.name, registry);
+        let base_type = column_to_rust_type(col, &table.name, registry, schema);
         // All builder fields are Option
         if base_type.starts_with("Option<") {
             // For nullable fields, the builder stores Option<Option<T>>
@@ -432,7 +432,7 @@ pub(super) fn generate_insertable_mutation(
     out.push_str(&format!("impl {} {{\n", builder_struct));
     for col in &insertable_columns {
         let col_snake = to_snake_case(&col.name);
-        let base_type = column_to_rust_type(col, &table.name, registry);
+        let base_type = column_to_rust_type(col, &table.name, registry, schema);
         // Setter takes the inner value (not Option)
         let inner_type = if base_type.starts_with("Option<") {
             // For nullable fields, setter takes the inner type
@@ -451,7 +451,7 @@ pub(super) fn generate_insertable_mutation(
     out.push_str(&format!("        Ok({} {{\n", insertable_struct));
     for col in &insertable_columns {
         let col_snake = to_snake_case(&col.name);
-        let base_type = column_to_rust_type(col, &table.name, registry);
+        let base_type = column_to_rust_type(col, &table.name, registry, schema);
         let is_optional = col.nullable || col.has_default;
         if is_optional {
             if base_type.starts_with("Option<") {
@@ -671,7 +671,7 @@ pub(super) fn generate_updatable_mutation(
     // ── Changes struct ──
     out.push_str(&format!("pub struct {} {{\n", changes_struct));
     for col in &updatable_columns {
-        let inner_type = column_to_rust_type(col, &table.name, registry);
+        let inner_type = column_to_rust_type(col, &table.name, registry, schema);
         out.push_str(&format!(
             "    pub {}: super::runtime::UpdateField<{}>,\n",
             to_snake_case(&col.name),

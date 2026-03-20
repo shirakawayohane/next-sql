@@ -14,7 +14,6 @@ fn builtin_type_to_pg_type(typ: &BuiltInType) -> &'static str {
         BuiltInType::Timestamp => "TIMESTAMP",
         BuiltInType::Timestamptz => "TIMESTAMPTZ",
         BuiltInType::Date => "DATE",
-        BuiltInType::Numeric => "NUMERIC",
         BuiltInType::Decimal => "NUMERIC",
         BuiltInType::Json => "JSON",
     }

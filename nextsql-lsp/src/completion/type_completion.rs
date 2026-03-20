@@ -44,7 +44,6 @@ pub trait TypeCompletionProvider {
             ("timestamp", "Timestamp type"),
             ("timestamptz", "Timestamp with timezone"),
             ("date", "Date type"),
-            ("numeric", "Arbitrary precision numeric type"),
             ("decimal", "Decimal type (arbitrary precision)"),
             ("json", "JSON value type"),
         ];
