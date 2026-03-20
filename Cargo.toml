@@ -5,6 +5,7 @@ members = [
     "nextsql-lsp",
     "nextsql-backend-rust",
     "nextsql-backend-rust/runtime",
+    "nextsql-tokio-postgres-adapter",
     "nextsql-codegen",
     "tests/e2e",
 ]

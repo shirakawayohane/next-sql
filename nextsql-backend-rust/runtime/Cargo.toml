@@ -6,7 +6,7 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 description = "Runtime support library for NextSQL generated Rust code"
-publish = false
+publish = true
 
 [dependencies]
 uuid = { version = "1", features = ["v4"] }
