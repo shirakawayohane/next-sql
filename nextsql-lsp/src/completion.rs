@@ -53,6 +53,7 @@ impl<'a> CompletionProvider<'a> {
     /// Get field completions for an input type by parsing the file text
     fn get_input_field_completions(&self, input_type_name: &str) -> Vec<CompletionItem> {
         use std::sync::LazyLock;
+        use utils::strip_comments;
         let mut completions = Vec::new();
 
         // Parse input type fields using regex: input TypeName { field1: type1, field2: type2 }
@@ -63,7 +64,8 @@ impl<'a> CompletionProvider<'a> {
             regex::Regex::new(r"(\w+)\s*:\s*([^\s,}]+)").unwrap()
         });
 
-        for cap in INPUT_BODY_RE.captures_iter(self.text) {
+        let text_no_comments = strip_comments(self.text);
+        for cap in INPUT_BODY_RE.captures_iter(&text_no_comments) {
             if &cap[1] == input_type_name {
                 let body = &cap[2];
                 for field_cap in FIELD_RE.captures_iter(body) {

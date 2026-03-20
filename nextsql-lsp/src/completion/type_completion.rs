@@ -68,10 +68,12 @@ pub trait TypeCompletionProvider {
         // Add valtype names defined in the current file
         {
             use std::sync::LazyLock;
+            use crate::completion::utils::strip_comments;
             static RE: LazyLock<regex::Regex> = LazyLock::new(|| {
                 regex::Regex::new(r"valtype\s+(\w+)\s*=\s*(\w+)").unwrap()
             });
-            for cap in RE.captures_iter(self.get_text()) {
+            let text_no_comments = strip_comments(self.get_text());
+            for cap in RE.captures_iter(&text_no_comments) {
                 let valtype_name = &cap[1];
                 let base_type = &cap[2];
                 completions.push(CompletionItem {
@@ -92,10 +94,12 @@ pub trait TypeCompletionProvider {
         // Add input type names defined in the current file
         {
             use std::sync::LazyLock;
+            use crate::completion::utils::strip_comments;
             static RE: LazyLock<regex::Regex> = LazyLock::new(|| {
                 regex::Regex::new(r"input\s+(\w+)\s*\{").unwrap()
             });
-            for cap in RE.captures_iter(self.get_text()) {
+            let text_no_comments = strip_comments(self.get_text());
+            for cap in RE.captures_iter(&text_no_comments) {
                 let input_name = &cap[1];
                 completions.push(CompletionItem {
                     label: input_name.to_string(),

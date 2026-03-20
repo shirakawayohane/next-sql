@@ -34,10 +34,11 @@ pub trait MethodCompletionProvider {
                 ]
             }
             CompletionContext::MutationMethod => {
-                // より正確なコンテキスト判定のため、直前のテキストを確認
-                let is_after_insert = self.get_text().contains("insert(");
-                let is_after_update = self.get_text().contains("update(");
-                let is_after_delete = self.get_text().contains("delete(");
+                // より正確なコンテキスト判定のため、直前のテキストを確認（コメント行を除外）
+                let text_no_comments = crate::completion::utils::strip_comments(self.get_text());
+                let is_after_insert = text_no_comments.contains("insert(");
+                let is_after_update = text_no_comments.contains("update(");
+                let is_after_delete = text_no_comments.contains("delete(");
 
                 let mut methods = vec![];
 

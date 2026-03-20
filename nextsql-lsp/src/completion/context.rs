@@ -199,10 +199,12 @@ pub fn extract_table_before_dot(full_text: &str, text: &str) -> Option<String> {
 /// Resolve an alias name to its target table name by scanning "alias X = Y" patterns in the text.
 fn resolve_alias(full_text: &str, identifier: &str) -> Option<String> {
     use std::sync::LazyLock;
+    use super::utils::strip_comments;
     static RE: LazyLock<regex::Regex> = LazyLock::new(|| {
         regex::Regex::new(r"alias\s+(\w+)\s*=\s*(\w+)").unwrap()
     });
-    for cap in RE.captures_iter(full_text) {
+    let text_no_comments = strip_comments(full_text);
+    for cap in RE.captures_iter(&text_no_comments) {
         if &cap[1] == identifier {
             eprintln!("LSP: Resolved alias '{}' to '{}'", identifier, &cap[2]);
             return Some(cap[2].to_string());
@@ -327,6 +329,7 @@ pub fn is_after_variable_colon(before_cursor: &str) -> bool {
 /// Returns the input type name if so.
 fn check_input_field_context(full_text: &str, text: &str) -> Option<String> {
     use std::sync::LazyLock;
+    use super::utils::strip_comments;
 
     // Extract the $variable at the end of text
     static VAR_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
@@ -335,12 +338,14 @@ fn check_input_field_context(full_text: &str, text: &str) -> Option<String> {
     let var_name = VAR_RE.captures(text).map(|c| c[1].to_string())?;
     eprintln!("LSP: check_input_field_context - var_name: '{}'", var_name);
 
+    let text_no_comments = strip_comments(full_text);
+
     // Find the variable's type declaration in query/mutation arguments: $varName: TypeName
     static ARG_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
         regex::Regex::new(r"\$(\w+)\s*:\s*(\w+)").unwrap()
     });
     let mut var_type = None;
-    for cap in ARG_RE.captures_iter(full_text) {
+    for cap in ARG_RE.captures_iter(&text_no_comments) {
         if &cap[1] == var_name {
             var_type = Some(cap[2].to_string());
             break;
@@ -353,7 +358,7 @@ fn check_input_field_context(full_text: &str, text: &str) -> Option<String> {
     static INPUT_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
         regex::Regex::new(r"input\s+(\w+)\s*\{").unwrap()
     });
-    for cap in INPUT_RE.captures_iter(full_text) {
+    for cap in INPUT_RE.captures_iter(&text_no_comments) {
         if &cap[1] == var_type {
             return Some(var_type);
         }
