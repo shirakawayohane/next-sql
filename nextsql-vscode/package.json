@@ -2,7 +2,7 @@
   "name": "nextsql-syntax",
   "displayName": "NextSQL Language Support",
   "description": "Syntax highlighting and language server for NextSQL language",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "publisher": "instansys",
   "license": "MIT",
   "repository": {
@@ -34,7 +34,11 @@
         "extensions": [
           ".nsql"
         ],
-        "configuration": "./language-configuration.json"
+        "configuration": "./language-configuration.json",
+        "icon": {
+          "light": "./icons/nsql-icon.svg",
+          "dark": "./icons/nsql-icon.svg"
+        }
       }
     ],
     "commands": [
@@ -84,13 +88,6 @@
         ]
       }
     },
-    "iconThemes": [
-      {
-        "id": "nextsql-icons",
-        "label": "NextSQL File Icons",
-        "path": "./icons/nsql-icon-theme.json"
-      }
-    ],
     "grammars": [
       {
         "language": "nextsql",
