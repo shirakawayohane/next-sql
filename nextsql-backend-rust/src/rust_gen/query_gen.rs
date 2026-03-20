@@ -194,7 +194,7 @@ pub(super) fn generate_mutation(out: &mut String, mutation: &Mutation, schema: &
                             continue;
                         }
 
-                        let gen = sql_gen::generate_insert_sql_with_relations(insert, rel_registry);
+                        let gen = sql_gen::generate_insert_sql_with_schema(insert, rel_registry, Some(schema));
 
                         if let Some(ref returning) = insert.returning {
                             let use_model = is_simple_wildcard_returning(returning, &insert.into.name);
@@ -249,7 +249,7 @@ pub(super) fn generate_mutation(out: &mut String, mutation: &Mutation, schema: &
                                 naming,
                             );
                         } else {
-                            let gen = sql_gen::generate_update_sql_with_relations(update, rel_registry);
+                            let gen = sql_gen::generate_update_sql_with_schema(update, rel_registry, Some(schema));
 
                             if let Some(ref returning) = update.returning {
                                 let use_model = is_simple_wildcard_returning(returning, &update.target.name);
@@ -545,11 +545,22 @@ pub(super) fn generate_insertable_mutation(
 
     // Build columns and params dynamically
     out.push_str("    let mut columns: Vec<&str> = Vec::new();\n");
-    out.push_str("    let mut bind_params: Vec<&dyn nextsql_backend_rust_runtime::ToSqlParam> = Vec::new();\n\n");
+    out.push_str("    let mut bind_params: Vec<&dyn nextsql_backend_rust_runtime::ToSqlParam> = Vec::new();\n");
+    out.push_str("    let mut cast_suffixes: Vec<&str> = Vec::new();\n\n");
 
     for col in &insertable_columns {
         let col_snake = to_snake_case(&col.name);
         let is_optional = col.nullable || col.has_default;
+        // Determine if this column needs an enum type cast
+        let cast_suffix = if let Type::UserDefined(ref enum_name) = col.column_type {
+            if schema.enums.contains_key(enum_name) {
+                format!("::{}", enum_name)
+            } else {
+                String::new()
+            }
+        } else {
+            String::new()
+        };
         if is_optional {
             out.push_str(&format!(
                 "    if let Some(ref v) = {}.{} {{\n",
@@ -557,6 +568,7 @@ pub(super) fn generate_insertable_mutation(
             ));
             out.push_str(&format!("        columns.push(\"{}\");\n", col.name));
             out.push_str("        bind_params.push(v);\n");
+            out.push_str(&format!("        cast_suffixes.push(\"{}\");\n", cast_suffix));
             out.push_str("    }\n");
         } else {
             out.push_str(&format!("    columns.push(\"{}\");\n", col.name));
@@ -564,11 +576,12 @@ pub(super) fn generate_insertable_mutation(
                 "    bind_params.push(&{}.{});\n",
                 insertable_access, col_snake,
             ));
+            out.push_str(&format!("    cast_suffixes.push(\"{}\");\n", cast_suffix));
         }
     }
 
     // Build SQL
-    out.push_str("\n    let placeholders: Vec<String> = (1..=bind_params.len()).map(|i| format!(\"${}\", i)).collect();\n");
+    out.push_str("\n    let placeholders: Vec<String> = (1..=bind_params.len()).enumerate().map(|(i, _)| format!(\"${}{}\", i + 1, cast_suffixes[i])).collect();\n");
 
     // Build the returning clause
     let returning_sql = if let Some(ref returning) = insert.returning {
@@ -785,13 +798,23 @@ pub(super) fn generate_updatable_mutation(
     let updatable_snake = to_snake_case(updatable_var_name);
     for col in &updatable_columns {
         let col_snake = to_snake_case(&col.name);
+        // Determine if this column needs an enum type cast
+        let cast_suffix = if let Type::UserDefined(ref enum_name) = col.column_type {
+            if schema.enums.contains_key(enum_name) {
+                format!("::{}", enum_name)
+            } else {
+                String::new()
+            }
+        } else {
+            String::new()
+        };
         out.push_str(&format!(
             "    if params.{}.{}.is_set() {{\n",
             updatable_snake, col_snake,
         ));
         out.push_str(&format!(
-            "        set_parts.push(format!(\"{} = ${{}}\", idx));\n",
-            col.name,
+            "        set_parts.push(format!(\"{} = ${{}}{}\", idx));\n",
+            col.name, cast_suffix,
         ));
         out.push_str(&format!(
             "        bind_params.push(&params.{}.{});\n",

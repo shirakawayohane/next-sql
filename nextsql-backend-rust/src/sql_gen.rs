@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use nextsql_core::ast::*;
+use nextsql_core::schema::DatabaseSchema;
 
 fn builtin_type_to_pg_type(typ: &BuiltInType) -> &'static str {
     match typ {
@@ -150,7 +151,19 @@ pub fn generate_insert_sql_with_relations(
     insert: &Insert,
     relations: &RelationRegistry,
 ) -> GeneratedSql {
-    let mut ctx = SqlGenContext::new(relations);
+    generate_insert_sql_with_schema(insert, relations, None)
+}
+
+/// Generate SQL from an Insert statement with relation resolution and schema for enum casts
+pub fn generate_insert_sql_with_schema(
+    insert: &Insert,
+    relations: &RelationRegistry,
+    schema: Option<&DatabaseSchema>,
+) -> GeneratedSql {
+    let mut ctx = match schema {
+        Some(s) => SqlGenContext::with_schema(relations, s),
+        None => SqlGenContext::new(relations),
+    };
     let sql = ctx.gen_insert(insert);
     let all_params = ctx.all_params_ordered();
     GeneratedSql {
@@ -173,7 +186,19 @@ pub fn generate_update_sql_with_relations(
     update: &Update,
     relations: &RelationRegistry,
 ) -> GeneratedSql {
-    let mut ctx = SqlGenContext::new(relations);
+    generate_update_sql_with_schema(update, relations, None)
+}
+
+/// Generate SQL from an Update statement with relation resolution and schema for enum casts
+pub fn generate_update_sql_with_schema(
+    update: &Update,
+    relations: &RelationRegistry,
+    schema: Option<&DatabaseSchema>,
+) -> GeneratedSql {
+    let mut ctx = match schema {
+        Some(s) => SqlGenContext::with_schema(relations, s),
+        None => SqlGenContext::new(relations),
+    };
     let sql = ctx.gen_update(update);
     let all_params = ctx.all_params_ordered();
     GeneratedSql {
@@ -229,6 +254,10 @@ struct SqlGenContext<'a> {
     when_clauses: Vec<WhenClauseInfo>,
     /// Static WHERE clause SQL (set during gen_select for dynamic queries).
     static_where_sql: Option<String>,
+    /// Optional schema reference for enum type casting in INSERT/UPDATE.
+    schema: Option<&'a DatabaseSchema>,
+    /// The target table name for INSERT/UPDATE, used to look up column types for enum casts.
+    enum_cast_table: Option<String>,
 }
 
 impl<'a> SqlGenContext<'a> {
@@ -244,7 +273,33 @@ impl<'a> SqlGenContext<'a> {
             relation_alias_map: HashMap::new(),
             when_clauses: Vec::new(),
             static_where_sql: None,
+            schema: None,
+            enum_cast_table: None,
         }
+    }
+
+    fn with_schema(relation_registry: &'a RelationRegistry, schema: &'a DatabaseSchema) -> Self {
+        Self {
+            schema: Some(schema),
+            ..Self::new(relation_registry)
+        }
+    }
+
+    /// If the column is a PostgreSQL enum type, wrap the value expression with a type cast.
+    /// e.g. `$1` becomes `$1::status_type`
+    fn maybe_enum_cast(&self, column_name: &str, val: String) -> String {
+        if let (Some(schema), Some(table_name)) = (self.schema, &self.enum_cast_table) {
+            if let Some(table) = schema.get_table(table_name) {
+                if let Some(col) = table.columns.iter().find(|c| c.name == column_name) {
+                    if let Type::UserDefined(enum_name) = &col.column_type {
+                        if schema.enums.contains_key(enum_name) {
+                            return format!("{}::{}", val, enum_name);
+                        }
+                    }
+                }
+            }
+        }
+        val
     }
 
     /// Return all params in order: static params first, then when-clause params.
@@ -1207,11 +1262,17 @@ impl<'a> SqlGenContext<'a> {
         }
 
         keys.iter()
-            .map(|k| self.gen_expr(obj.fields.get(*k).unwrap()))
+            .map(|k| {
+                let val = self.gen_expr(obj.fields.get(*k).unwrap());
+                self.maybe_enum_cast(k, val)
+            })
             .collect()
     }
 
     fn gen_insert(&mut self, insert: &Insert) -> String {
+        // Set the target table for enum type casting
+        self.enum_cast_table = Some(insert.into.name.clone());
+
         // Collect columns and values from the value expressions.
         // Values are expected to be Object literals, arrays of Object literals,
         // or variables (for Insertable<T> pattern).
@@ -1278,6 +1339,7 @@ impl<'a> SqlGenContext<'a> {
                         .iter()
                         .map(|(col, expr)| {
                             let val = self.gen_expr(expr);
+                            let val = self.maybe_enum_cast(col, val);
                             format!("{} = {}", col, val)
                         })
                         .collect();
@@ -1302,11 +1364,15 @@ impl<'a> SqlGenContext<'a> {
     // ── UPDATE generation ───────────────────────────────────────────────
 
     fn gen_update(&mut self, update: &Update) -> String {
+        // Set the target table for enum type casting
+        self.enum_cast_table = Some(update.target.name.clone());
+
         let set_parts: Vec<String> = update
             .set
             .iter()
             .map(|(col, expr)| {
                 let val = self.gen_expr(expr);
+                let val = self.maybe_enum_cast(col, val);
                 format!("{} = {}", col, val)
             })
             .collect();
