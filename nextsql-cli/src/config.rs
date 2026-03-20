@@ -123,6 +123,7 @@ fn install_skill(claude_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use nextsql_core::config::{FilesConfig, TargetConfig};
     use tempfile::tempdir;
 
     #[test]
