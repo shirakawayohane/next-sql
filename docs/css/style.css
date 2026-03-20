@@ -658,6 +658,92 @@ h4 {
   user-select: none;
 }
 
+/* ---------- VSCode Extension ---------- */
+.vscode-section {
+  padding: 5rem 2rem 6rem;
+  max-width: 1100px;
+  margin: 0 auto;
+}
+
+.vscode-inner {
+  max-width: 1100px;
+}
+
+.vscode-card {
+  display: flex;
+  gap: 1.5rem;
+  align-items: flex-start;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 2rem;
+  margin-top: 2rem;
+  transition: all var(--transition);
+}
+
+.vscode-card:hover {
+  border-color: rgba(59, 130, 246, 0.3);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+}
+
+.vscode-card-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: 12px;
+  background: rgba(59, 130, 246, 0.1);
+  border: 1px solid rgba(59, 130, 246, 0.2);
+  display: grid;
+  place-items: center;
+  color: var(--blue-400);
+  flex-shrink: 0;
+}
+
+.vscode-card-body h3 {
+  font-size: 1.15rem;
+  color: #fff;
+  margin-bottom: 0.75rem;
+}
+
+.vscode-features {
+  list-style: none;
+  margin-bottom: 1.25rem;
+}
+
+.vscode-features li {
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  padding: 0.2rem 0;
+  padding-left: 1.2rem;
+  position: relative;
+}
+
+.vscode-features li::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0.55rem;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--blue-500);
+}
+
+.vscode-features code {
+  font-family: "Fira Code", monospace;
+  font-size: 0.85em;
+  background: rgba(59, 130, 246, 0.1);
+  border: 1px solid rgba(59, 130, 246, 0.15);
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+  color: var(--blue-300);
+}
+
+@media (max-width: 600px) {
+  .vscode-card {
+    flex-direction: column;
+  }
+}
+
 /* ---------- Footer ---------- */
 .footer {
   padding: 3rem 2rem;
