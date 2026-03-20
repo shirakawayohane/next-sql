@@ -4,7 +4,7 @@ mod migration;
 
 use nextsql_core::*;
 
-use clap::{Parser, Subcommand};
+use clap::{error::ErrorKind, CommandFactory, Parser, Subcommand};
 use config::{NextSqlConfig, NextSqlConfigExt};
 use db::{DatabaseConfig, DatabaseMigrationManager};
 use migration::{MigrationDirection, MigrationManager};
@@ -13,8 +13,10 @@ use std::path::{Path, PathBuf};
 #[derive(Parser)]
 #[command(name = "nsql")]
 #[command(about = "NextSQL CLI tool")]
-#[command(version)]
+#[command(version, disable_version_flag = true)]
 struct Cli {
+    #[arg(short = 'v', long = "version", action = clap::ArgAction::Version)]
+    version: (),
     #[command(subcommand)]
     command: Commands,
 }
@@ -173,7 +175,15 @@ enum MigrationCommands {
 
 #[tokio::main]
 async fn main() {
-    let cli = Cli::parse();
+    let cli = match Cli::try_parse() {
+        Ok(cli) => cli,
+        Err(e) if e.kind() == ErrorKind::InvalidSubcommand => {
+            let _ = Cli::command().print_help();
+            eprintln!();
+            e.exit();
+        }
+        Err(e) => e.exit(),
+    };
 
     match cli.command {
         Commands::Init { dir } => {
