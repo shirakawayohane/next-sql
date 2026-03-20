@@ -1,10 +1,10 @@
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use crate::ast::Type;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DatabaseSchema {
-    pub tables: HashMap<String, TableSchema>,
+    pub tables: BTreeMap<String, TableSchema>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -26,7 +26,7 @@ pub struct ColumnSchema {
 impl DatabaseSchema {
     pub fn new() -> Self {
         Self {
-            tables: HashMap::new(),
+            tables: BTreeMap::new(),
         }
     }
 

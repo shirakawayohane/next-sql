@@ -226,29 +226,12 @@ fn format_pest_error(error: &pest::error::Error<nextsql_core::Rule>) -> String {
 /// merges type definitions from types.nsql, dispatches to the appropriate
 /// backend, and writes the generated files.
 ///
-/// Runs check (validation) first. If any errors are found, generation is aborted.
+/// Runs check (validation) as part of parsing. If any errors are found, generation is aborted.
 pub fn generate(config: &CodegenConfig, schema: &DatabaseSchema) -> CodegenResult {
     let mut result = CodegenResult {
         generated_files: Vec::new(),
         errors: Vec::new(),
     };
-
-    // Run check first — abort if there are errors
-    let check_config = CheckConfig {
-        source_dir: config.source_dir.clone(),
-    };
-    let check_result = check(&check_config, schema);
-    if check_result.has_errors() {
-        for diag in &check_result.diagnostics {
-            let location = match (diag.line, diag.column) {
-                (Some(l), Some(c)) => format!("{}:{}:{}", diag.file.display(), l, c),
-                (Some(l), None) => format!("{}:{}", diag.file.display(), l),
-                _ => format!("{}", diag.file.display()),
-            };
-            result.errors.push(format!("{}: {}", location, diag.message));
-        }
-        return result;
-    }
 
     // 1. Find all .nsql files
     let nsql_files = find_nsql_files(&config.source_dir);
@@ -286,8 +269,9 @@ pub fn generate(config: &CodegenConfig, schema: &DatabaseSchema) -> CodegenResul
         return result;
     }
 
-    // 4. Parse all .nsql files (except types.nsql)
+    // 4. Parse all .nsql files (except types.nsql), validate, then collect
     let mut parsed_modules: Vec<(String, nextsql_core::ast::Module)> = Vec::new();
+    let types_line_offset = types_content.as_ref().map(|t| t.lines().count() + 1).unwrap_or(0);
 
     for nsql_path in &nsql_files {
         let filename = nsql_path.file_name().unwrap().to_str().unwrap();
@@ -315,16 +299,60 @@ pub fn generate(config: &CodegenConfig, schema: &DatabaseSchema) -> CodegenResul
         let module = match nextsql_core::parser::parse_module(&combined_content) {
             Ok(m) => m,
             Err(e) => {
+                let (line, col) = extract_pest_line_col(&e);
+                let adjusted_line = if line > types_line_offset {
+                    line - types_line_offset
+                } else {
+                    line
+                };
                 result
                     .errors
-                    .push(format!("Failed to parse {}: {}", nsql_path.display(), e));
+                    .push(format!("{}:{}:{}: {}", nsql_path.display(), adjusted_line, col, format_pest_error(&e)));
                 continue;
             }
         };
 
+        // Run type validation
+        let mut validator = nextsql_core::TypeValidator::new(schema);
+        let errors = validator.validate_module(&module);
+        if !errors.is_empty() {
+            for error in errors {
+                let (line, col) = if let Some(span) = &error.span {
+                    let text = &combined_content;
+                    let line = text[..span.start].matches('\n').count() + 1;
+                    let col = span.start
+                        - text[..span.start].rfind('\n').map(|i| i + 1).unwrap_or(0)
+                        + 1;
+                    (line, col)
+                } else {
+                    (0, 0)
+                };
+
+                let adjusted_line = if line > types_line_offset {
+                    line - types_line_offset
+                } else if line > 0 {
+                    continue; // Error is in the types.nsql portion — skip
+                } else {
+                    0
+                };
+
+                let location = match (adjusted_line, col) {
+                    (l, c) if l > 0 && c > 0 => format!("{}:{}:{}", nsql_path.display(), l, c),
+                    (l, _) if l > 0 => format!("{}:{}", nsql_path.display(), l),
+                    _ => format!("{}", nsql_path.display()),
+                };
+                result.errors.push(format!("{}: {}", location, error.message));
+            }
+            continue;
+        }
+
         // Generate module name from filename (replace hyphens with underscores)
         let module_name = filename.trim_end_matches(".nsql").replace('-', "_");
         parsed_modules.push((module_name, module));
+    }
+
+    if !result.errors.is_empty() {
+        return result;
     }
 
     // 5. Generate code for each module
@@ -463,7 +491,7 @@ fn find_nsql_files(dir: &Path) -> Vec<PathBuf> {
     let pattern = dir.join("**/*.nsql");
     let pattern_str = pattern.to_str().unwrap_or("");
     let mut files: Vec<PathBuf> = glob::glob(pattern_str)
-        .map(|paths| paths.filter_map(|p| p.ok()).collect())
+        .map(|paths| paths.filter_map(|p| p.ok()).filter(|p| p.is_file()).collect())
         .unwrap_or_default();
     files.sort();
     files

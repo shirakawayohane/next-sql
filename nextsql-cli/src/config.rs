@@ -65,21 +65,14 @@ impl NextSqlConfig {
     }
 
     fn validate_config(config: &NextSqlConfig) -> Result<(), Box<dyn std::error::Error>> {
-        // TOMLをJSONに変換してスキーマ検証
-        let json_value = serde_json::to_value(config)?;
-        let schema_str = include_str!("../schemas/next-sql.schema.json");
-        let schema: serde_json::Value = serde_json::from_str(schema_str)?;
-        
-        let compiled_schema = jsonschema::JSONSchema::compile(&schema)
-            .map_err(|e| format!("Schema compilation failed: {}", e))?;
-            
-        if let Err(errors) = compiled_schema.validate(&json_value) {
-            let error_messages: Vec<String> = errors
-                .map(|error| format!("Validation error: {}", error))
-                .collect();
-            return Err(format!("Configuration validation failed:\n{}", error_messages.join("\n")).into());
+        const SUPPORTED_LANGUAGES: &[&str] = &["rust"];
+        if !SUPPORTED_LANGUAGES.contains(&config.target.target_language.as_str()) {
+            return Err(format!(
+                "Configuration validation failed:\nValidation error: unsupported target_language '{}', expected one of: {}",
+                config.target.target_language,
+                SUPPORTED_LANGUAGES.join(", ")
+            ).into());
         }
-        
         Ok(())
     }
 
@@ -98,15 +91,47 @@ impl NextSqlConfig {
 
         let config_path = path.as_ref().join("next-sql.toml");
 
-        if config_path.exists() {
-            return Err("next-sql.toml already exists".into());
+        if !config_path.exists() {
+            // next-sql.toml を手書きで生成（database_url を空でも含めるため）
+            let config_content = r#"# NextSQL Configuration File
+
+# Database connection URL for schema loading and type validation
+database_url = ""
+
+[files]
+# Glob patterns for NextSQL files to include
+includes = ["**"]
+
+[target]
+# Target language for code generation
+target_language = "rust"
+
+# Output directory for generated code
+target_directory = "."
+"#;
+            fs::write(&config_path, config_content)?;
+            println!("Created next-sql.toml with default configuration");
         }
 
-        let config = NextSqlConfig::default();
-        config.save_to_file(&config_path)?;
+        // .nsql/ ディレクトリを作成
+        let nsql_dir = path.as_ref().join(".nsql");
+        fs::create_dir_all(&nsql_dir)?;
+
+        // .gitignore に .nsql/ を追加
+        let gitignore_path = path.as_ref().join(".gitignore");
+        let needs_entry = if gitignore_path.exists() {
+            let content = fs::read_to_string(&gitignore_path)?;
+            !content.lines().any(|line| line.trim() == ".nsql")
+        } else {
+            true
+        };
+        if needs_entry {
+            use std::io::Write;
+            let mut f = fs::OpenOptions::new().create(true).append(true).open(&gitignore_path)?;
+            writeln!(f, ".nsql")?;
+        }
 
         println!("Initialized NextSQL project at {}", path.as_ref().display());
-        println!("Created next-sql.toml with default configuration");
 
         // .claude ディレクトリを探して、見つかればスキルを配置
         let absolute_path = fs::canonicalize(path.as_ref())?;

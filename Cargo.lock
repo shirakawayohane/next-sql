@@ -1335,7 +1335,6 @@ dependencies = [
  "chrono",
  "clap",
  "dirs",
- "jsonschema",
  "nextsql-codegen",
  "nextsql-core",
  "postgres",

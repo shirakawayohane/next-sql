@@ -468,6 +468,13 @@ fn handle_generate_command(
 
 /// Resolve the schema for a given source directory.
 /// Priority: database connection from next-sql.toml > schema.json file > empty schema
+/// Schema cache with fingerprint for change detection.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct SchemaCache {
+    fingerprint: String,
+    schema: nextsql_core::schema::DatabaseSchema,
+}
+
 fn resolve_schema(
     source: &Path,
 ) -> Result<nextsql_core::schema::DatabaseSchema, Box<dyn std::error::Error>> {
@@ -478,17 +485,25 @@ fn resolve_schema(
     let source_abs = std::fs::canonicalize(source).unwrap_or_else(|_| source.to_path_buf());
     let project_root = find_project_root(&source_abs);
 
+    let cache_path = project_root.as_ref().map(|root| root.join(".nsql/schema_cache.json"));
+
     if let Some(ref root) = project_root {
         let config_path = root.join("next-sql.toml");
         if config_path.exists() {
             if let Ok(config) = NextSqlConfig::load_from_file(&config_path) {
-                if let Some(db_url) = config.database_url {
-                    match load_schema_from_database(&db_url) {
-                        Ok(schema) => {
-                            return Ok(schema);
-                        }
-                        Err(e) => {
-                            eprintln!("Warning: could not load schema from database: {}", e);
+                if let Some(ref db_url) = config.database_url {
+                    if !db_url.is_empty() {
+                        let cp = cache_path.clone();
+                        match tokio::task::block_in_place(|| {
+                            let mut client = connect_database(db_url)?;
+                            resolve_schema_with_cache(&mut client, &cp)
+                        }) {
+                            Ok(schema) => {
+                                return Ok(schema);
+                            }
+                            Err(e) => {
+                                eprintln!("Warning: could not load schema from database: {}", e);
+                            }
                         }
                     }
                 }
@@ -514,8 +529,57 @@ fn resolve_schema(
         }
     }
 
+    // Fallback: try loading from .nsql/schema_cache.json
+    if let Some(ref cp) = cache_path {
+        if let Some(cache) = load_cache(cp) {
+            return Ok(cache.schema);
+        }
+    }
+
     // Fallback: empty schema
     Ok(DatabaseSchema::new())
+}
+
+/// Compare DB fingerprint against cache. If unchanged, use cache; otherwise full-load and update.
+/// Must be called within tokio::task::block_in_place.
+fn resolve_schema_with_cache(
+    client: &mut postgres::Client,
+    cache_path: &Option<PathBuf>,
+) -> Result<nextsql_core::schema::DatabaseSchema, Box<dyn std::error::Error>> {
+    use nextsql_core::SchemaLoader;
+
+    let fingerprint = SchemaLoader::fetch_schema_fingerprint(client)?;
+
+    // Check if cache matches
+    if let Some(ref cp) = cache_path {
+        if let Some(cache) = load_cache(cp) {
+            if cache.fingerprint == fingerprint {
+                return Ok(cache.schema);
+            }
+        }
+    }
+
+    // Cache miss or fingerprint mismatch — full load
+    let schema = SchemaLoader::load_from_database(client)?;
+
+    // Save cache
+    if let Some(ref cp) = cache_path {
+        let cache = SchemaCache {
+            fingerprint,
+            schema: schema.clone(),
+        };
+        if let Ok(json) = serde_json::to_string_pretty(&cache) {
+            let _ = std::fs::create_dir_all(cp.parent().unwrap());
+            let _ = std::fs::write(cp, json);
+        }
+    }
+
+    Ok(schema)
+}
+
+fn load_cache(path: &Path) -> Option<SchemaCache> {
+    let json_str = std::fs::read_to_string(path).ok()?;
+    serde_json::from_str(&json_str).ok()
 }
 
 fn find_project_root(start: &Path) -> Option<PathBuf> {
@@ -529,18 +593,12 @@ fn find_project_root(start: &Path) -> Option<PathBuf> {
     }
 }
 
-fn load_schema_from_database(
-    db_url: &str,
-) -> Result<nextsql_core::schema::DatabaseSchema, Box<dyn std::error::Error>> {
-    // Use block_in_place to allow synchronous postgres calls within the tokio runtime.
-    // The synchronous postgres crate internally uses block_on, which conflicts with
-    // an already-running tokio runtime unless we signal that this thread is doing blocking work.
-    tokio::task::block_in_place(|| {
-        let config = db_url.parse::<postgres::Config>()?;
-        let mut client = config.connect(postgres::NoTls)?;
-        let schema = nextsql_core::SchemaLoader::load_from_database(&mut client)?;
-        Ok(schema)
-    })
+/// Connect to the database and return the client.
+fn connect_database(db_url: &str) -> Result<postgres::Client, Box<dyn std::error::Error>> {
+    let mut config = db_url.parse::<postgres::Config>()?;
+    config.connect_timeout(std::time::Duration::from_secs(3));
+    let client = config.connect(postgres::NoTls)?;
+    Ok(client)
 }
 
 fn handle_check_command(
