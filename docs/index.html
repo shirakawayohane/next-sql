@@ -221,17 +221,21 @@
             <div class="step-number">1</div>
             <div class="step-content">
               <h3>Install NextSQL CLI</h3>
-              <p>
-                Download from the
-                <a
-                  href="https://github.com/shirakawayohane/next-sql/releases"
-                  target="_blank"
-                  >GitHub Releases</a
-                >
-                page, or install with cargo:
-              </p>
-              <div class="step-code">
-                <span class="prompt">$ </span>cargo install nextsql-cli
+              <div class="install-tabs">
+                <div class="install-tab-buttons">
+                  <button class="install-tab-btn active" data-tab="macos-linux">macOS / Linux</button>
+                  <button class="install-tab-btn" data-tab="windows">Windows PowerShell</button>
+                </div>
+                <div class="install-tab-panel active" id="tab-macos-linux">
+                  <div class="step-code">
+                    <span class="prompt">$ </span>curl -fsSL https://github.com/shirakawayohane/next-sql/releases/latest/download/nextsql-cli-installer.sh | bash
+                  </div>
+                </div>
+                <div class="install-tab-panel" id="tab-windows">
+                  <div class="step-code">
+                    <span class="prompt">&gt; </span>irm https://github.com/shirakawayohane/next-sql/releases/latest/download/nextsql-cli-installer.ps1 | iex
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -326,6 +330,27 @@
         );
         document.querySelectorAll(".reveal").forEach(function (el) {
           observer.observe(el);
+        });
+      })();
+    </script>
+
+    <!-- Install tabs -->
+    <script>
+      (function () {
+        document.querySelectorAll(".install-tab-btn").forEach(function (btn) {
+          btn.addEventListener("click", function () {
+            var tabs = this.closest(".install-tabs");
+            tabs
+              .querySelectorAll(".install-tab-btn")
+              .forEach(function (b) { b.classList.remove("active"); });
+            tabs
+              .querySelectorAll(".install-tab-panel")
+              .forEach(function (p) { p.classList.remove("active"); });
+            this.classList.add("active");
+            tabs
+              .querySelector("#tab-" + this.dataset.tab)
+              .classList.add("active");
+          });
         });
       })();
     </script>

@@ -4,10 +4,16 @@ The `nsql` command-line tool provides project initialization, validation, code g
 
 ## Installation
 
-Download pre-built binaries from [GitHub Releases](https://github.com/shirakawayohane/next-sql/releases), or install with cargo:
+**macOS / Linux:**
 
 ```bash
-cargo install nextsql-cli
+curl -fsSL https://github.com/shirakawayohane/next-sql/releases/latest/download/nextsql-cli-installer.sh | bash
+```
+
+**Windows PowerShell:**
+
+```powershell
+irm https://github.com/shirakawayohane/next-sql/releases/latest/download/nextsql-cli-installer.ps1 | iex
 ```
 
 ## Commands

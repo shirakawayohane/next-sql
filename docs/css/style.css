@@ -578,6 +578,54 @@ h4 {
   user-select: none;
 }
 
+/* ---------- Install Tabs ---------- */
+.install-tabs {
+  margin-top: 0.5rem;
+}
+
+.install-tab-buttons {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 0;
+}
+
+.install-tab-btn {
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-muted);
+  font-family: "Lexend", sans-serif;
+  font-size: 0.85rem;
+  padding: 0.5rem 1rem;
+  cursor: pointer;
+  transition: color 0.2s, border-color 0.2s;
+}
+
+.install-tab-btn:hover {
+  color: var(--text-secondary);
+}
+
+.install-tab-btn.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+.install-tab-panel {
+  display: none;
+}
+
+.install-tab-panel.active {
+  display: block;
+}
+
+.install-tab-panel .step-code {
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+  font-size: 0.8rem;
+  word-break: break-all;
+}
+
 /* ---------- Footer ---------- */
 .footer {
   padding: 3rem 2rem;
