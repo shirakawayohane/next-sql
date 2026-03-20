@@ -16,6 +16,7 @@ pub trait TypeCompletionProvider {
             )),
             insert_text: Some("Insertable<$1>$0".to_string()),
             insert_text_format: Some(InsertTextFormat::SNIPPET),
+            sort_text: Some("2_Insertable".to_string()),
             ..Default::default()
         });
 
@@ -28,6 +29,7 @@ pub trait TypeCompletionProvider {
             )),
             insert_text: Some("ChangeSet<$1>$0".to_string()),
             insert_text_format: Some(InsertTextFormat::SNIPPET),
+            sort_text: Some("2_ChangeSet".to_string()),
             ..Default::default()
         });
 
@@ -54,6 +56,7 @@ pub trait TypeCompletionProvider {
                 kind: Some(CompletionItemKind::KEYWORD),
                 detail: Some(description.to_string()),
                 insert_text: Some(type_name.to_string()),
+                sort_text: Some(format!("1_{}", type_name)),
                 ..Default::default()
             });
         }
@@ -76,6 +79,7 @@ pub trait TypeCompletionProvider {
                         base_type
                     ))),
                     insert_text: Some(valtype_name.to_string()),
+                    sort_text: Some(format!("0_{}", valtype_name)),
                     ..Default::default()
                 });
             }
@@ -98,6 +102,7 @@ pub trait TypeCompletionProvider {
                         input_name
                     ))),
                     insert_text: Some(input_name.to_string()),
+                    sort_text: Some(format!("0_{}", input_name)),
                     ..Default::default()
                 });
             }
