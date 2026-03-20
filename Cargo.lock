@@ -1164,7 +1164,7 @@ dependencies = [
 
 [[package]]
 name = "nextsql-backend-rust"
-version = "0.1.5"
+version = "0.2.0"
 dependencies = [
  "nextsql-backend-rust-runtime",
  "nextsql-core",
@@ -1184,7 +1184,7 @@ dependencies = [
 
 [[package]]
 name = "nextsql-cli"
-version = "0.1.5"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "clap",
@@ -1203,7 +1203,7 @@ dependencies = [
 
 [[package]]
 name = "nextsql-codegen"
-version = "0.1.5"
+version = "0.2.0"
 dependencies = [
  "glob",
  "nextsql-backend-rust",
@@ -1214,7 +1214,7 @@ dependencies = [
 
 [[package]]
 name = "nextsql-core"
-version = "0.1.5"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "pest",
@@ -1241,7 +1241,7 @@ dependencies = [
 
 [[package]]
 name = "nextsql-lsp"
-version = "0.1.5"
+version = "0.2.0"
 dependencies = [
  "glob",
  "nextsql-core",

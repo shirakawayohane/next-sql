@@ -1,16 +1,18 @@
 name: Release All
 
 # Unified release workflow:
-#   1. Bumps version in Cargo.toml & package.json
+#   1. Bumps version in Cargo.toml, package.json, and crate dependency refs
 #   2. Optionally updates syntax docs with Claude Code
 #   3. Commits, tags, and pushes
 #   4. Tag push triggers: release.yml (CLI) + publish-vscode.yml (VSCode Extension)
+#      + publish-crates.yml (crates.io)
 #   5. Docs push triggers: deploy-pages.yml (GitHub Pages)
 #
 # Required secrets:
 #   RELEASE_TOKEN  — GitHub PAT with contents:write scope
 #                    (GITHUB_TOKEN cannot trigger downstream workflows)
 #   CLAUDE_CODE_OAUTH_TOKEN — Required only when update_docs is enabled
+#   CARGO_REGISTRY_TOKEN — crates.io API token
 
 on:
   workflow_dispatch:
@@ -65,6 +67,15 @@ jobs:
       - name: Bump Cargo.toml workspace version
         run: |
           sed -i 's/^version = "${{ steps.version.outputs.current }}"/version = "${{ steps.version.outputs.new }}"/' Cargo.toml
+
+      - name: Sync adapter dependency version on runtime crate
+        run: |
+          cd nextsql-tokio-postgres-adapter
+          sed -i 's/nextsql-backend-rust-runtime = { version = "[^"]*"/nextsql-backend-rust-runtime = { version = "${{ steps.version.outputs.new }}"/' Cargo.toml
+
+      - name: Sync codegen RUNTIME_CRATE_VERSION constant
+        run: |
+          sed -i 's/^const RUNTIME_CRATE_VERSION: &str = ".*"/const RUNTIME_CRATE_VERSION: \&str = "${{ steps.version.outputs.new }}"/' nextsql-codegen/src/lib.rs
 
       - name: Update Cargo.lock
         run: |
