@@ -1136,26 +1136,6 @@ fn parse_select_statement(pairs: pest::iterators::Pairs<Rule>) -> SelectStatemen
 }
 
 #[test]
-fn test_when_expression() {
-    let input = "when($includeEmail, users.email)";
-    let pairs = match NextSqlParser::parse(Rule::expression, &input) {
-        Ok(p) => p,
-        Err(e) => {
-            eprintln!("パースエラー: {}", e);
-            return;
-        }
-    };
-    let expr = parse_expression(pairs.peekable().next().unwrap().into_inner());
-    match expr {
-        Expression::Atomic(AtomicExpression::Call(call)) => {
-            assert_eq!(call.callee, "when");
-            assert_eq!(call.args.len(), 2);
-        }
-        _ => panic!("Expected when call expression, got: {:?}", expr),
-    }
-}
-
-#[test]
 fn test_parse_expression() {
     let input = "a == b";
     let pairs = match NextSqlParser::parse(Rule::expression, &input) {
@@ -1310,47 +1290,6 @@ fn parse_expression(pairs: pest::iterators::Pairs<Rule>) -> Expression {
         Rule::multiplicative_expression => parse_multiplicative_expression(pair.into_inner()),
         Rule::unary_expression => parse_unary_expression(pair.into_inner()),
         Rule::atomic_expression => parse_atomic_expression(pair.into_inner()),
-        Rule::when_expression => {
-            let mut pairs = pair.into_inner().peekable();
-            let condition = parse_expression(pairs.next().unwrap().into_inner());
-            let then_expr = parse_expression(pairs.next().unwrap().into_inner());
-            Expression::Atomic(AtomicExpression::When(WhenExpression {
-                condition: Box::new(condition),
-                then_expr: Box::new(then_expr),
-            }))
-        }
-        Rule::switch_expression => {
-            let mut pairs = pair.into_inner().peekable();
-            let expr = parse_expression(pairs.next().unwrap().into_inner());
-            let mut cases = Vec::new();
-            let mut default = None;
-
-            for case_pair in pairs {
-                match case_pair.as_rule() {
-                    Rule::switch_case => {
-                        let mut case_pairs = case_pair.into_inner();
-                        let condition = parse_expression(case_pairs.next().unwrap().into_inner());
-                        let result = parse_expression(case_pairs.next().unwrap().into_inner());
-                        cases.push(SwitchCase {
-                            condition: Box::new(condition),
-                            result: Box::new(result),
-                        });
-                    }
-                    Rule::switch_default => {
-                        let mut default_pairs = case_pair.into_inner();
-                        let result = parse_expression(default_pairs.next().unwrap().into_inner());
-                        default = Some(Box::new(result));
-                    }
-                    _ => unreachable!(),
-                }
-            }
-
-            Expression::Atomic(AtomicExpression::Switch(SwitchExpression {
-                expr: Box::new(expr),
-                cases,
-                default,
-            }))
-        }
         Rule::expression => {
             let inner_pairs = pair.into_inner();
             parse_expression(inner_pairs)
@@ -1629,47 +1568,6 @@ fn parse_atomic_expression(pairs: pest::iterators::Pairs<Rule>) -> Expression {
             let statement = parse_select_statement(pairs.next().unwrap().into_inner());
             Expression::Atomic(AtomicExpression::SubQuery(Box::new(statement)))
         }
-        Rule::when_expression => {
-            let mut pairs = pair.into_inner().peekable();
-            let condition = parse_expression(pairs.next().unwrap().into_inner());
-            let then_expr = parse_expression(pairs.next().unwrap().into_inner());
-            Expression::Atomic(AtomicExpression::When(WhenExpression {
-                condition: Box::new(condition),
-                then_expr: Box::new(then_expr),
-            }))
-        }
-        Rule::switch_expression => {
-            let mut pairs = pair.into_inner().peekable();
-            let expr = parse_expression(pairs.next().unwrap().into_inner());
-            let mut cases = Vec::new();
-            let mut default = None;
-
-            for case_pair in pairs {
-                match case_pair.as_rule() {
-                    Rule::switch_case => {
-                        let mut case_pairs = case_pair.into_inner();
-                        let condition = parse_expression(case_pairs.next().unwrap().into_inner());
-                        let result = parse_expression(case_pairs.next().unwrap().into_inner());
-                        cases.push(SwitchCase {
-                            condition: Box::new(condition),
-                            result: Box::new(result),
-                        });
-                    }
-                    Rule::switch_default => {
-                        let mut default_pairs = case_pair.into_inner();
-                        let result = parse_expression(default_pairs.next().unwrap().into_inner());
-                        default = Some(Box::new(result));
-                    }
-                    _ => unreachable!(),
-                }
-            }
-
-            Expression::Atomic(AtomicExpression::Switch(SwitchExpression {
-                expr: Box::new(expr),
-                cases,
-                default,
-            }))
-        }
         Rule::cast_expression => {
             let mut pairs = pair.into_inner().peekable();
             let expr = parse_expression(pairs.next().unwrap().into_inner());
@@ -1689,20 +1587,33 @@ fn parse_atomic_expression(pairs: pest::iterators::Pairs<Rule>) -> Expression {
             Expression::Atomic(AtomicExpression::Exists(Box::new(subquery)))
         }
         Rule::aggregate_function => {
-            let mut pairs = pair.into_inner().peekable();
-            let function_type_str = pairs.next().unwrap().as_str();
-            let function_type = match function_type_str {
-                "SUM" => AggregateFunctionType::Sum,
-                "COUNT" => AggregateFunctionType::Count,
-                "AVG" => AggregateFunctionType::Avg,
-                "MIN" => AggregateFunctionType::Min,
-                "MAX" => AggregateFunctionType::Max,
-                _ => unreachable!("Unknown aggregate function: {}", function_type_str),
+            let pair_str = pair.as_str();
+            let function_type = if pair_str.starts_with("SUM") {
+                AggregateFunctionType::Sum
+            } else if pair_str.starts_with("COUNT") {
+                AggregateFunctionType::Count
+            } else if pair_str.starts_with("AVG") {
+                AggregateFunctionType::Avg
+            } else if pair_str.starts_with("MIN") {
+                AggregateFunctionType::Min
+            } else if pair_str.starts_with("MAX") {
+                AggregateFunctionType::Max
+            } else {
+                unreachable!("Unknown aggregate function: {}", pair_str)
             };
+            let mut pairs = pair.into_inner().peekable();
             let expr = parse_expression(pairs.next().unwrap().into_inner());
+            let filter = if let Some(filter_pair) = pairs.next() {
+                assert_eq!(filter_pair.as_rule(), Rule::aggregate_filter);
+                let filter_expr = parse_expression(filter_pair.into_inner().next().unwrap().into_inner());
+                Some(Box::new(filter_expr))
+            } else {
+                None
+            };
             Expression::Atomic(AtomicExpression::Aggregate(AggregateFunction {
                 function_type,
                 expr: Box::new(expr),
+                filter,
             }))
         }
         _ => {
@@ -1877,12 +1788,6 @@ mod tests {
     #[test]
     fn dynamic_joins_test() {
         let input = include_str!("../../examples/dynamic-joins.nsql");
-        dbg!("{:?}", parse_module(&input).unwrap());
-    }
-
-    #[test]
-    fn dynamic_switch_case_test() {
-        let input = include_str!("../../examples/dynamic-switch-case.nsql");
         dbg!("{:?}", parse_module(&input).unwrap());
     }
 
@@ -2822,4 +2727,40 @@ fn test_cast_expression_with_different_types() {
     "#;
     let module = parse_module(input).unwrap();
     assert_eq!(module.toplevels.len(), 1);
+}
+
+#[test]
+fn test_aggregate_with_filter() {
+    let input = r#"
+        query test() {
+            from(orders)
+            .aggregate(active_count: COUNT(orders.id).filter(orders.status == "active"))
+            .select(active_count)
+        }
+    "#;
+    let module = parse_module(input).unwrap();
+    assert_eq!(module.toplevels.len(), 1);
+
+    let query = match &module.toplevels[0] {
+        TopLevel::Query(q) => q,
+        _ => panic!("expected query"),
+    };
+    let QueryStatement::Select(select_stmt) = &query.body.statements[0];
+    // Find the aggregate clause
+    let agg_clause = select_stmt.clauses.iter().find_map(|c| match c {
+        QueryClause::Aggregate(aggs) => Some(aggs),
+        _ => None,
+    }).expect("expected aggregate clause");
+
+    assert_eq!(agg_clause.len(), 1);
+    assert_eq!(agg_clause[0].alias, "active_count");
+
+    // The aggregate expression should be an AggregateFunction with a filter
+    match &agg_clause[0].expr {
+        Expression::Atomic(AtomicExpression::Aggregate(agg)) => {
+            assert_eq!(agg.function_type, AggregateFunctionType::Count);
+            assert!(agg.filter.is_some(), "expected filter on aggregate");
+        }
+        _ => panic!("expected aggregate function expression"),
+    }
 }

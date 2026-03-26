@@ -490,22 +490,11 @@ impl<'a> SqlGenContext<'a> {
             AtomicExpression::SubQuery(select) => {
                 self.collect_params_from_select(select);
             }
-            AtomicExpression::When(when) => {
-                self.collect_params_from_expr(&when.condition);
-                self.collect_params_from_expr(&when.then_expr);
-            }
-            AtomicExpression::Switch(switch) => {
-                self.collect_params_from_expr(&switch.expr);
-                for case in &switch.cases {
-                    self.collect_params_from_expr(&case.condition);
-                    self.collect_params_from_expr(&case.result);
-                }
-                if let Some(default) = &switch.default {
-                    self.collect_params_from_expr(default);
-                }
-            }
             AtomicExpression::Aggregate(agg) => {
                 self.collect_params_from_expr(&agg.expr);
+                if let Some(filter_expr) = &agg.filter {
+                    self.collect_params_from_expr(filter_expr);
+                }
             }
             AtomicExpression::Exists(select) => {
                 self.collect_params_from_select(select);
@@ -653,26 +642,6 @@ impl<'a> SqlGenContext<'a> {
                 let sql = self.gen_select(select);
                 format!("({})", sql)
             }
-            AtomicExpression::When(when) => {
-                let cond = self.gen_expr(&when.condition);
-                let then = self.gen_expr(&when.then_expr);
-                format!("CASE WHEN {} THEN {} END", cond, then)
-            }
-            AtomicExpression::Switch(switch) => {
-                let expr = self.gen_expr(&switch.expr);
-                let mut parts = vec![format!("CASE {}", expr)];
-                for case in &switch.cases {
-                    let cond = self.gen_expr(&case.condition);
-                    let result = self.gen_expr(&case.result);
-                    parts.push(format!("WHEN {} THEN {}", cond, result));
-                }
-                if let Some(default) = &switch.default {
-                    let d = self.gen_expr(default);
-                    parts.push(format!("ELSE {}", d));
-                }
-                parts.push("END".to_string());
-                parts.join(" ")
-            }
             AtomicExpression::Aggregate(agg) => {
                 let func = match agg.function_type {
                     AggregateFunctionType::Sum => "SUM",
@@ -682,7 +651,12 @@ impl<'a> SqlGenContext<'a> {
                     AggregateFunctionType::Max => "MAX",
                 };
                 let expr = self.gen_expr(&agg.expr);
-                format!("{}({})", func, expr)
+                if let Some(filter_expr) = &agg.filter {
+                    let filter = self.gen_expr(filter_expr);
+                    format!("{}({}) FILTER (WHERE {})", func, expr, filter)
+                } else {
+                    format!("{}({})", func, expr)
+                }
             }
             AtomicExpression::Exists(select) => {
                 let sql = self.gen_select(select);
@@ -1900,63 +1874,28 @@ mod tests {
             let agg = Expression::Atomic(AtomicExpression::Aggregate(AggregateFunction {
                 function_type: func_type,
                 expr: Box::new(col_implicit(col)),
+                filter: None,
             }));
             assert_eq!(ctx.gen_expr(&agg), expected);
         }
     }
 
-    // ── When / Switch ───────────────────────────────────────────────────
-
     #[test]
-    fn test_when_expression() {
-        let when = Expression::Atomic(AtomicExpression::When(WhenExpression {
-            condition: Box::new(binary(col_implicit("x"), BinaryOp::GreaterThan, num(0.0))),
-            then_expr: Box::new(str_lit("positive")),
-        }));
+    fn test_aggregate_with_filter() {
         let reg = RelationRegistry::empty();
         let mut ctx = SqlGenContext::new(&reg);
-        assert_eq!(ctx.gen_expr(&when), "CASE WHEN x > 0 THEN 'positive' END");
-    }
-
-    #[test]
-    fn test_switch_expression() {
-        let switch = Expression::Atomic(AtomicExpression::Switch(SwitchExpression {
-            expr: Box::new(col_implicit("status")),
-            cases: vec![
-                SwitchCase {
-                    condition: Box::new(num(1.0)),
-                    result: Box::new(str_lit("active")),
-                },
-                SwitchCase {
-                    condition: Box::new(num(2.0)),
-                    result: Box::new(str_lit("inactive")),
-                },
-            ],
-            default: Some(Box::new(str_lit("unknown"))),
+        let agg = Expression::Atomic(AtomicExpression::Aggregate(AggregateFunction {
+            function_type: AggregateFunctionType::Count,
+            expr: Box::new(col_implicit("id")),
+            filter: Some(Box::new(binary(
+                col_implicit("status"),
+                BinaryOp::Equal,
+                str_lit("active"),
+            ))),
         }));
-        let reg = RelationRegistry::empty();
-        let mut ctx = SqlGenContext::new(&reg);
         assert_eq!(
-            ctx.gen_expr(&switch),
-            "CASE status WHEN 1 THEN 'active' WHEN 2 THEN 'inactive' ELSE 'unknown' END"
-        );
-    }
-
-    #[test]
-    fn test_switch_no_default() {
-        let switch = Expression::Atomic(AtomicExpression::Switch(SwitchExpression {
-            expr: Box::new(col_implicit("status")),
-            cases: vec![SwitchCase {
-                condition: Box::new(num(1.0)),
-                result: Box::new(str_lit("active")),
-            }],
-            default: None,
-        }));
-        let reg = RelationRegistry::empty();
-        let mut ctx = SqlGenContext::new(&reg);
-        assert_eq!(
-            ctx.gen_expr(&switch),
-            "CASE status WHEN 1 THEN 'active' END"
+            ctx.gen_expr(&agg),
+            "COUNT(id) FILTER (WHERE status = 'active')"
         );
     }
 
@@ -2125,6 +2064,7 @@ mod tests {
                     expr: Expression::Atomic(AtomicExpression::Aggregate(AggregateFunction {
                         function_type: AggregateFunctionType::Count,
                         expr: Box::new(col_wildcard()),
+                        filter: None,
                     })),
                 }]),
                 QueryClause::GroupBy(vec![col_implicit("status")]),
@@ -2132,6 +2072,7 @@ mod tests {
                     Expression::Atomic(AtomicExpression::Aggregate(AggregateFunction {
                         function_type: AggregateFunctionType::Count,
                         expr: Box::new(col_wildcard()),
+                        filter: None,
                     })),
                     BinaryOp::GreaterThan,
                     num(5.0),
@@ -2595,6 +2536,7 @@ mod tests {
                     expr: Expression::Atomic(AtomicExpression::Aggregate(AggregateFunction {
                         function_type: AggregateFunctionType::Count,
                         expr: Box::new(col_wildcard()),
+                        filter: None,
                     })),
                 }]),
                 QueryClause::Where(binary(
@@ -2607,6 +2549,7 @@ mod tests {
                     Expression::Atomic(AtomicExpression::Aggregate(AggregateFunction {
                         function_type: AggregateFunctionType::Count,
                         expr: Box::new(col_wildcard()),
+                        filter: None,
                     })),
                     BinaryOp::GreaterThanOrEqual,
                     num(3.0),
@@ -2615,6 +2558,7 @@ mod tests {
                     expr: Expression::Atomic(AtomicExpression::Aggregate(AggregateFunction {
                         function_type: AggregateFunctionType::Count,
                         expr: Box::new(col_wildcard()),
+                        filter: None,
                     })),
                     direction: Some(OrderDirection::Desc),
                 }]),
@@ -2656,6 +2600,7 @@ mod tests {
                     expr: Expression::Atomic(AtomicExpression::Aggregate(AggregateFunction {
                         function_type: AggregateFunctionType::Avg,
                         expr: Box::new(col_explicit("reviews", "rating")),
+                        filter: None,
                     })),
                 }]),
                 QueryClause::GroupBy(vec![col_explicit("reviews", "product_id")]),
@@ -2663,6 +2608,7 @@ mod tests {
                     Expression::Atomic(AtomicExpression::Aggregate(AggregateFunction {
                         function_type: AggregateFunctionType::Avg,
                         expr: Box::new(col_explicit("reviews", "rating")),
+                        filter: None,
                     })),
                     BinaryOp::GreaterThanOrEqual,
                     var("min_rating"),

@@ -130,6 +130,7 @@ pub enum AggregateFunctionType {
 pub struct AggregateFunction {
     pub function_type: AggregateFunctionType,
     pub expr: Box<Expression>,
+    pub filter: Option<Box<Expression>>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -142,8 +143,6 @@ pub enum AtomicExpression {
     PropertyAccess(PropertyAccess),
     MethodCall(MethodCall),
     SubQuery(Box<SelectStatement>),
-    When(WhenExpression),
-    Switch(SwitchExpression),
     Aggregate(AggregateFunction),
     Exists(Box<SelectStatement>),
     Cast(CastExpression),
@@ -307,25 +306,6 @@ pub struct Argument {
 pub struct QueryDecl {
     pub name: String,
     pub arguments: Vec<Argument>,
-}
-
-#[derive(Debug, PartialEq, Clone)]
-pub struct WhenExpression {
-    pub condition: Box<Expression>,
-    pub then_expr: Box<Expression>,
-}
-
-#[derive(Debug, PartialEq, Clone)]
-pub struct SwitchCase {
-    pub condition: Box<Expression>,
-    pub result: Box<Expression>,
-}
-
-#[derive(Debug, PartialEq, Clone)]
-pub struct SwitchExpression {
-    pub expr: Box<Expression>,
-    pub cases: Vec<SwitchCase>,
-    pub default: Option<Box<Expression>>,
 }
 
 #[derive(Debug, PartialEq, Clone)]

@@ -96,3 +96,17 @@ query highValueCustomers($min_total: f64) {
   .select(orders.customer_id, total_spent, order_count)
   .orderBy(total_spent.desc())
 }
+
+// 9. Conditional aggregation with FILTER
+query orderStatusBreakdown() {
+  from(orders)
+  .groupBy(orders.customer_id)
+  .aggregate(
+    total_orders: COUNT(orders.id),
+    active_orders: COUNT(orders.id).filter(orders.status == "active"),
+    shipped_orders: COUNT(orders.id).filter(orders.status == "shipped"),
+    cancelled_orders: COUNT(orders.id).filter(orders.status == "cancelled"),
+    active_revenue: SUM(orders.total_amount).filter(orders.status == "active")
+  )
+  .select(orders.customer_id, total_orders, active_orders, shipped_orders, cancelled_orders, active_revenue)
+}

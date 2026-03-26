@@ -961,6 +961,15 @@ async fn handle_update_command() -> Result<(), Box<dyn std::error::Error>> {
     let _ = std::fs::remove_file(&backup_path);
 
     println!("Successfully updated to {}!", tag_name);
+
+    // Update skill files if .claude directory exists
+    let cwd = std::env::current_dir()?;
+    if let Some(claude_dir) = config::find_claude_dir(&cwd) {
+        if let Err(e) = config::install_skill_files(&claude_dir) {
+            eprintln!("Warning: Failed to update skill files: {}", e);
+        }
+    }
+
     Ok(())
 }
 

@@ -1418,3 +1418,31 @@ async fn test_find_reviews_without_comments() {
     assert_eq!(results[0].rating, 3);
     assert_eq!(results[0].name, "Silent"); // Customer name from JOIN
 }
+
+#[tokio::test]
+async fn test_order_status_breakdown_with_filter() {
+    let client = setup().await;
+    let inner = client.inner();
+
+    let cust_row = inner.query_one(
+        "INSERT INTO customers (name, email) VALUES ('FilterTest', 'filter@example.com') RETURNING id",
+        &[],
+    ).await.unwrap();
+    let cust_id: uuid::Uuid = cust_row.get(0);
+
+    // Insert orders with different statuses
+    inner.execute("INSERT INTO orders (customer_id, status, total_amount) VALUES ($1, 'active', 100.0)", &[&cust_id]).await.unwrap();
+    inner.execute("INSERT INTO orders (customer_id, status, total_amount) VALUES ($1, 'active', 200.0)", &[&cust_id]).await.unwrap();
+    inner.execute("INSERT INTO orders (customer_id, status, total_amount) VALUES ($1, 'shipped', 150.0)", &[&cust_id]).await.unwrap();
+    inner.execute("INSERT INTO orders (customer_id, status, total_amount) VALUES ($1, 'cancelled', 50.0)", &[&cust_id]).await.unwrap();
+
+    let results = analytics::order_status_breakdown(&client).await.unwrap();
+    assert_eq!(results.len(), 1);
+
+    let row = &results[0];
+    assert_eq!(row.total_orders, 4);
+    assert_eq!(row.active_orders, 2);
+    assert_eq!(row.shipped_orders, 1);
+    assert_eq!(row.cancelled_orders, 1);
+    assert_eq!(row.active_revenue, 300.0); // 100 + 200
+}

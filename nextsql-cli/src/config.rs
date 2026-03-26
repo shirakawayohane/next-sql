@@ -91,7 +91,7 @@ target_directory = "."
 
 /// 親ディレクトリを遡って .claude ディレクトリを探す
 /// ホームディレクトリ直下の ~/.claude（グローバル設定）は除外する
-fn find_claude_dir(start: &Path) -> Option<std::path::PathBuf> {
+pub fn find_claude_dir(start: &Path) -> Option<std::path::PathBuf> {
     let home_dir = dirs::home_dir();
     let mut current = Some(start);
     while let Some(dir) = current {
@@ -110,7 +110,7 @@ fn find_claude_dir(start: &Path) -> Option<std::path::PathBuf> {
     None
 }
 
-fn install_skill_files(claude_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
+pub fn install_skill_files(claude_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
     let skill_dir = claude_dir.join("skills/learn-next-sql");
     let skill_path = skill_dir.join("SKILL.md");
 

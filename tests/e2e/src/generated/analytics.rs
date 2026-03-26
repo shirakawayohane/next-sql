@@ -228,3 +228,35 @@ pub async fn high_value_customers(
     Ok(rows.iter().map(|row| HighValueCustomersRow::from_row(row)).collect())
 }
 
+pub struct OrderStatusBreakdownRow {
+    pub customer_id: CustomerId,
+    pub total_orders: i64,
+    pub active_orders: i64,
+    pub shipped_orders: i64,
+    pub cancelled_orders: i64,
+    pub active_revenue: f64,
+}
+
+impl OrderStatusBreakdownRow {
+    pub fn from_row(row: &dyn super::runtime::Row) -> Self {
+        Self {
+            customer_id: CustomerId(row.get_uuid(0)),
+            total_orders: row.get_i64(1),
+            active_orders: row.get_i64(2),
+            shipped_orders: row.get_i64(3),
+            cancelled_orders: row.get_i64(4),
+            active_revenue: row.get_f64(5),
+        }
+    }
+}
+
+pub async fn order_status_breakdown(
+    client: &(impl super::runtime::Client + ?Sized),
+) -> Result<Vec<OrderStatusBreakdownRow>, Box<dyn std::error::Error + Send + Sync>> {
+    let rows = client.query(
+        "SELECT orders.customer_id, COUNT(orders.id) AS total_orders, COUNT(orders.id) FILTER (WHERE orders.status = 'active') AS active_orders, COUNT(orders.id) FILTER (WHERE orders.status = 'shipped') AS shipped_orders, COUNT(orders.id) FILTER (WHERE orders.status = 'cancelled') AS cancelled_orders, SUM(orders.total_amount) FILTER (WHERE orders.status = 'active') AS active_revenue FROM orders GROUP BY orders.customer_id",
+        &[],
+    ).await?;
+    Ok(rows.iter().map(|row| OrderStatusBreakdownRow::from_row(row)).collect())
+}
+

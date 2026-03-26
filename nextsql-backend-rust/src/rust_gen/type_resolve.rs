@@ -417,9 +417,6 @@ pub(super) fn extract_name_from_atomic(atomic: &AtomicExpression) -> Option<Stri
                 None
             }
         }
-        AtomicExpression::When(when) => {
-            extract_name_from_expr(&when.then_expr)
-        }
         AtomicExpression::Aggregate(agg) => {
             let prefix = match agg.function_type {
                 AggregateFunctionType::Count => "count",

@@ -49,14 +49,11 @@ index_access = { (basic_expression | property_access | method_call) ~ ("[" ~ exp
 call_expression = { ident ~ ("(" ~ ")" | "(" ~ expression ~ (s* ~ "," ~ expression)* ~ ")")}
 member_expression = { index_access | method_call | property_access | basic_expression }
 subquery = { "$(" ~ select_statement ~ ")" }
-when_expression = { "when" ~ "(" ~ expression ~ "," ~ expression ~ ")" }
-switch_case = { "case" ~ expression ~ ":" ~ expression }
-switch_default = { "default" ~ ":" ~ expression }
-switch_expression = { "switch" ~ "(" ~ expression ~ ")" ~ "{" ~ switch_case* ~ switch_default? ~ "}" }
 exists_expression = { "exists" ~ "(" ~ subquery ~ ")" }
-aggregate_function = { ("SUM" | "COUNT" | "AVG" | "MIN" | "MAX") ~ "(" ~ expression ~ ")" }
+aggregate_filter = { dot ~ "filter" ~ "(" ~ expression ~ ")" }
+aggregate_function = { ("SUM" | "COUNT" | "AVG" | "MIN" | "MAX") ~ "(" ~ expression ~ ")" ~ aggregate_filter? }
 cast_expression = { "cast" ~ "(" ~ expression ~ "," ~ builtin_type ~ ")" }
-atomic_expression = { cast_expression | member_expression | when_expression | switch_expression | exists_expression | aggregate_function | subquery | "(" ~ expression ~ ")" }
+atomic_expression = { cast_expression | aggregate_function | member_expression | exists_expression | subquery | "(" ~ expression ~ ")" }
 
 // Target is now just an identifier (no inline alias)
 target = @{ ident }
