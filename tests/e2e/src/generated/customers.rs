@@ -67,17 +67,17 @@ pub async fn search_customers(
 
     let mut conditions: Vec<String> = Vec::new();
     if params.name_like.is_some() {
-        conditions.push(format!("upper(customers.name) LIKE ${}", idx));
+        conditions.push(format!("upper(customers.name) LIKE ${idx}"));
         bind_params.push(&params.name_like);
         idx += 1;
     }
     if params.email_like.is_some() {
-        conditions.push(format!("customers.email LIKE ${}", idx));
+        conditions.push(format!("customers.email LIKE ${idx}"));
         bind_params.push(&params.email_like);
         idx += 1;
     }
     if params.is_active.is_some() {
-        conditions.push(format!("customers.is_active = ${}", idx));
+        conditions.push(format!("customers.is_active = ${idx}"));
         bind_params.push(&params.is_active);
         idx += 1;
     }

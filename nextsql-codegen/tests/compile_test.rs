@@ -54,8 +54,7 @@ fn test_generated_code_compiles() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         output.status.success(),
-        "Generated code failed to compile:\n{}",
-        stderr
+        "Generated code failed to compile:\n{stderr}"
     );
 }
 
@@ -88,8 +87,7 @@ fn test_generated_function_signatures() {
     // find_customer_by_id returns Vec<Customer> (model struct reuse)
     assert!(
         customers.contains("-> Result<Vec<Customer>,"),
-        "find_customer_by_id should return Vec<Customer>, got:\n{}",
-        customers
+        "find_customer_by_id should return Vec<Customer>, got:\n{customers}"
     );
     // create_customer is present
     assert!(

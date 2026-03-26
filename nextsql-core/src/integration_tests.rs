@@ -1,5 +1,5 @@
 #[cfg(test)]
-mod integration_tests {
+mod tests {
     use crate::*;
     use crate::schema::{DatabaseSchema, TableSchema, ColumnSchema};
     use crate::type_validator::TypeValidator;
@@ -141,14 +141,14 @@ mod integration_tests {
         "#;
         
         let module = parse_module(nextsql_code).unwrap();
-        println!("Module: {:?}", module);
+        println!("Module: {module:?}");
         let errors = validator.validate_module(&module);
         
         // Should have type mismatch error
-        println!("Errors: {:?}", errors);
+        println!("Errors: {errors:?}");
         assert!(!errors.is_empty(), "Expected type validation errors but got none");
         assert!(errors.iter().any(|e| e.message.contains("Type mismatch for field 'age'")), 
-                "Expected type mismatch error for age field, but got: {:?}", errors);
+                "Expected type mismatch error for age field, but got: {errors:?}");
     }
 
     #[test]
@@ -216,13 +216,13 @@ mutation createUser($email: string) {
 }"#;
         
         let module = parse_module(nextsql_code).unwrap();
-        println!("Undefined var module: {:?}", module);
+        println!("Undefined var module: {module:?}");
         let errors = validator.validate_module(&module);
         
         // Should have error about undefined variable
-        println!("Undefined var errors: {:?}", errors);
+        println!("Undefined var errors: {errors:?}");
         assert!(!errors.is_empty(), "Expected undefined variable error but got none");
         assert!(errors.iter().any(|e| e.message.contains("Undefined variable") && e.message.contains("undefined_var")), 
-                "Expected undefined variable error, but got: {:?}", errors);
+                "Expected undefined variable error, but got: {errors:?}");
     }
 }

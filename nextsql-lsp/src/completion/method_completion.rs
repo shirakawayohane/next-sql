@@ -171,7 +171,7 @@ pub trait MethodCompletionProvider {
         CompletionItem {
             label: label.to_string(),
             kind: Some(CompletionItemKind::METHOD),
-            detail: Some(format!(".{}", insert_text)),
+            detail: Some(format!(".{insert_text}")),
             documentation: Some(Documentation::String(documentation.to_string())),
             insert_text: Some(insert_text.to_string()),
             insert_text_format: Some(InsertTextFormat::SNIPPET),

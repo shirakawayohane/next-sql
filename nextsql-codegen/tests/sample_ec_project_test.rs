@@ -18,7 +18,7 @@ fn load_schema() -> DatabaseSchema {
 fn run_codegen(test_name: &str) -> (nextsql_codegen::CodegenResult, PathBuf) {
     let schema = load_schema();
     let source_dir = project_root().join("examples/sample-ec-project");
-    let temp_dir = std::env::temp_dir().join(format!("nextsql-test-ec-{}", test_name));
+    let temp_dir = std::env::temp_dir().join(format!("nextsql-test-ec-{test_name}"));
     let _ = std::fs::remove_dir_all(&temp_dir);
     let src_dir = temp_dir.join("src");
     std::fs::create_dir_all(&src_dir).unwrap();
@@ -406,8 +406,7 @@ fn test_params_use_valtypes() {
     // findCustomerById should use CustomerId valtype for the id parameter, not uuid::Uuid
     assert!(
         content.contains("id: &CustomerId,"),
-        "findCustomerById param should use CustomerId type, got:\n{}",
-        content
+        "findCustomerById param should use CustomerId type, got:\n{content}"
     );
 }
 

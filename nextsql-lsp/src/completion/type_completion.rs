@@ -60,7 +60,7 @@ pub trait TypeCompletionProvider {
                 kind: Some(CompletionItemKind::KEYWORD),
                 detail: Some(description.to_string()),
                 insert_text: Some(type_name.to_string()),
-                sort_text: Some(format!("1_{}", type_name)),
+                sort_text: Some(format!("1_{type_name}")),
                 ..Default::default()
             });
         }
@@ -79,13 +79,12 @@ pub trait TypeCompletionProvider {
                 completions.push(CompletionItem {
                     label: valtype_name.to_string(),
                     kind: Some(CompletionItemKind::TYPE_PARAMETER),
-                    detail: Some(format!("valtype {} = {}", valtype_name, base_type)),
+                    detail: Some(format!("valtype {valtype_name} = {base_type}")),
                     documentation: Some(Documentation::String(format!(
-                        "Value type alias for {}",
-                        base_type
+                        "Value type alias for {base_type}"
                     ))),
                     insert_text: Some(valtype_name.to_string()),
-                    sort_text: Some(format!("0_{}", valtype_name)),
+                    sort_text: Some(format!("0_{valtype_name}")),
                     ..Default::default()
                 });
             }
@@ -104,13 +103,12 @@ pub trait TypeCompletionProvider {
                 completions.push(CompletionItem {
                     label: input_name.to_string(),
                     kind: Some(CompletionItemKind::STRUCT),
-                    detail: Some(format!("input {}", input_name)),
+                    detail: Some(format!("input {input_name}")),
                     documentation: Some(Documentation::String(format!(
-                        "Input type '{}'",
-                        input_name
+                        "Input type '{input_name}'"
                     ))),
                     insert_text: Some(input_name.to_string()),
-                    sort_text: Some(format!("0_{}", input_name)),
+                    sort_text: Some(format!("0_{input_name}")),
                     ..Default::default()
                 });
             }
@@ -131,13 +129,12 @@ pub trait TypeCompletionProvider {
                         completions.push(CompletionItem {
                             label: name.clone(),
                             kind: Some(CompletionItemKind::TYPE_PARAMETER),
-                            detail: Some(format!("valtype {} = {:?}", name, base_type)),
+                            detail: Some(format!("valtype {name} = {base_type:?}")),
                             documentation: Some(Documentation::String(format!(
-                                "Value type alias for {:?} (from another file)",
-                                base_type
+                                "Value type alias for {base_type:?} (from another file)"
                             ))),
                             insert_text: Some(name.clone()),
-                            sort_text: Some(format!("0_{}", name)),
+                            sort_text: Some(format!("0_{name}")),
                             ..Default::default()
                         });
                     }
@@ -155,20 +152,19 @@ pub trait TypeCompletionProvider {
                             .collect::<Vec<_>>()
                             .join(", ");
                         let detail = if enum_schema.variants.len() > 5 {
-                            format!("{}, ...", variants_preview)
+                            format!("{variants_preview}, ...")
                         } else {
                             variants_preview
                         };
                         completions.push(CompletionItem {
                             label: enum_name.clone(),
                             kind: Some(CompletionItemKind::ENUM),
-                            detail: Some(format!("enum {}", enum_name)),
+                            detail: Some(format!("enum {enum_name}")),
                             documentation: Some(Documentation::String(format!(
-                                "Database enum type\nVariants: {}",
-                                detail
+                                "Database enum type\nVariants: {detail}"
                             ))),
                             insert_text: Some(enum_name.clone()),
-                            sort_text: Some(format!("0_{}", enum_name)),
+                            sort_text: Some(format!("0_{enum_name}")),
                             ..Default::default()
                         });
                     }

@@ -50,18 +50,17 @@ pub trait ModelCompletionProvider {
                     // Create the replacement text
                     let replacement_text = if has_closing_bracket {
                         // Include the closing bracket and use snippet to position cursor after it
-                        format!("{}>$0", model_name)
+                        format!("{model_name}>$0")
                     } else {
-                        format!("{}>", model_name)
+                        format!("{model_name}>")
                     };
                     
                     let mut completion_item = CompletionItem {
                         label: model_name.clone(),
                         kind: Some(CompletionItemKind::CLASS),
-                        detail: Some(format!("Model for table {}", table_name)),
+                        detail: Some(format!("Model for table {table_name}")),
                         documentation: Some(Documentation::String(format!(
-                            "Utility type for {} table",
-                            table_name
+                            "Utility type for {table_name} table"
                         ))),
                         text_edit: Some(CompletionTextEdit::Edit(TextEdit {
                             range: Range {
@@ -121,18 +120,17 @@ pub trait ModelCompletionProvider {
             
             for (table, model) in common_models {
                 let replacement_text = if has_closing_bracket {
-                    format!("{}>$0", model)
+                    format!("{model}>$0")
                 } else {
-                    format!("{}>", model)
+                    format!("{model}>")
                 };
                 
                 let mut completion_item = CompletionItem {
                     label: model.to_string(),
                     kind: Some(CompletionItemKind::CLASS),
-                    detail: Some(format!("Model for table {} (suggestion)", table)),
+                    detail: Some(format!("Model for table {table} (suggestion)")),
                     documentation: Some(Documentation::String(format!(
-                        "Utility type for {} table",
-                        table
+                        "Utility type for {table} table"
                     ))),
                     text_edit: Some(CompletionTextEdit::Edit(TextEdit {
                         range: Range {

@@ -85,7 +85,7 @@ pub fn check(config: &CheckConfig, schema: &DatabaseSchema) -> CheckResult {
                 file: path,
                 line: None,
                 column: None,
-                message: format!("Failed to read file: {}", e),
+                message: format!("Failed to read file: {e}"),
                 source: DiagnosticSource::Io,
             });
             return result;
@@ -123,7 +123,7 @@ pub fn check(config: &CheckConfig, schema: &DatabaseSchema) -> CheckResult {
                     file: nsql_path.clone(),
                     line: None,
                     column: None,
-                    message: format!("Failed to read file: {}", e),
+                    message: format!("Failed to read file: {e}"),
                     source: DiagnosticSource::Io,
                 });
                 continue;
@@ -131,7 +131,7 @@ pub fn check(config: &CheckConfig, schema: &DatabaseSchema) -> CheckResult {
         };
 
         let combined_content = match &types_content {
-            Some(types) => format!("{}\n{}", types, file_content),
+            Some(types) => format!("{types}\n{file_content}"),
             None => file_content.clone(),
         };
 
@@ -213,12 +213,12 @@ fn format_pest_error(error: &pest::error::Error<nextsql_core::Rule>) -> String {
             if !positives.is_empty() {
                 format!(
                     "expected one of: {}",
-                    positives.iter().map(|r| format!("{:?}", r)).collect::<Vec<_>>().join(", ")
+                    positives.iter().map(|r| format!("{r:?}")).collect::<Vec<_>>().join(", ")
                 )
             } else if !negatives.is_empty() {
                 format!(
                     "unexpected: {}",
-                    negatives.iter().map(|r| format!("{:?}", r)).collect::<Vec<_>>().join(", ")
+                    negatives.iter().map(|r| format!("{r:?}")).collect::<Vec<_>>().join(", ")
                 )
             } else {
                 "parsing error".to_string()
@@ -250,7 +250,7 @@ pub fn generate(config: &CodegenConfig, schema: &DatabaseSchema) -> CodegenResul
         Ok(content) => {
             if let Some(ref c) = content {
                 if let Err(e) = nextsql_core::parser::parse_module(c) {
-                    result.errors.push(format!("Failed to parse type files: {}", e));
+                    result.errors.push(format!("Failed to parse type files: {e}"));
                     return result;
                 }
             }
@@ -271,7 +271,7 @@ pub fn generate(config: &CodegenConfig, schema: &DatabaseSchema) -> CodegenResul
     if let Err(e) = std::fs::create_dir_all(&generated_dir) {
         result
             .errors
-            .push(format!("Failed to create output directory: {}", e));
+            .push(format!("Failed to create output directory: {e}"));
         return result;
     }
 
@@ -307,7 +307,7 @@ pub fn generate(config: &CodegenConfig, schema: &DatabaseSchema) -> CodegenResul
         // Merge types.nsql content by prepending it to the file content before parsing.
         // This avoids needing Clone on TopLevel/Query/Mutation types.
         let combined_content = match &types_content {
-            Some(types) => format!("{}\n{}", types, file_content),
+            Some(types) => format!("{types}\n{file_content}"),
             None => file_content,
         };
 
@@ -401,8 +401,7 @@ pub fn generate(config: &CodegenConfig, schema: &DatabaseSchema) -> CodegenResul
                     }
                     Err(e) => {
                         result.errors.push(format!(
-                            "Failed to write types.rs: {}",
-                            e
+                            "Failed to write types.rs: {e}"
                         ));
                     }
                 }
@@ -430,7 +429,7 @@ pub fn generate(config: &CodegenConfig, schema: &DatabaseSchema) -> CodegenResul
                 // Collect codegen errors (e.g., duplicate field names)
                 result.errors.extend(generated.errors);
 
-                let output_filename = format!("{}.rs", module_name);
+                let output_filename = format!("{module_name}.rs");
                 let output_path = generated_dir.join(&output_filename);
                 match std::fs::write(&output_path, &generated.content) {
                     Ok(_) => {
@@ -448,7 +447,7 @@ pub fn generate(config: &CodegenConfig, schema: &DatabaseSchema) -> CodegenResul
             }
         }
         other => {
-            result.errors.push(format!("Unknown backend: {}", other));
+            result.errors.push(format!("Unknown backend: {other}"));
             return result;
         }
     }
@@ -462,7 +461,7 @@ pub fn generate(config: &CodegenConfig, schema: &DatabaseSchema) -> CodegenResul
             Ok(_) => result.generated_files.push(mod_path),
             Err(e) => result
                 .errors
-                .push(format!("Failed to write generated/mod.rs: {}", e)),
+                .push(format!("Failed to write generated/mod.rs: {e}")),
         }
 
         // Update lib.rs: only replace the nextsql-managed section, preserving user code
@@ -472,7 +471,7 @@ pub fn generate(config: &CodegenConfig, schema: &DatabaseSchema) -> CodegenResul
             Ok(_) => result.generated_files.push(lib_path),
             Err(e) => result
                 .errors
-                .push(format!("Failed to write lib.rs: {}", e)),
+                .push(format!("Failed to write lib.rs: {e}")),
         }
     }
 
@@ -502,13 +501,13 @@ pub fn generate(config: &CodegenConfig, schema: &DatabaseSchema) -> CodegenResul
             if let Err(e) = std::fs::create_dir_all(cargo_dir) {
                 result
                     .errors
-                    .push(format!("Failed to create crate root directory: {}", e));
+                    .push(format!("Failed to create crate root directory: {e}"));
             }
             match std::fs::write(&cargo_path, &cargo_content) {
                 Ok(_) => result.generated_files.push(cargo_path),
                 Err(e) => result
                     .errors
-                    .push(format!("Failed to write Cargo.toml: {}", e)),
+                    .push(format!("Failed to write Cargo.toml: {e}")),
             }
         } else if config.runtime_crate_path.is_none() {
             // Update nextsql-backend-rust-runtime version in existing Cargo.toml
@@ -518,7 +517,7 @@ pub fn generate(config: &CodegenConfig, schema: &DatabaseSchema) -> CodegenResul
                     if let Err(e) = std::fs::write(&cargo_path, &updated) {
                         result
                             .errors
-                            .push(format!("Failed to update Cargo.toml: {}", e));
+                            .push(format!("Failed to update Cargo.toml: {e}"));
                     }
                 }
             }
@@ -639,11 +638,7 @@ fn replace_version_in_dep_line(line: &str, new_version: &str) -> Option<String> 
     // Find the quoted version string to replace.
     // For inline table, look for `version = "..."` first.
     // For simple format, look for `= "..."`.
-    let search_start = if let Some(ver_pos) = line.find("version") {
-        ver_pos
-    } else {
-        0
-    };
+    let search_start = line.find("version").unwrap_or(0);
     let rest = &line[search_start..];
     // Find opening quote
     let open_quote = rest.find('"')?;
@@ -664,7 +659,7 @@ fn generate_mod_rs(module_names: &[String]) -> String {
     let mut out = String::new();
     out.push_str("// AUTO-GENERATED by nextsql. Do not edit.\n\n");
     for name in module_names {
-        out.push_str(&format!("pub mod {};\n", name));
+        out.push_str(&format!("pub mod {name};\n"));
     }
     out
 }
@@ -679,7 +674,7 @@ fn generate_lib_rs_section(module_names: &[String]) -> String {
     out.push('\n');
     out.push_str("mod generated;\n");
     for name in module_names {
-        out.push_str(&format!("pub use generated::{};\n", name));
+        out.push_str(&format!("pub use generated::{name};\n"));
     }
     out.push_str(NEXTSQL_END_MARKER);
     out
@@ -692,7 +687,7 @@ fn update_lib_rs(lib_path: &Path, module_names: &[String]) -> String {
 
     let existing = std::fs::read_to_string(lib_path).unwrap_or_default();
     if existing.is_empty() {
-        return format!("{}\n", section);
+        return format!("{section}\n");
     }
 
     if let (Some(begin), Some(end)) = (
@@ -707,7 +702,7 @@ fn update_lib_rs(lib_path: &Path, module_names: &[String]) -> String {
         result
     } else {
         // No markers found: prepend the section
-        format!("{}\n{}", section, existing)
+        format!("{section}\n{existing}")
     }
 }
 
@@ -753,8 +748,7 @@ mod tests {
 
         // Simulate existing lib.rs with user code and markers
         let existing = format!(
-            "use some_crate::Thing;\n\n{}\nmod generated;\npub use generated::old_module;\n{}\n\nfn my_custom_fn() {{}}\n",
-            NEXTSQL_BEGIN_MARKER, NEXTSQL_END_MARKER
+            "use some_crate::Thing;\n\n{NEXTSQL_BEGIN_MARKER}\nmod generated;\npub use generated::old_module;\n{NEXTSQL_END_MARKER}\n\nfn my_custom_fn() {{}}\n"
         );
         std::fs::write(&lib_path, &existing).unwrap();
 

@@ -11,6 +11,10 @@ use completion::CompletionProvider;
 use diagnostics::DiagnosticsProvider;
 use schema_cache::SchemaCache;
 
+/// Return type for `generate_schema_document`:
+/// (document text, table name -> line, table name -> (column name -> line), enum name -> line)
+type SchemaDocument = (String, HashMap<String, u32>, HashMap<String, HashMap<String, u32>>, HashMap<String, u32>);
+
 #[derive(Debug)]
 pub struct NextSqlLanguageServer {
     client: Client,
@@ -240,7 +244,7 @@ impl LanguageServer for NextSqlLanguageServer {
                     let word_lower = word.to_lowercase().replace('_', "");
                     enum_lines.iter().find(|(name, _)| {
                         name.to_lowercase().replace('_', "") == word_lower
-                    }).map(|(name, line)| (name, line))
+                    })
                 });
             if let Some((_, &line)) = enum_match {
                 return Ok(Some(GotoDefinitionResponse::Scalar(Location {
@@ -436,9 +440,8 @@ impl NextSqlLanguageServer {
         }
 
         // Search for $varName: Type only within the argument list lines
-        let pattern = format!("${}", var_name);
-        for line_num in decl_line_num..=args_end_line {
-            let line = lines[line_num];
+        let pattern = format!("${var_name}");
+        for (line_num, line) in lines.iter().enumerate().take(args_end_line + 1).skip(decl_line_num) {
             if let Some(pos) = line.find(&pattern) {
                 let after = &line[pos + pattern.len()..];
                 let after_trimmed = after.trim_start();
@@ -680,7 +683,7 @@ impl NextSqlLanguageServer {
     /// 戻り値: (ドキュメントテキスト, テーブル名→行番号, テーブル名→(カラム名→行番号), enum名→行番号)
     fn generate_schema_document(
         schema: &nextsql_core::DatabaseSchema,
-    ) -> (String, HashMap<String, u32>, HashMap<String, HashMap<String, u32>>, HashMap<String, u32>) {
+    ) -> SchemaDocument {
         let mut doc = String::new();
         let mut table_lines: HashMap<String, u32> = HashMap::new();
         let mut column_lines: HashMap<String, HashMap<String, u32>> = HashMap::new();
@@ -703,11 +706,11 @@ impl NextSqlLanguageServer {
             let enum_schema = &schema.enums[*enum_name];
             enum_lines.insert(enum_name.to_string(), current_line);
 
-            doc.push_str(&format!("enum {} {{\n", enum_name));
+            doc.push_str(&format!("enum {enum_name} {{\n"));
             current_line += 1;
 
             for variant in &enum_schema.variants {
-                doc.push_str(&format!("    {}\n", variant));
+                doc.push_str(&format!("    {variant}\n"));
                 current_line += 1;
             }
 
@@ -730,7 +733,7 @@ impl NextSqlLanguageServer {
 
             let mut cols: HashMap<String, u32> = HashMap::new();
 
-            doc.push_str(&format!("table {} {{\n", table_name));
+            doc.push_str(&format!("table {table_name} {{\n"));
             current_line += 1;
 
             for column in &table.columns {
@@ -748,7 +751,7 @@ impl NextSqlLanguageServer {
                 }
                 if column.has_default {
                     if let Some(ref default_val) = column.default_value {
-                        annotations.push(format!("default: {}", default_val));
+                        annotations.push(format!("default: {default_val}"));
                     } else {
                         annotations.push("default".to_string());
                     }
@@ -865,39 +868,39 @@ impl NextSqlLanguageServer {
             .log_message(MessageType::INFO, "Found next-sql.toml, loading database schema...")
             .await;
 
-        let result: std::result::Result<nextsql_core::DatabaseSchema, String> = (|| async {
+        let result: std::result::Result<nextsql_core::DatabaseSchema, String> = async {
             // Read and parse config
             let config_str = std::fs::read_to_string(&config_path)
-                .map_err(|e| format!("Failed to read next-sql.toml: {}", e))?;
+                .map_err(|e| format!("Failed to read next-sql.toml: {e}"))?;
 
             let config: nextsql_core::config::NextSqlConfig = toml::from_str(&config_str)
-                .map_err(|e| format!("Failed to parse next-sql.toml: {}", e))?;
+                .map_err(|e| format!("Failed to parse next-sql.toml: {e}"))?;
 
             let db_url = config.database_url
                 .ok_or_else(|| "No database_url in next-sql.toml".to_string())?;
 
             // Connect to database and load schema
             let pg_config = db_url.parse::<tokio_postgres::Config>()
-                .map_err(|e| format!("Invalid database_url: {}", e))?;
+                .map_err(|e| format!("Invalid database_url: {e}"))?;
 
             let connector = native_tls::TlsConnector::builder()
                 .danger_accept_invalid_certs(false)
                 .build()
-                .map_err(|e| format!("Failed to create TLS connector: {}", e))?;
+                .map_err(|e| format!("Failed to create TLS connector: {e}"))?;
             let tls = postgres_native_tls::MakeTlsConnector::new(connector);
 
             let (pg_client, connection) = pg_config.connect(tls).await
-                .map_err(|e| format!("Failed to connect to database: {}", e))?;
+                .map_err(|e| format!("Failed to connect to database: {e}"))?;
 
             tokio::spawn(async move {
                 if let Err(e) = connection.await {
-                    eprintln!("Database connection error: {}", e);
+                    eprintln!("Database connection error: {e}");
                 }
             });
 
             nextsql_core::SchemaLoader::load_from_database(&pg_client).await
-                .map_err(|e| format!("Failed to load schema from database: {}", e))
-        })().await;
+                .map_err(|e| format!("Failed to load schema from database: {e}"))
+        }.await;
 
         match result {
             Ok(schema) => {
@@ -909,8 +912,7 @@ impl NextSqlLanguageServer {
                     .log_message(
                         MessageType::INFO,
                         format!(
-                            "Database schema loaded successfully ({} tables)",
-                            table_count
+                            "Database schema loaded successfully ({table_count} tables)"
                         ),
                     )
                     .await;
@@ -919,7 +921,7 @@ impl NextSqlLanguageServer {
                 client
                     .log_message(
                         MessageType::WARNING,
-                        format!("Schema loading skipped: {}", msg),
+                        format!("Schema loading skipped: {msg}"),
                     )
                     .await;
             }
@@ -927,7 +929,7 @@ impl NextSqlLanguageServer {
     }
 
     async fn validate_document(&self, uri: &Url, text: &str) {
-        eprintln!("LSP: validate_document called for: {}", uri);
+        eprintln!("LSP: validate_document called for: {uri}");
         
         // Clone Arc for async move
         let schema_cache = self.schema_cache.clone();
@@ -946,9 +948,9 @@ impl NextSqlLanguageServer {
                 } else if let Some(s) = panic_info.downcast_ref::<String>() {
                     s.clone()
                 } else {
-                    format!("{:?}", panic_info)
+                    format!("{panic_info:?}")
                 };
-                eprintln!("LSP: Panic occurred: {}", msg);
+                eprintln!("LSP: Panic occurred: {msg}");
                 vec![Diagnostic {
                     range: Range {
                         start: Position { line: 0, character: 0 },
@@ -958,7 +960,7 @@ impl NextSqlLanguageServer {
                     code: None,
                     code_description: None,
                     source: Some("nextsql-lsp".to_string()),
-                    message: format!("Internal error: {}", msg),
+                    message: format!("Internal error: {msg}"),
                     related_information: None,
                     tags: None,
                     data: None,
@@ -1099,7 +1101,7 @@ impl NextSqlLanguageServer {
 async fn main() {
     // パニックハンドラーを設定してサーバーがクラッシュしないように
     std::panic::set_hook(Box::new(|panic_info| {
-        eprintln!("LSP Server panic: {:?}", panic_info);
+        eprintln!("LSP Server panic: {panic_info:?}");
     }));
 
     // LSPではstdoutは通信に使われるため、ログはstderrに出力する
@@ -1112,7 +1114,7 @@ async fn main() {
     let stdin = tokio::io::stdin();
     let stdout = tokio::io::stdout();
 
-    let (service, socket) = LspService::build(|client| NextSqlLanguageServer::new(client))
+    let (service, socket) = LspService::build(NextSqlLanguageServer::new)
         .custom_method("nextsql/getSchemaDocument", NextSqlLanguageServer::get_schema_document)
         .finish();
     Server::new(stdin, stdout, socket).serve(service).await;

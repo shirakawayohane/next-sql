@@ -102,7 +102,7 @@ impl DatabaseMigrationManager {
     pub async fn execute_migration_up(&self, migration_name: &str, migration_file: &Path) -> Result<(), Box<dyn std::error::Error>> {
         // マイグレーションがすでに実行されているかチェック
         if self.is_migration_executed(migration_name).await? {
-            return Err(format!("Migration {} has already been executed", migration_name).into());
+            return Err(format!("Migration {migration_name} has already been executed").into());
         }
 
         // SQLファイルを読み込み
@@ -118,7 +118,7 @@ impl DatabaseMigrationManager {
                 
                 // コミット
                 tx.commit().await?;
-                println!("Successfully executed migration: {}", migration_name);
+                println!("Successfully executed migration: {migration_name}");
                 Ok(())
             }
             Err(e) => {
@@ -128,7 +128,7 @@ impl DatabaseMigrationManager {
                 // エラー記録を追加
                 self.record_migration_error(migration_name, &e.to_string()).await?;
                 
-                Err(format!("Failed to execute migration {}: {}", migration_name, e).into())
+                Err(format!("Failed to execute migration {migration_name}: {e}").into())
             }
         }
     }
@@ -136,7 +136,7 @@ impl DatabaseMigrationManager {
     pub async fn execute_migration_down(&self, migration_name: &str, migration_file: &Path) -> Result<(), Box<dyn std::error::Error>> {
         // マイグレーションが実行されているかチェック
         if !self.is_migration_executed(migration_name).await? {
-            return Err(format!("Migration {} has not been executed", migration_name).into());
+            return Err(format!("Migration {migration_name} has not been executed").into());
         }
 
         // SQLファイルを読み込み
@@ -155,14 +155,14 @@ impl DatabaseMigrationManager {
                 
                 // コミット
                 tx.commit().await?;
-                println!("Successfully rolled back migration: {}", migration_name);
+                println!("Successfully rolled back migration: {migration_name}");
                 Ok(())
             }
             Err(e) => {
                 // ロールバック
                 tx.rollback().await?;
                 
-                Err(format!("Failed to rollback migration {}: {}", migration_name, e).into())
+                Err(format!("Failed to rollback migration {migration_name}: {e}").into())
             }
         }
     }

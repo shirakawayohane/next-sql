@@ -45,7 +45,7 @@ impl SchemaCache {
         match self.load_schema_for_project(&project_root).await {
             Ok(schema) => Some(schema),
             Err(e) => {
-                eprintln!("SchemaCache: Failed to load schema: {}", e);
+                eprintln!("SchemaCache: Failed to load schema: {e}");
                 None
             }
         }
@@ -67,10 +67,10 @@ impl SchemaCache {
         }
 
         let config_str = std::fs::read_to_string(&config_path)
-            .map_err(|e| format!("Failed to read config: {}", e))?;
+            .map_err(|e| format!("Failed to read config: {e}"))?;
 
         let config: nextsql_core::config::NextSqlConfig = toml::from_str(&config_str)
-            .map_err(|e| format!("Failed to parse config: {}", e))?;
+            .map_err(|e| format!("Failed to parse config: {e}"))?;
 
         if let Some(db_url) = config.database_url {
             match self.load_schema_from_database(&db_url).await {
@@ -80,7 +80,7 @@ impl SchemaCache {
                     schemas.insert(project_root.to_path_buf(), Arc::clone(&schema));
                     Ok(schema)
                 }
-                Err(e) => Err(format!("Failed to load schema from database: {}", e)),
+                Err(e) => Err(format!("Failed to load schema from database: {e}")),
             }
         } else {
             Err("No database_url found in configuration".to_string())
@@ -98,7 +98,7 @@ impl SchemaCache {
             .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { Box::new(e) })?;
         tokio::spawn(async move {
             if let Err(e) = connection.await {
-                eprintln!("Database connection error: {}", e);
+                eprintln!("Database connection error: {e}");
             }
         });
         let schema = SchemaLoader::load_from_database(&client).await
@@ -115,10 +115,7 @@ impl SchemaCache {
                 return Some(current.to_path_buf());
             }
 
-            current = match current.parent() {
-                Some(parent) => parent,
-                None => return None,
-            };
+            current = current.parent()?;
         }
     }
 

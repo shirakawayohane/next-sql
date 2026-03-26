@@ -23,11 +23,11 @@ pub enum FunctionContext {
 
 pub fn analyze_context_before_dot(full_text: &str, text_before_dot: &str) -> CompletionContext {
     let trimmed = text_before_dot.trim_end_matches('.');
-    eprintln!("LSP: analyze_context_before_dot - trimmed: '{}'", trimmed);
+    eprintln!("LSP: analyze_context_before_dot - trimmed: '{trimmed}'");
 
     // Check if we're after a $variable. pattern where the variable is an input type
     if let Some(input_type_name) = check_input_field_context(full_text, trimmed) {
-        eprintln!("LSP: Detected input field context for type: {}", input_type_name);
+        eprintln!("LSP: Detected input field context for type: {input_type_name}");
         return CompletionContext::InputField(input_type_name);
     }
 
@@ -35,8 +35,7 @@ pub fn analyze_context_before_dot(full_text: &str, text_before_dot: &str) -> Com
     if is_in_join_method_context(trimmed) {
         if let Some(table_name) = extract_table_before_dot(full_text, trimmed) {
             eprintln!(
-                "LSP: Detected table join method context for table: {}",
-                table_name
+                "LSP: Detected table join method context for table: {table_name}"
             );
             return CompletionContext::TableJoinMethod(table_name);
         }
@@ -52,8 +51,7 @@ pub fn analyze_context_before_dot(full_text: &str, text_before_dot: &str) -> Com
     // まず、テーブル名.かどうかをチェック
     if let Some(table_name) = extract_table_before_dot(full_text, trimmed) {
         eprintln!(
-            "LSP: Detected table field context for table: {}",
-            table_name
+            "LSP: Detected table field context for table: {table_name}"
         );
         return CompletionContext::TableField(table_name);
     }
@@ -86,7 +84,7 @@ pub fn analyze_context_before_dot(full_text: &str, text_before_dot: &str) -> Com
                 .last()
                 .unwrap_or("")
                 .split(['(', ')', ',', '{', '}', '.'])
-                .last()
+                .next_back()
                 .unwrap_or("");
 
             // 関数名に基づいてコンテキストを判定
@@ -128,7 +126,7 @@ pub fn check_function_context(before_cursor: &str) -> Option<FunctionContext> {
             .last()
             .unwrap_or("")
             .split(['(', ')', ',', '{', '}', '.'])
-            .last()
+            .next_back()
             .unwrap_or("");
 
         // Check if we're in a join method
@@ -162,14 +160,14 @@ pub fn check_function_context(before_cursor: &str) -> Option<FunctionContext> {
 }
 
 pub fn extract_table_before_dot(full_text: &str, text: &str) -> Option<String> {
-    eprintln!("LSP: extract_table_before_dot - text: '{}'", text);
+    eprintln!("LSP: extract_table_before_dot - text: '{text}'");
 
     // ドットの直前の識別子を抽出
     let parts: Vec<&str> = text.split_whitespace().collect();
-    eprintln!("LSP: Split parts: {:?}", parts);
+    eprintln!("LSP: Split parts: {parts:?}");
 
     if let Some(last_part) = parts.last() {
-        eprintln!("LSP: Last part: '{}'", last_part);
+        eprintln!("LSP: Last part: '{last_part}'");
 
         // 識別子の文字のみを取得（句読点などを除外）
         let identifier: String = last_part
@@ -181,13 +179,13 @@ pub fn extract_table_before_dot(full_text: &str, text: &str) -> Option<String> {
             .rev()
             .collect();
 
-        eprintln!("LSP: Extracted identifier: '{}'", identifier);
+        eprintln!("LSP: Extracted identifier: '{identifier}'");
 
         // 識別子は文字で始まる必要がある（数字のみは除外）
         if !identifier.is_empty() && identifier.chars().next().unwrap().is_alphabetic() {
             // Check if the identifier is an alias and resolve it
             let resolved = resolve_alias(full_text, &identifier).unwrap_or(identifier);
-            eprintln!("LSP: Using identifier as table name: '{}'", resolved);
+            eprintln!("LSP: Using identifier as table name: '{resolved}'");
             return Some(resolved);
         }
     }
@@ -214,7 +212,7 @@ fn resolve_alias(full_text: &str, identifier: &str) -> Option<String> {
 }
 
 fn is_in_join_method_context(text: &str) -> bool {
-    eprintln!("LSP: is_in_join_method_context - checking: '{}'", text);
+    eprintln!("LSP: is_in_join_method_context - checking: '{text}'");
     
     // First, check if we're inside a join method's parameters (after comma)
     // If so, we should NOT offer join method completions
@@ -282,7 +280,7 @@ fn is_in_join_method_context(text: &str) -> bool {
 }
 
 pub fn is_after_insertable_angle_bracket(before_cursor: &str) -> bool {
-    eprintln!("LSP: Checking for Insertable</ChangeSet< pattern in: '{}'", before_cursor);
+    eprintln!("LSP: Checking for Insertable</ChangeSet< pattern in: '{before_cursor}'");
 
     // Check if the text ends with "Insertable<" or "ChangeSet<" with optional partial text
     let patterns = ["Insertable<", "ChangeSet<"];
@@ -299,7 +297,7 @@ pub fn is_after_insertable_angle_bracket(before_cursor: &str) -> bool {
 }
 
 pub fn is_after_variable_colon(before_cursor: &str) -> bool {
-    eprintln!("LSP: Checking for $variable: pattern in: '{}'", before_cursor);
+    eprintln!("LSP: Checking for $variable: pattern in: '{before_cursor}'");
     
     // Check if we're after "$identifier: " pattern
     if let Some(colon_pos) = before_cursor.rfind(':') {
@@ -336,7 +334,7 @@ fn check_input_field_context(full_text: &str, text: &str) -> Option<String> {
         regex::Regex::new(r"\$(\w+)$").unwrap()
     });
     let var_name = VAR_RE.captures(text).map(|c| c[1].to_string())?;
-    eprintln!("LSP: check_input_field_context - var_name: '{}'", var_name);
+    eprintln!("LSP: check_input_field_context - var_name: '{var_name}'");
 
     let text_no_comments = strip_comments(full_text);
 
@@ -346,20 +344,20 @@ fn check_input_field_context(full_text: &str, text: &str) -> Option<String> {
     });
     let mut var_type = None;
     for cap in ARG_RE.captures_iter(&text_no_comments) {
-        if &cap[1] == var_name {
+        if cap[1] == var_name {
             var_type = Some(cap[2].to_string());
             break;
         }
     }
     let var_type = var_type?;
-    eprintln!("LSP: check_input_field_context - var_type: '{}'", var_type);
+    eprintln!("LSP: check_input_field_context - var_type: '{var_type}'");
 
     // Check if that type is an input type declared in the file
     static INPUT_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
         regex::Regex::new(r"input\s+(\w+)\s*\{").unwrap()
     });
     for cap in INPUT_RE.captures_iter(&text_no_comments) {
-        if &cap[1] == var_type {
+        if cap[1] == var_type {
             return Some(var_type);
         }
     }
@@ -409,7 +407,7 @@ fn is_in_expression_method_context(full_text: &str, trimmed: &str) -> bool {
                     // Get the identifier before the dot
                     let ident_before = before_dot_part
                         .split(|c: char| !c.is_alphanumeric() && c != '_')
-                        .last()
+                        .next_back()
                         .unwrap_or("");
 
                     // Both parts should be valid identifiers
@@ -419,7 +417,7 @@ fn is_in_expression_method_context(full_text: &str, trimmed: &str) -> bool {
                         && after_dot.chars().next().unwrap().is_alphabetic()
                         && after_dot.chars().all(|c| c.is_alphanumeric() || c == '_')
                     {
-                        eprintln!("LSP: Found expression method context: {}.{}", ident_before, after_dot);
+                        eprintln!("LSP: Found expression method context: {ident_before}.{after_dot}");
                         return true;
                     }
                 }

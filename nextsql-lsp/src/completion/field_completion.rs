@@ -10,14 +10,14 @@ pub trait FieldCompletionProvider {
 
     async fn get_field_completions(&self, table_name: &str) -> Vec<CompletionItem> {
         let mut completions = Vec::new();
-        eprintln!("LSP: get_field_completions for table: '{}'", table_name);
+        eprintln!("LSP: get_field_completions for table: '{table_name}'");
 
         if let (Some(schema_cache), Some(file_uri)) = (self.get_schema_cache(), self.get_file_uri()) {
             let path = std::path::Path::new(file_uri.trim_start_matches("file://"));
-            eprintln!("LSP: File path for schema lookup: {:?}", path);
+            eprintln!("LSP: File path for schema lookup: {path:?}");
 
             if let Some(schema) = schema_cache.get_schema_for_file(path).await {
-                eprintln!("LSP: Schema found, looking for table '{}'", table_name);
+                eprintln!("LSP: Schema found, looking for table '{table_name}'");
                 if let Some(table) = schema.tables.get(table_name) {
                     eprintln!(
                         "LSP: Table '{}' found with {} columns",
@@ -48,7 +48,7 @@ pub trait FieldCompletionProvider {
                         });
                     }
                 } else {
-                    eprintln!("LSP: Table '{}' not found in schema", table_name);
+                    eprintln!("LSP: Table '{table_name}' not found in schema");
                 }
             } else {
                 eprintln!("LSP: No schema found for file");
@@ -86,7 +86,7 @@ pub trait FieldCompletionProvider {
                 
                 let optional_str = if is_optional { " (optional)" } else { "" };
                 
-                let detail = format!("{}{}", relation_type_str, optional_str);
+                let detail = format!("{relation_type_str}{optional_str}");
                 
                 eprintln!("LSP: Adding relation completion: {}", relation.decl.name);
                 completions.push(CompletionItem {

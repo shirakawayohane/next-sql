@@ -16,7 +16,7 @@ fn is_rust_keyword(s: &str) -> bool {
 /// Escape a Rust identifier with `r#` prefix if it is a reserved keyword.
 pub(super) fn escape_rust_keyword(s: String) -> String {
     if is_rust_keyword(&s) {
-        format!("r#{}", s)
+        format!("r#{s}")
     } else {
         s
     }
@@ -72,8 +72,8 @@ pub(super) fn singularize(name: &str) -> String {
         || name.ends_with("ses")
     {
         name[..name.len() - 2].to_string()
-    } else if name.ends_with('s') {
-        name[..name.len() - 1].to_string()
+    } else if let Some(stripped) = name.strip_suffix('s') {
+        stripped.to_string()
     } else {
         name.to_string()
     }

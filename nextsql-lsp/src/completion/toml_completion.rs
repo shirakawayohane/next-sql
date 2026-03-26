@@ -276,7 +276,7 @@ impl<'a> TomlCompletionProvider<'a> {
             label: label.to_string(),
             kind: Some(CompletionItemKind::VALUE),
             detail: Some(detail.to_string()),
-            insert_text: Some(format!("\"{}\"", label)),
+            insert_text: Some(format!("\"{label}\"")),
             ..Default::default()
         }
     }

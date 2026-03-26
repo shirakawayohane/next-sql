@@ -112,10 +112,10 @@ pub async fn find_products_by_ids(
     client: &(impl super::runtime::Client + ?Sized),
     params: &FindProductsByIdsParams,
 ) -> Result<Vec<Product>, Box<dyn std::error::Error + Send + Sync>> {
-    let __ids_inner: Vec<uuid::Uuid> = params.ids.iter().map(|v| v.0.clone()).collect();
+    let __ids_inner: Vec<uuid::Uuid> = params.ids.iter().map(|v| v.0).collect();
     let rows = client.query(
         "SELECT products.* FROM products WHERE products.id = ANY($1)",
-        &vec![&__ids_inner as &dyn super::runtime::ToSqlParam],
+        &[&__ids_inner as &dyn super::runtime::ToSqlParam],
     ).await?;
     Ok(rows.iter().map(|row| Product::from_row(row)).collect())
 }
@@ -143,22 +143,22 @@ pub async fn search_products(
 
     let mut conditions: Vec<String> = Vec::new();
     if params.min_price.is_some() {
-        conditions.push(format!("products.price >= ${}", idx));
+        conditions.push(format!("products.price >= ${idx}"));
         bind_params.push(&params.min_price);
         idx += 1;
     }
     if params.max_price.is_some() {
-        conditions.push(format!("products.price <= ${}", idx));
+        conditions.push(format!("products.price <= ${idx}"));
         bind_params.push(&params.max_price);
         idx += 1;
     }
     if params.category_ids.is_some() {
-        conditions.push(format!("products.category_id = ANY(${})", idx));
+        conditions.push(format!("products.category_id = ANY(${idx})"));
         bind_params.push(&params.category_ids);
         idx += 1;
     }
     if params.name_like.is_some() {
-        conditions.push(format!("products.name LIKE ${}", idx));
+        conditions.push(format!("products.name LIKE ${idx}"));
         bind_params.push(&params.name_like);
         idx += 1;
     }

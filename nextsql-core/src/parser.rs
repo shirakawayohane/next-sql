@@ -19,12 +19,13 @@ fn get_span(pair: &pest::iterators::Pair<Rule>) -> Option<Span> {
 #[grammar = "nextsql.pest"]
 pub struct NextSqlParser;
 
-pub fn parse_module(input: &str) -> Result<Module, Error<Rule>> {
-    let pairs: pest::iterators::Pairs<Rule> = NextSqlParser::parse(Rule::module, &input)?;
+pub fn parse_module(input: &str) -> Result<Module, Box<Error<Rule>>> {
+    let pairs: pest::iterators::Pairs<Rule> =
+        NextSqlParser::parse(Rule::module, input).map_err(Box::new)?;
 
     let mut toplevels = Vec::new();
 
-    let pairs = pairs.peekable().into_iter();
+    let pairs = pairs.peekable();
     for pair in pairs {
         match pair.as_rule() {
             Rule::module => {
@@ -116,7 +117,7 @@ fn test_parse_type() {
     for input in builtin_types {
         let pairs = match NextSqlParser::parse(Rule::r#type, input) {
             Ok(p) => p,
-            Err(e) => panic!("{}のパースでエラーが発生しました: {}", input, e),
+            Err(e) => panic!("{input}のパースでエラーが発生しました: {e}"),
         };
         let typ = parse_type(pairs.peekable().next().unwrap().into_inner());
         assert_eq!(input, typ.to_string());
@@ -126,7 +127,7 @@ fn test_parse_type() {
     let input = "Insertable<User>";
     let pairs = match NextSqlParser::parse(Rule::r#type, input) {
         Ok(p) => p,
-        Err(e) => panic!("{}のパースでエラーが発生しました: {}", input, e),
+        Err(e) => panic!("{input}のパースでエラーが発生しました: {e}"),
     };
     let typ = parse_type(pairs.peekable().next().unwrap().into_inner());
     assert_eq!(input, typ.to_string());
@@ -135,7 +136,7 @@ fn test_parse_type() {
     let input = "Insertable<string>";
     let pairs = match NextSqlParser::parse(Rule::r#type, input) {
         Ok(p) => p,
-        Err(e) => panic!("{}のパースでエラーが発生しました: {}", input, e),
+        Err(e) => panic!("{input}のパースでエラーが発生しました: {e}"),
     };
     let typ = parse_type(pairs.peekable().next().unwrap().into_inner());
     assert_eq!(input, typ.to_string());
@@ -144,7 +145,7 @@ fn test_parse_type() {
     let input = "Insertable<User>?";
     let pairs = match NextSqlParser::parse(Rule::r#type, input) {
         Ok(p) => p,
-        Err(e) => panic!("{}のパースでエラーが発生しました: {}", input, e),
+        Err(e) => panic!("{input}のパースでエラーが発生しました: {e}"),
     };
     let typ = parse_type(pairs.peekable().next().unwrap().into_inner());
     assert_eq!(input, typ.to_string());
@@ -153,7 +154,7 @@ fn test_parse_type() {
     let input = "[Insertable<User>]";
     let pairs = match NextSqlParser::parse(Rule::r#type, input) {
         Ok(p) => p,
-        Err(e) => panic!("{}のパースでエラーが発生しました: {}", input, e),
+        Err(e) => panic!("{input}のパースでエラーが発生しました: {e}"),
     };
     let typ = parse_type(pairs.peekable().next().unwrap().into_inner());
     assert_eq!(input, typ.to_string());
@@ -162,7 +163,7 @@ fn test_parse_type() {
     let input = "[Insertable<User>]?";
     let pairs = match NextSqlParser::parse(Rule::r#type, input) {
         Ok(p) => p,
-        Err(e) => panic!("{}のパースでエラーが発生しました: {}", input, e),
+        Err(e) => panic!("{input}のパースでエラーが発生しました: {e}"),
     };
     let typ = parse_type(pairs.peekable().next().unwrap().into_inner());
     assert_eq!(input, typ.to_string());
@@ -171,7 +172,7 @@ fn test_parse_type() {
     let input = "Insertable<User?>";
     let pairs = match NextSqlParser::parse(Rule::r#type, input) {
         Ok(p) => p,
-        Err(e) => panic!("{}のパースでエラーが発生しました: {}", input, e),
+        Err(e) => panic!("{input}のパースでエラーが発生しました: {e}"),
     };
     let typ = parse_type(pairs.peekable().next().unwrap().into_inner());
     assert_eq!(input, typ.to_string());
@@ -180,7 +181,7 @@ fn test_parse_type() {
     let input = "ChangeSet<User>";
     let pairs = match NextSqlParser::parse(Rule::r#type, input) {
         Ok(p) => p,
-        Err(e) => panic!("{}のパースでエラーが発生しました: {}", input, e),
+        Err(e) => panic!("{input}のパースでエラーが発生しました: {e}"),
     };
     let typ = parse_type(pairs.peekable().next().unwrap().into_inner());
     assert_eq!(input, typ.to_string());
@@ -189,7 +190,7 @@ fn test_parse_type() {
     let input = "ChangeSet<string>";
     let pairs = match NextSqlParser::parse(Rule::r#type, input) {
         Ok(p) => p,
-        Err(e) => panic!("{}のパースでエラーが発生しました: {}", input, e),
+        Err(e) => panic!("{input}のパースでエラーが発生しました: {e}"),
     };
     let typ = parse_type(pairs.peekable().next().unwrap().into_inner());
     assert_eq!(input, typ.to_string());
@@ -198,7 +199,7 @@ fn test_parse_type() {
     let input = "ChangeSet<User>?";
     let pairs = match NextSqlParser::parse(Rule::r#type, input) {
         Ok(p) => p,
-        Err(e) => panic!("{}のパースでエラーが発生しました: {}", input, e),
+        Err(e) => panic!("{input}のパースでエラーが発生しました: {e}"),
     };
     let typ = parse_type(pairs.peekable().next().unwrap().into_inner());
     assert_eq!(input, typ.to_string());
@@ -206,7 +207,7 @@ fn test_parse_type() {
     let input = "[i32]";
     let pairs = match NextSqlParser::parse(Rule::r#type, input) {
         Ok(p) => p,
-        Err(e) => panic!("{}のパースでエラーが発生しました: {}", input, e),
+        Err(e) => panic!("{input}のパースでエラーが発生しました: {e}"),
     };
     matches!(
         parse_type(pairs.peekable().next().unwrap().into_inner()),
@@ -346,9 +347,9 @@ fn parse_argument_list(pairs: pest::iterators::Pairs<Rule>) -> Vec<Argument> {
 #[test]
 fn test_parse_argument_list() {
     let input = "($a: i32, $b: i32)";
-    let pairs = match NextSqlParser::parse(Rule::argument_list, &input) {
+    let pairs = match NextSqlParser::parse(Rule::argument_list, input) {
         Ok(p) => p,
-        Err(e) => panic!("パースエラーが発生しました: {}", e),
+        Err(e) => panic!("パースエラーが発生しました: {e}"),
     };
     let arguments = parse_argument_list(pairs.peekable().next().unwrap().into_inner());
     dbg!(&arguments);
@@ -371,9 +372,9 @@ fn parse_query_decl(pairs: pest::iterators::Pairs<Rule>) -> QueryDecl {
 #[test]
 fn test_parse_query_decl() {
     let input = "query foo ($a: i32, $b: i32)";
-    let pairs = match NextSqlParser::parse(Rule::query_decl, &input) {
+    let pairs = match NextSqlParser::parse(Rule::query_decl, input) {
         Ok(p) => p,
-        Err(e) => panic!("パースエラーが発生しました: {}", e),
+        Err(e) => panic!("パースエラーが発生しました: {e}"),
     };
     // dbg!(&pairs);
     let decl = parse_query_decl(pairs.peekable().next().unwrap().into_inner());
@@ -530,9 +531,9 @@ fn parse_mutation_decl(pairs: pest::iterators::Pairs<Rule>) -> MutationDecl {
 #[test]
 fn test_parse_mutation_decl() {
     let input = "mutation foo ($a: i32, $b: i32)";
-    let pairs = match NextSqlParser::parse(Rule::mutation_decl, &input) {
+    let pairs = match NextSqlParser::parse(Rule::mutation_decl, input) {
         Ok(p) => p,
-        Err(e) => panic!("パースエラーが発生しました: {}", e),
+        Err(e) => panic!("パースエラーが発生しました: {e}"),
     };
     let decl = parse_mutation_decl(pairs.peekable().next().unwrap().into_inner());
     dbg!(&decl);
@@ -547,9 +548,9 @@ fn parse_insert_clause(pairs: pest::iterators::Pairs<Rule>) -> Target {
 #[test]
 fn test_parse_insert_clause() {
     let input = "insert(foo) values(...)";
-    let pairs = match NextSqlParser::parse(Rule::insert_clause, &input) {
+    let pairs = match NextSqlParser::parse(Rule::insert_clause, input) {
         Ok(p) => p,
-        Err(e) => panic!("パースエラーが発生しました: {}", e),
+        Err(e) => panic!("パースエラーが発生しました: {e}"),
     };
     let clause = parse_insert_clause(pairs.peekable().next().unwrap().into_inner());
     assert_eq!(clause.name, "foo");
@@ -558,9 +559,9 @@ fn test_parse_insert_clause() {
 #[test]
 fn test_parse_value_clause() {
     let input = ".value({ a: 1, b: \"abc\" })";
-    let pairs = match NextSqlParser::parse(Rule::value_clause, &input) {
+    let pairs = match NextSqlParser::parse(Rule::value_clause, input) {
         Ok(p) => p,
-        Err(e) => panic!("パースエラーが発生しました: {}", e),
+        Err(e) => panic!("パースエラーが発生しました: {e}"),
     };
     let clause = parse_value_clause(pairs.peekable().next().unwrap().into_inner());
     assert_eq!(
@@ -586,9 +587,9 @@ fn parse_value_clause(pairs: pest::iterators::Pairs<Rule>) -> Expression {
 #[test]
 fn test_parse_values_clause() {
     let input = ".values({ a: 1, b: \"abc\" }, { a: 2, b: \"def\" })";
-    let pairs = match NextSqlParser::parse(Rule::values_clause, &input) {
+    let pairs = match NextSqlParser::parse(Rule::values_clause, input) {
         Ok(p) => p,
-        Err(e) => panic!("パースエラーが発生しました: {}", e),
+        Err(e) => panic!("パースエラーが発生しました: {e}"),
     };
     let clause = parse_values_clause(pairs.peekable().next().unwrap().into_inner());
     assert_eq!(2, clause.len());
@@ -602,25 +603,25 @@ fn parse_values_clause(pairs: pest::iterators::Pairs<Rule>) -> Vec<Expression> {
 #[test]
 fn test_parse_returning_clause() {
     let input = ".returning(a, b)";
-    let pairs = match NextSqlParser::parse(Rule::returning_clause, &input) {
+    let pairs = match NextSqlParser::parse(Rule::returning_clause, input) {
         Ok(p) => p,
-        Err(e) => panic!("パースエラーが発生しました: {}", e),
+        Err(e) => panic!("パースエラーが発生しました: {e}"),
     };
     let clause = parse_returning_clause(pairs.peekable().next().unwrap().into_inner());
     assert_eq!(2, clause.len());
 
     let input = ".returning(a.*, b.c)";
-    let pairs = match NextSqlParser::parse(Rule::returning_clause, &input) {
+    let pairs = match NextSqlParser::parse(Rule::returning_clause, input) {
         Ok(p) => p,
-        Err(e) => panic!("パースエラーが発生しました: {}", e),
+        Err(e) => panic!("パースエラーが発生しました: {e}"),
     };
     let clause = parse_returning_clause(pairs.peekable().next().unwrap().into_inner());
     assert_eq!(2, clause.len());
 
     let input = ".returning(*)";
-    let pairs = match NextSqlParser::parse(Rule::returning_clause, &input) {
+    let pairs = match NextSqlParser::parse(Rule::returning_clause, input) {
         Ok(p) => p,
-        Err(e) => panic!("パースエラーが発生しました: {}", e),
+        Err(e) => panic!("パースエラーが発生しました: {e}"),
     };
     let clause = parse_returning_clause(pairs.peekable().next().unwrap().into_inner());
     assert_eq!(1, clause.len());
@@ -633,9 +634,9 @@ fn parse_returning_clause(pairs: pest::iterators::Pairs<Rule>) -> Vec<Column> {
 #[test]
 fn test_parse_mutation_body() {
     let input = "{ insert(foo).values({ a: 1, b: \"abc\" }).returning(a, b) }";
-    let pairs = match NextSqlParser::parse(Rule::mutation_body, &input) {
+    let pairs = match NextSqlParser::parse(Rule::mutation_body, input) {
         Ok(p) => p,
-        Err(e) => panic!("パースエラーが発生しました: {}", e),
+        Err(e) => panic!("パースエラーが発生しました: {e}"),
     };
     let body = parse_mutation_body(pairs.peekable().next().unwrap().into_inner());
     dbg!(&body);
@@ -712,9 +713,9 @@ fn parse_insert(pairs: pest::iterators::Pairs<Rule>) -> Insert {
 #[test]
 fn test_parse_update_clause() {
     let input = "update(foo).set({ a: 1, b: \"abc\" }).where(a > 1).returning(a, b)";
-    let pairs = match NextSqlParser::parse(Rule::update_clause, &input) {
+    let pairs = match NextSqlParser::parse(Rule::update_clause, input) {
         Ok(p) => p,
-        Err(e) => panic!("パースエラーが発生しました: {}", e),
+        Err(e) => panic!("パースエラーが発生しました: {e}"),
     };
     let mut pairs = pairs.peekable().next().unwrap().into_inner();
     let clause = pairs.next().unwrap().as_str().to_string();
@@ -724,9 +725,9 @@ fn test_parse_update_clause() {
 #[test]
 fn test_parse_where_clause() {
     let input = ".where(u.id == $id)";
-    let pairs = match NextSqlParser::parse(Rule::where_clause, &input) {
+    let pairs = match NextSqlParser::parse(Rule::where_clause, input) {
         Ok(p) => p,
-        Err(e) => panic!("パースエラーが発生しました: {}", e),
+        Err(e) => panic!("パースエラーが発生しました: {e}"),
     };
     // dbg!(&pairs);
     let clause = parse_where_clause(pairs.peekable().next().unwrap().into_inner());
@@ -862,9 +863,9 @@ fn parse_delete(pairs: pest::iterators::Pairs<Rule>) -> Delete {
 #[test]
 fn test_parse_mutation() {
     let input = "mutation foo { insert(foo).values({ a: 1, b: \"abc\" }).returning(a, b) }";
-    let pairs = match NextSqlParser::parse(Rule::mutation, &input) {
+    let pairs = match NextSqlParser::parse(Rule::mutation, input) {
         Ok(p) => p,
-        Err(e) => panic!("パースエラーが発生しました: {}", e),
+        Err(e) => panic!("パースエラーが発生しました: {e}"),
     };
     let mutation = parse_mutation(pairs.peekable().next().unwrap().into_inner());
     dbg!(&mutation);
@@ -880,9 +881,9 @@ fn parse_mutation(pairs: pest::iterators::Pairs<Rule>) -> Mutation {
 #[test]
 fn test_parse_target() {
     let input = "foo";
-    let pairs = match NextSqlParser::parse(Rule::target, &input) {
+    let pairs = match NextSqlParser::parse(Rule::target, input) {
         Ok(p) => p,
-        Err(e) => panic!("パースエラーが発生しました: {}", e),
+        Err(e) => panic!("パースエラーが発生しました: {e}"),
     };
     let target = parse_target(pairs.peekable().next().unwrap());
     assert_eq!(
@@ -1138,10 +1139,10 @@ fn parse_select_statement(pairs: pest::iterators::Pairs<Rule>) -> SelectStatemen
 #[test]
 fn test_parse_expression() {
     let input = "a == b";
-    let pairs = match NextSqlParser::parse(Rule::expression, &input) {
+    let pairs = match NextSqlParser::parse(Rule::expression, input) {
         Ok(p) => p,
         Err(e) => {
-            eprintln!("パースエラー: {}", e);
+            eprintln!("パースエラー: {e}");
             return;
         }
     };
@@ -1160,10 +1161,10 @@ fn test_parse_expression() {
     );
 
     let input = { "{ name: \"alice\" }" };
-    let pairs = match NextSqlParser::parse(Rule::expression, &input) {
+    let pairs = match NextSqlParser::parse(Rule::expression, input) {
         Ok(p) => p,
         Err(e) => {
-            eprintln!("パースエラー: {}", e);
+            eprintln!("パースエラー: {e}");
             return;
         }
     };
@@ -1185,10 +1186,10 @@ fn test_parse_expression() {
         expr
     );
     let input = "1 + 1";
-    let pairs = match NextSqlParser::parse(Rule::expression, &input) {
+    let pairs = match NextSqlParser::parse(Rule::expression, input) {
         Ok(p) => p,
         Err(e) => {
-            eprintln!("パースエラー: {}", e);
+            eprintln!("パースエラー: {e}");
             return;
         }
     };
@@ -1207,10 +1208,10 @@ fn test_parse_expression() {
     );
 
     let input = "[1, 2, 3]";
-    let pairs = match NextSqlParser::parse(Rule::expression, &input) {
+    let pairs = match NextSqlParser::parse(Rule::expression, input) {
         Ok(p) => p,
         Err(e) => {
-            eprintln!("パースエラー: {}", e);
+            eprintln!("パースエラー: {e}");
             return;
         }
     };
@@ -1226,7 +1227,7 @@ fn test_parse_expression() {
         expr
     );
     let input = "\",\"";
-    let pairs = NextSqlParser::parse(Rule::expression, &input).expect("パースエラー");
+    let pairs = NextSqlParser::parse(Rule::expression, input).expect("パースエラー");
     let expr = parse_expression(pairs.peekable().next().unwrap().into_inner());
     assert_eq!(
         Expression::Atomic(AtomicExpression::Literal(Literal::String(",".to_string()))),
@@ -1234,10 +1235,10 @@ fn test_parse_expression() {
     );
 
     let input = "split(\"a,b,c\", \",\")";
-    let pairs = match NextSqlParser::parse(Rule::expression, &input) {
+    let pairs = match NextSqlParser::parse(Rule::expression, input) {
         Ok(p) => p,
         Err(e) => {
-            eprintln!("パースエラー: {}", e);
+            eprintln!("パースエラー: {e}");
             panic!();
         }
     };
@@ -1256,10 +1257,10 @@ fn test_parse_expression() {
         expr
     );
     let input = "call()[0]";
-    let pairs = match NextSqlParser::parse(Rule::expression, &input) {
+    let pairs = match NextSqlParser::parse(Rule::expression, input) {
         Ok(p) => p,
         Err(e) => {
-            eprintln!("パースエラー: {}", e);
+            eprintln!("パースエラー: {e}");
             panic!();
         }
     };
@@ -1322,81 +1323,81 @@ fn parse_logical_expression(pairs: pest::iterators::Pairs<Rule>) -> Expression {
 
 fn parse_equality_expression(pairs: pest::iterators::Pairs<Rule>) -> Expression {
     let mut pairs = pairs.peekable();
-    let left = parse_relational_expression(pairs.next().unwrap().into_inner());
-    if pairs.peek().is_none() {
-        return left;
+    let mut left = parse_relational_expression(pairs.next().unwrap().into_inner());
+    while pairs.peek().is_some() {
+        let op = match pairs.next().unwrap().as_rule() {
+            Rule::equal => BinaryOp::Equal,
+            Rule::unequal => BinaryOp::Unequal,
+            _ => unreachable!(),
+        };
+        let right = parse_relational_expression(pairs.next().unwrap().into_inner());
+        left = Expression::Binary {
+            left: Box::new(left),
+            op,
+            right: Box::new(right),
+        };
     }
-    let op = match pairs.next().unwrap().as_rule() {
-        Rule::equal => BinaryOp::Equal,
-        Rule::unequal => BinaryOp::Unequal,
-        _ => unreachable!(),
-    };
-    let right = parse_relational_expression(pairs.next().unwrap().into_inner());
-    Expression::Binary {
-        left: Box::new(left),
-        op,
-        right: Box::new(right),
-    }
+    left
 }
 
 fn parse_relational_expression(pairs: pest::iterators::Pairs<Rule>) -> Expression {
     let mut pairs = pairs.peekable();
-    let left = parse_additive_expression(pairs.next().unwrap().into_inner());
-    if pairs.peek().is_none() {
-        return left;
+    let mut left = parse_additive_expression(pairs.next().unwrap().into_inner());
+    while pairs.peek().is_some() {
+        let op = match pairs.next().unwrap().as_rule() {
+            Rule::lt => BinaryOp::LessThan,
+            Rule::le => BinaryOp::LessThanOrEqual,
+            Rule::gt => BinaryOp::GreaterThan,
+            Rule::ge => BinaryOp::GreaterThanOrEqual,
+            _ => unreachable!(),
+        };
+        let right = parse_additive_expression(pairs.next().unwrap().into_inner());
+        left = Expression::Binary {
+            left: Box::new(left),
+            op,
+            right: Box::new(right),
+        };
     }
-    let op = match pairs.next().unwrap().as_rule() {
-        Rule::lt => BinaryOp::LessThan,
-        Rule::le => BinaryOp::LessThanOrEqual,
-        Rule::gt => BinaryOp::GreaterThan,
-        Rule::ge => BinaryOp::GreaterThanOrEqual,
-        _ => unreachable!(),
-    };
-    let right = parse_additive_expression(pairs.next().unwrap().into_inner());
-    Expression::Binary {
-        left: Box::new(left),
-        op,
-        right: Box::new(right),
-    }
+    left
 }
 
 fn parse_additive_expression(pairs: pest::iterators::Pairs<Rule>) -> Expression {
     let mut pairs = pairs.peekable();
-    let left = parse_multiplicative_expression(pairs.next().unwrap().into_inner());
-    if pairs.peek().is_none() {
-        return left;
+    let mut left = parse_multiplicative_expression(pairs.next().unwrap().into_inner());
+    while pairs.peek().is_some() {
+        let op = match pairs.next().unwrap().as_rule() {
+            Rule::add => BinaryOp::Add,
+            Rule::subtract => BinaryOp::Subtract,
+            _ => unreachable!(),
+        };
+        let right = parse_multiplicative_expression(pairs.next().unwrap().into_inner());
+        left = Expression::Binary {
+            left: Box::new(left),
+            op,
+            right: Box::new(right),
+        };
     }
-    let op = match pairs.next().unwrap().as_rule() {
-        Rule::add => BinaryOp::Add,
-        Rule::subtract => BinaryOp::Subtract,
-        _ => unreachable!(),
-    };
-    let right = parse_multiplicative_expression(pairs.next().unwrap().into_inner());
-    Expression::Binary {
-        left: Box::new(left),
-        op,
-        right: Box::new(right),
-    }
+    left
 }
 
 fn parse_multiplicative_expression(pairs: pest::iterators::Pairs<Rule>) -> Expression {
     let mut pairs = pairs.peekable();
-    let left = parse_unary_expression(pairs.next().unwrap().into_inner());
-    if pairs.peek().is_none() {
-        return left;
+    let mut left = parse_unary_expression(pairs.next().unwrap().into_inner());
+    while pairs.peek().is_some() {
+        let op = match pairs.next().unwrap().as_rule() {
+            Rule::multiply => BinaryOp::Multiply,
+            Rule::divide => BinaryOp::Divide,
+            Rule::rem => BinaryOp::Remainder,
+            _ => unreachable!(),
+        };
+        let right = parse_unary_expression(pairs.next().unwrap().into_inner());
+        left = Expression::Binary {
+            left: Box::new(left),
+            op,
+            right: Box::new(right),
+        };
     }
-    let op = match pairs.next().unwrap().as_rule() {
-        Rule::multiply => BinaryOp::Multiply,
-        Rule::divide => BinaryOp::Divide,
-        Rule::rem => BinaryOp::Remainder,
-        _ => unreachable!(),
-    };
-    let right = parse_unary_expression(pairs.next().unwrap().into_inner());
-    Expression::Binary {
-        left: Box::new(left),
-        op,
-        right: Box::new(right),
-    }
+    left
 }
 
 fn parse_unary_expression(pairs: pest::iterators::Pairs<Rule>) -> Expression {
@@ -1417,25 +1418,25 @@ fn parse_unary_expression(pairs: pest::iterators::Pairs<Rule>) -> Expression {
 #[test]
 fn test_parse_column() {
     let input = "*";
-    let pairs = match NextSqlParser::parse(Rule::column, &input) {
+    let pairs = match NextSqlParser::parse(Rule::column, input) {
         Ok(p) => p,
-        Err(e) => panic!("パースエラーが発生しました: {}", e),
+        Err(e) => panic!("パースエラーが発生しました: {e}"),
     };
     let column = parse_column(pairs.peekable().next().unwrap().into_inner());
     assert_eq!(Column::Wildcard(Some(Span { start: 0, end: 1 })), column);
 
     let input = "foo_bar";
-    let pairs = match NextSqlParser::parse(Rule::column, &input) {
+    let pairs = match NextSqlParser::parse(Rule::column, input) {
         Ok(p) => p,
-        Err(e) => panic!("パースエラーが発生しました: {}", e),
+        Err(e) => panic!("パースエラーが発生しました: {e}"),
     };
     let column = parse_column(pairs.peekable().next().unwrap().into_inner());
     assert_eq!(Column::ImplicitTarget("foo_bar".to_string(), Some(Span { start: 0, end: 7 })), column);
 
     let input = "foo.bar";
-    let pairs = match NextSqlParser::parse(Rule::column, &input) {
+    let pairs = match NextSqlParser::parse(Rule::column, input) {
         Ok(p) => p,
-        Err(e) => panic!("パースエラーが発生しました: {}", e),
+        Err(e) => panic!("パースエラーが発生しました: {e}"),
     };
     let column = parse_column(pairs.peekable().next().unwrap().into_inner());
     assert_eq!(
@@ -1444,9 +1445,9 @@ fn test_parse_column() {
     );
 
     let input = "foo.*";
-    let pairs = match NextSqlParser::parse(Rule::column, &input) {
+    let pairs = match NextSqlParser::parse(Rule::column, input) {
         Ok(p) => p,
-        Err(e) => panic!("パースエラーが発生しました: {}", e),
+        Err(e) => panic!("パースエラーが発生しました: {e}"),
     };
     let column = parse_column(pairs.peekable().next().unwrap().into_inner());
     assert_eq!(Column::WildcardOf("foo".to_string(), Some(Span { start: 4, end: 5 })), column);
@@ -1653,7 +1654,7 @@ fn parse_property_access(pairs: pest::iterators::Pairs<Rule>) -> Expression {
     let target_pair = pairs.next().unwrap();
     let mut result = parse_basic_expression(target_pair.into_inner());
     // Consume all chained property idents (the grammar `("." ~ ident)+` may produce multiple)
-    while let Some(prop_pair) = pairs.next() {
+    for prop_pair in pairs {
         let property = prop_pair.as_str().to_string();
         result = Expression::Atomic(AtomicExpression::PropertyAccess(PropertyAccess {
             target: Box::new(result),
@@ -1728,73 +1729,73 @@ mod tests {
     #[test]
     fn simple_select_test() {
         let input = include_str!("../../examples/simple-select.nsql");
-        parse_module(&input).unwrap();
+        parse_module(input).unwrap();
     }
 
     #[test]
     fn simple_select_and_join_test() {
         let input = include_str!("../../examples/simple-select-and-join.nsql");
-        dbg!("{:?}", parse_module(&input).unwrap());
+        dbg!("{:?}", parse_module(input).unwrap());
     }
 
     #[test]
     fn insert_optional_test() {
         let input = include_str!("../../examples/insert-optional.nsql");
-        parse_module(&input).unwrap();
+        parse_module(input).unwrap();
     }
 
     #[test]
     fn insert_many_test() {
         let input = include_str!("../../examples/insert-many.nsql");
-        dbg!("{:?}", parse_module(&input).unwrap());
+        dbg!("{:?}", parse_module(input).unwrap());
     }
 
     #[test]
     fn insert_many_with_variable_test() {
         let input = include_str!("../../examples/insert-many-with-variable.nsql");
-        dbg!("{:?}", parse_module(&input).unwrap());
+        dbg!("{:?}", parse_module(input).unwrap());
     }
 
     #[test]
     fn update_test() {
         let input = include_str!("../../examples/update.nsql");
-        dbg!("{:?}", parse_module(&input).unwrap());
+        dbg!("{:?}", parse_module(input).unwrap());
     }
 
     #[test]
     fn simple_delete_test() {
         let input = include_str!("../../examples/simple-delete.nsql");
-        dbg!("{:?}", parse_module(&input).unwrap());
+        dbg!("{:?}", parse_module(input).unwrap());
     }
 
     #[test]
     fn delete_with_subquery_test() {
         let input = include_str!("../../examples/delete-with-subquery.nsql");
-        dbg!("{:?}", parse_module(&input).unwrap());
+        dbg!("{:?}", parse_module(input).unwrap());
     }
 
     #[test]
     fn dynamic_conditional_clauses_test() {
         let input = include_str!("../../examples/dynamic-conditional-clauses.nsql");
-        dbg!("{:?}", parse_module(&input).unwrap());
+        dbg!("{:?}", parse_module(input).unwrap());
     }
 
     #[test]
     fn dynamic_field_selection_test() {
         let input = include_str!("../../examples/dynamic-field-selection.nsql");
-        dbg!("{:?}", parse_module(&input).unwrap());
+        dbg!("{:?}", parse_module(input).unwrap());
     }
 
     #[test]
     fn dynamic_joins_test() {
         let input = include_str!("../../examples/dynamic-joins.nsql");
-        dbg!("{:?}", parse_module(&input).unwrap());
+        dbg!("{:?}", parse_module(input).unwrap());
     }
 
     #[test]
     fn dynamic_array_conditions_test() {
         let input = include_str!("../../examples/dynamic-array-conditions.nsql");
-        dbg!("{:?}", parse_module(&input).unwrap());
+        dbg!("{:?}", parse_module(input).unwrap());
     }
 
     #[test]
@@ -1880,9 +1881,7 @@ aggregation comment_count for posts returning i32 {
             TopLevel::Query(q) => q,
             _ => panic!("Expected query"),
         };
-        let select = match &query.body.statements[0] {
-            QueryStatement::Select(s) => s,
-        };
+        let QueryStatement::Select(select) = &query.body.statements[0];
         assert_eq!(select.unions.len(), 1);
         match &select.unions[0].union_type {
             UnionType::Union => {},
@@ -1907,9 +1906,7 @@ aggregation comment_count for posts returning i32 {
             TopLevel::Query(q) => q,
             _ => panic!("Expected query"),
         };
-        let select = match &query.body.statements[0] {
-            QueryStatement::Select(s) => s,
-        };
+        let QueryStatement::Select(select) = &query.body.statements[0];
         assert_eq!(select.unions.len(), 1);
         match &select.unions[0].union_type {
             UnionType::UnionAll => {},
@@ -1938,9 +1935,7 @@ aggregation comment_count for posts returning i32 {
             TopLevel::Query(q) => q,
             _ => panic!("Expected query"),
         };
-        let select = match &query.body.statements[0] {
-            QueryStatement::Select(s) => s,
-        };
+        let QueryStatement::Select(select) = &query.body.statements[0];
         assert_eq!(select.unions.len(), 2);
         match &select.unions[0].union_type {
             UnionType::Union => {},
@@ -1964,19 +1959,17 @@ aggregation comment_count for posts returning i32 {
         if examples_dir.exists() && examples_dir.is_dir() {
             match fs::read_dir(examples_dir) {
                 Ok(entries) => {
-                    for entry in entries {
-                        if let Ok(entry) = entry {
-                            let path = entry.path();
-                            if path.extension().and_then(|s| s.to_str()) == Some("nsql") {
-                                if let Some(filename) = path.file_name().and_then(|s| s.to_str()) {
-                                    // Read file content
-                                    match fs::read_to_string(&path) {
-                                        Ok(content) => {
-                                            example_files.push((filename.to_string(), content));
-                                        }
-                                        Err(e) => {
-                                            panic!("Failed to read {}: {}", filename, e);
-                                        }
+                    for entry in entries.flatten() {
+                        let path = entry.path();
+                        if path.extension().and_then(|s| s.to_str()) == Some("nsql") {
+                            if let Some(filename) = path.file_name().and_then(|s| s.to_str()) {
+                                // Read file content
+                                match fs::read_to_string(&path) {
+                                    Ok(content) => {
+                                        example_files.push((filename.to_string(), content));
+                                    }
+                                    Err(e) => {
+                                        panic!("Failed to read {filename}: {e}");
                                     }
                                 }
                             }
@@ -1984,7 +1977,7 @@ aggregation comment_count for posts returning i32 {
                     }
                 }
                 Err(e) => {
-                    panic!("Failed to read examples directory: {}", e);
+                    panic!("Failed to read examples directory: {e}");
                 }
             }
         } else {
@@ -2011,7 +2004,7 @@ aggregation comment_count for posts returning i32 {
 
         for (filename, content) in example_files {
             total_files += 1;
-            print!("Testing {}... ", filename);
+            print!("Testing {filename}... ");
 
 
             match parse_module(&content) {
@@ -2021,8 +2014,7 @@ aggregation comment_count for posts returning i32 {
                     // Validate the module has at least one top-level item
                     assert!(
                         !module.toplevels.is_empty(),
-                        "File {} should contain at least one query or mutation",
-                        filename
+                        "File {filename} should contain at least one query or mutation"
                     );
 
                     // Count queries and mutations
@@ -2041,8 +2033,7 @@ aggregation comment_count for posts returning i32 {
                     }
 
                     println!(
-                        "✅ ({} queries, {} mutations, {} with statements, {} relations)",
-                        queries, mutations, with_statements, relations
+                        "✅ ({queries} queries, {mutations} mutations, {with_statements} with statements, {relations} relations)"
                     );
                 }
                 Err(e) => {
@@ -2068,12 +2059,11 @@ aggregation comment_count for posts returning i32 {
                         skipped_file_names.push(filename.clone());
                         println!("⚠️  SKIPPED (contains unsupported features)");
                         println!(
-                            "    💡 Consider adding '{}' to unsupported_files list",
-                            filename
+                            "    💡 Consider adding '{filename}' to unsupported_files list"
                         );
                     } else {
                         failed_files.push((filename.clone(), error_message.clone()));
-                        println!("❌ FAILED: {}", error_message);
+                        println!("❌ FAILED: {error_message}");
                     }
                 }
             }
@@ -2081,31 +2071,30 @@ aggregation comment_count for posts returning i32 {
 
         // Print summary
         println!("\n📊 PARSING SUMMARY:");
-        println!("Total files discovered: {}", total_files);
-        println!("Successful: {} ✅", successful_files);
-        println!("Skipped (unsupported): {} ⚠️", skipped_files);
+        println!("Total files discovered: {total_files}");
+        println!("Successful: {successful_files} ✅");
+        println!("Skipped (unsupported): {skipped_files} ⚠️");
         println!("Failed: {} ❌", failed_files.len());
 
         let testable_files = total_files - skipped_files;
         if testable_files > 0 {
             let success_rate = (successful_files as f64 / testable_files as f64) * 100.0;
             println!(
-                "Success rate: {:.1}% ({}/{})",
-                success_rate, successful_files, testable_files
+                "Success rate: {success_rate:.1}% ({successful_files}/{testable_files})"
             );
         }
 
         if !skipped_file_names.is_empty() {
             println!("\n⚠️  Skipped files (unsupported features):");
             for filename in &skipped_file_names {
-                println!("  - {}", filename);
+                println!("  - {filename}");
             }
         }
 
         if !failed_files.is_empty() {
             println!("\n❌ Failed files:");
             for (filename, error) in &failed_files {
-                println!("  - {}: {}", filename, error);
+                println!("  - {filename}: {error}");
             }
         }
 
@@ -2116,7 +2105,7 @@ aggregation comment_count for posts returning i32 {
         );
 
         if skipped_files > 0 {
-            println!("🎉 All supported example files parsed successfully! ({} unsupported files were skipped)", skipped_files);
+            println!("🎉 All supported example files parsed successfully! ({skipped_files} unsupported files were skipped)");
         } else {
             println!("🎉 All example files parsed successfully!");
         }
@@ -2141,7 +2130,7 @@ aggregation comment_count for posts returning i32 {
                     _ => panic!("Expected variable as target"),
                 }
             }
-            _ => panic!("Expected property access, got {:?}", expr),
+            _ => panic!("Expected property access, got {expr:?}"),
         }
 
         // Test method call on column (users.name is parsed as a column)
@@ -2166,10 +2155,10 @@ aggregation comment_count for posts returning i32 {
                         assert_eq!(table, "users");
                         assert_eq!(col, "name");
                     }
-                    _ => panic!("Expected ExplicitTarget column as target, got {:?}", target),
+                    _ => panic!("Expected ExplicitTarget column as target, got {target:?}"),
                 }
             }
-            _ => panic!("Expected method call, got {:?}", expr),
+            _ => panic!("Expected method call, got {expr:?}"),
         }
 
         // Test method call with arguments (users.id is parsed as a column)
@@ -2194,7 +2183,7 @@ aggregation comment_count for posts returning i32 {
                         assert_eq!(table, "users");
                         assert_eq!(col, "id");
                     }
-                    _ => panic!("Expected ExplicitTarget column as target, got {:?}", target),
+                    _ => panic!("Expected ExplicitTarget column as target, got {target:?}"),
                 }
                 // Verify the argument is a variable
                 match &args[0] {
@@ -2204,7 +2193,7 @@ aggregation comment_count for posts returning i32 {
                     _ => panic!("Expected variable as argument"),
                 }
             }
-            _ => panic!("Expected method call, got {:?}", expr),
+            _ => panic!("Expected method call, got {expr:?}"),
         }
 
         // Test chained method calls
@@ -2239,7 +2228,7 @@ aggregation comment_count for posts returning i32 {
                     _ => panic!("Expected method call as target"),
                 }
             }
-            _ => panic!("Expected method call, got {:?}", expr),
+            _ => panic!("Expected method call, got {expr:?}"),
         }
     }
 
@@ -2257,9 +2246,7 @@ aggregation comment_count for posts returning i32 {
             TopLevel::Query(q) => q,
             _ => panic!("Expected query"),
         };
-        let stmt = match &query.body.statements[0] {
-            QueryStatement::Select(s) => s,
-        };
+        let QueryStatement::Select(stmt) = &query.body.statements[0];
         assert!(stmt.clauses.iter().any(|c| matches!(c, QueryClause::Distinct)));
     }
 
@@ -2278,9 +2265,7 @@ aggregation comment_count for posts returning i32 {
             TopLevel::Query(q) => q,
             _ => panic!("Expected query"),
         };
-        let stmt = match &query.body.statements[0] {
-            QueryStatement::Select(s) => s,
-        };
+        let QueryStatement::Select(stmt) = &query.body.statements[0];
         assert!(stmt.clauses.iter().any(|c| matches!(c, QueryClause::Offset(_))));
     }
 
@@ -2300,9 +2285,7 @@ aggregation comment_count for posts returning i32 {
             TopLevel::Query(q) => q,
             _ => panic!("Expected query"),
         };
-        let stmt = match &query.body.statements[0] {
-            QueryStatement::Select(s) => s,
-        };
+        let QueryStatement::Select(stmt) = &query.body.statements[0];
         assert!(stmt.clauses.iter().any(|c| matches!(c, QueryClause::Having(_))));
     }
 
@@ -2320,9 +2303,7 @@ aggregation comment_count for posts returning i32 {
             TopLevel::Query(q) => q,
             _ => panic!("Expected query"),
         };
-        let select = match &query.body.statements[0] {
-            QueryStatement::Select(s) => s,
-        };
+        let QueryStatement::Select(select) = &query.body.statements[0];
         let order_by = select.clauses.iter().find(|c| matches!(c, QueryClause::OrderBy(_)));
         assert!(order_by.is_some());
         match order_by.unwrap() {
@@ -2349,9 +2330,7 @@ aggregation comment_count for posts returning i32 {
             TopLevel::Query(q) => q,
             _ => panic!("Expected query"),
         };
-        let select = match &query.body.statements[0] {
-            QueryStatement::Select(s) => s,
-        };
+        let QueryStatement::Select(select) = &query.body.statements[0];
         let order_by = select.clauses.iter().find(|c| matches!(c, QueryClause::OrderBy(_)));
         assert!(order_by.is_some());
         match order_by.unwrap() {
@@ -2558,9 +2537,7 @@ fn test_for_update_clause() {
         TopLevel::Query(q) => q,
         _ => panic!("expected query"),
     };
-    let stmt = match &q.body.statements[0] {
-        QueryStatement::Select(s) => s,
-    };
+    let QueryStatement::Select(stmt) = &q.body.statements[0];
     assert!(
         stmt.clauses.iter().any(|c| matches!(c, QueryClause::ForUpdate)),
         "Expected ForUpdate clause in parsed query"
@@ -2593,7 +2570,7 @@ fn test_set_with_column_expression() {
         Expression::Binary { op, .. } => {
             assert_eq!(*op, BinaryOp::Add);
         }
-        _ => panic!("expected binary expression for stage, got {:?}", expr),
+        _ => panic!("expected binary expression for stage, got {expr:?}"),
     }
 }
 
@@ -2621,7 +2598,7 @@ fn test_now_function_call_parse() {
             assert_eq!(call.callee, "now");
             assert!(call.args.is_empty());
         }
-        _ => panic!("expected call expression for now(), got {:?}", expr),
+        _ => panic!("expected call expression for now(), got {expr:?}"),
     }
 }
 
@@ -2639,9 +2616,7 @@ fn test_count_with_alias_parse() {
         TopLevel::Query(q) => q,
         _ => panic!("expected query"),
     };
-    let stmt = match &q.body.statements[0] {
-        QueryStatement::Select(s) => s,
-    };
+    let QueryStatement::Select(stmt) = &q.body.statements[0];
     // Find Select clause
     let select_clause = stmt.clauses.iter().find_map(|c| match c {
         QueryClause::Select(exprs) => Some(exprs),

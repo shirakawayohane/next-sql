@@ -302,7 +302,7 @@ impl<'a> SqlGenContext<'a> {
                 if let Some(col) = table.columns.iter().find(|c| c.name == column_name) {
                     if let Type::UserDefined(enum_name) = &col.column_type {
                         if schema.enums.contains_key(enum_name) {
-                            return format!("{}::{}", val, enum_name);
+                            return format!("{val}::{enum_name}");
                         }
                     }
                 }
@@ -391,7 +391,7 @@ impl<'a> SqlGenContext<'a> {
                 // Replace $N with ${} in reverse order to avoid replacing $1 inside $10
                 for i in (1..=params.len()).rev() {
                     template = template.replace(
-                        &format!("${}", i),
+                        &format!("${i}"),
                         "${}",
                     );
                 }
@@ -409,8 +409,8 @@ impl<'a> SqlGenContext<'a> {
                     .map(|e| {
                         let expr_sql = sub_ctx.gen_expr(&e.expr);
                         match &e.direction {
-                            Some(OrderDirection::Asc) => format!("{} ASC", expr_sql),
-                            Some(OrderDirection::Desc) => format!("{} DESC", expr_sql),
+                            Some(OrderDirection::Asc) => format!("{expr_sql} ASC"),
+                            Some(OrderDirection::Desc) => format!("{expr_sql} DESC"),
                             None => expr_sql,
                         }
                     })
@@ -419,7 +419,7 @@ impl<'a> SqlGenContext<'a> {
                 let params = sub_ctx.params.clone();
                 let mut template = sql;
                 for i in (1..=params.len()).rev() {
-                    template = template.replace(&format!("${}", i), "${}");
+                    template = template.replace(&format!("${i}"), "${}");
                 }
                 (WhenClauseType::OrderBy, template, params)
             }
@@ -428,7 +428,7 @@ impl<'a> SqlGenContext<'a> {
                 let params = sub_ctx.params.clone();
                 let mut template = sql;
                 for i in (1..=params.len()).rev() {
-                    template = template.replace(&format!("${}", i), "${}");
+                    template = template.replace(&format!("${i}"), "${}");
                 }
                 (WhenClauseType::Limit, template, params)
             }
@@ -439,123 +439,6 @@ impl<'a> SqlGenContext<'a> {
         }
     }
 
-    /// Walk an expression tree and register all variables as params
-    /// without generating SQL output. This ensures that variables inside
-    /// when-clause conditions and bodies (which may be overwritten by
-    /// subsequent clauses) are still tracked.
-    #[allow(dead_code)]
-    fn collect_params_from_expr(&mut self, expr: &Expression) {
-        match expr {
-            Expression::Binary { left, right, .. } => {
-                self.collect_params_from_expr(left);
-                self.collect_params_from_expr(right);
-            }
-            Expression::Unary { expr, .. } => {
-                self.collect_params_from_expr(expr);
-            }
-            Expression::Atomic(atomic) => {
-                self.collect_params_from_atomic(atomic);
-            }
-        }
-    }
-
-    #[allow(dead_code)]
-    fn collect_params_from_atomic(&mut self, atomic: &AtomicExpression) {
-        match atomic {
-            AtomicExpression::Variable(var) => {
-                self.add_param(&var.name);
-            }
-            AtomicExpression::Call(call) => {
-                for arg in &call.args {
-                    self.collect_params_from_expr(arg);
-                }
-            }
-            AtomicExpression::MethodCall(mc) => {
-                self.collect_params_from_expr(&mc.target);
-                for arg in &mc.args {
-                    self.collect_params_from_expr(arg);
-                }
-            }
-            AtomicExpression::PropertyAccess(pa) => {
-                if let Expression::Atomic(AtomicExpression::Variable(var)) = &*pa.target {
-                    self.add_param(&format!("{}.{}", var.name, pa.property));
-                } else {
-                    self.collect_params_from_expr(&pa.target);
-                }
-            }
-            AtomicExpression::IndexAccess(ia) => {
-                self.collect_params_from_expr(&ia.target);
-                self.collect_params_from_expr(&ia.index);
-            }
-            AtomicExpression::SubQuery(select) => {
-                self.collect_params_from_select(select);
-            }
-            AtomicExpression::Aggregate(agg) => {
-                self.collect_params_from_expr(&agg.expr);
-                if let Some(filter_expr) = &agg.filter {
-                    self.collect_params_from_expr(filter_expr);
-                }
-            }
-            AtomicExpression::Exists(select) => {
-                self.collect_params_from_select(select);
-            }
-            AtomicExpression::Cast(cast) => {
-                self.collect_params_from_expr(&cast.expr);
-            }
-            AtomicExpression::Column(_) | AtomicExpression::Literal(_) => {}
-        }
-    }
-
-    /// Collect params from all expressions within a select statement.
-    #[allow(dead_code)]
-    fn collect_params_from_select(&mut self, stmt: &SelectStatement) {
-        for clause in &stmt.clauses {
-            self.collect_params_from_clause(clause);
-        }
-        for union in &stmt.unions {
-            self.collect_params_from_select(&union.select);
-        }
-    }
-
-    /// Collect params from a query clause.
-    #[allow(dead_code)]
-    fn collect_params_from_clause(&mut self, clause: &QueryClause) {
-        match clause {
-            QueryClause::Select(exprs) => {
-                for se in exprs {
-                    self.collect_params_from_expr(&se.expr);
-                }
-            }
-            QueryClause::Where(expr) => self.collect_params_from_expr(expr),
-            QueryClause::GroupBy(exprs) => {
-                for e in exprs {
-                    self.collect_params_from_expr(e);
-                }
-            }
-            QueryClause::Having(expr) => self.collect_params_from_expr(expr),
-            QueryClause::OrderBy(exprs) => {
-                for e in exprs {
-                    self.collect_params_from_expr(&e.expr);
-                }
-            }
-            QueryClause::Limit(expr) => self.collect_params_from_expr(expr),
-            QueryClause::Offset(expr) => self.collect_params_from_expr(expr),
-            QueryClause::Join(join) => {
-                self.collect_params_from_expr(&join.condition);
-            }
-            QueryClause::Aggregate(aggs) => {
-                for agg in aggs {
-                    self.collect_params_from_expr(&agg.expr);
-                }
-            }
-            QueryClause::When(when) => {
-                self.collect_params_from_expr(&when.condition);
-                self.collect_params_from_clause(&when.clause);
-            }
-            QueryClause::Distinct => {}
-            QueryClause::ForUpdate => {}
-        }
-    }
 
     // ── Expression generation ───────────────────────────────────────────
 
@@ -579,12 +462,12 @@ impl<'a> SqlGenContext<'a> {
                     BinaryOp::Divide => "/",
                     BinaryOp::Remainder => "%",
                 };
-                format!("{} {} {}", l, op_str, r)
+                format!("{l} {op_str} {r}")
             }
             Expression::Unary { op, expr } => {
                 let e = self.gen_expr(expr);
                 match op {
-                    UnaryOp::Not => format!("NOT {}", e),
+                    UnaryOp::Not => format!("NOT {e}"),
                 }
             }
             Expression::Atomic(atomic) => self.gen_atomic(atomic),
@@ -596,7 +479,7 @@ impl<'a> SqlGenContext<'a> {
         match expr {
             Expression::Binary { .. } => {
                 let s = self.gen_expr(expr);
-                format!("({})", s)
+                format!("({s})")
             }
             _ => self.gen_expr(expr),
         }
@@ -612,13 +495,13 @@ impl<'a> SqlGenContext<'a> {
                     // Special handling for EXCLUDED reference in ON CONFLICT DO UPDATE
                     if let Expression::Atomic(AtomicExpression::Column(col)) = &call.args[0] {
                         match col {
-                            Column::ImplicitTarget(name, _) => format!("EXCLUDED.{}", name),
-                            Column::ExplicitTarget(_, name, _) => format!("EXCLUDED.{}", name),
-                            _ => format!("EXCLUDED.*"),
+                            Column::ImplicitTarget(name, _) => format!("EXCLUDED.{name}"),
+                            Column::ExplicitTarget(_, name, _) => format!("EXCLUDED.{name}"),
+                            _ => "EXCLUDED.*".to_string(),
                         }
                     } else {
                         let arg = self.gen_expr(&call.args[0]);
-                        format!("EXCLUDED.{}", arg)
+                        format!("EXCLUDED.{arg}")
                     }
                 } else {
                     let args: Vec<String> = call.args.iter().map(|a| self.gen_expr(a)).collect();
@@ -636,11 +519,11 @@ impl<'a> SqlGenContext<'a> {
             AtomicExpression::IndexAccess(ia) => {
                 let target = self.gen_expr(&ia.target);
                 let index = self.gen_expr(&ia.index);
-                format!("{}[{}]", target, index)
+                format!("{target}[{index}]")
             }
             AtomicExpression::SubQuery(select) => {
                 let sql = self.gen_select(select);
-                format!("({})", sql)
+                format!("({sql})")
             }
             AtomicExpression::Aggregate(agg) => {
                 let func = match agg.function_type {
@@ -653,19 +536,19 @@ impl<'a> SqlGenContext<'a> {
                 let expr = self.gen_expr(&agg.expr);
                 if let Some(filter_expr) = &agg.filter {
                     let filter = self.gen_expr(filter_expr);
-                    format!("{}({}) FILTER (WHERE {})", func, expr, filter)
+                    format!("{func}({expr}) FILTER (WHERE {filter})")
                 } else {
-                    format!("{}({})", func, expr)
+                    format!("{func}({expr})")
                 }
             }
             AtomicExpression::Exists(select) => {
                 let sql = self.gen_select(select);
-                format!("EXISTS ({})", sql)
+                format!("EXISTS ({sql})")
             }
             AtomicExpression::Cast(cast) => {
                 let expr = self.gen_expr(&cast.expr);
                 let pg_type = builtin_type_to_pg_type(&cast.target_type);
-                format!("CAST({} AS {})", expr, pg_type)
+                format!("CAST({expr} AS {pg_type})")
             }
         }
     }
@@ -673,8 +556,8 @@ impl<'a> SqlGenContext<'a> {
     fn gen_column(&self, col: &Column) -> String {
         match col {
             Column::ImplicitTarget(name, _) => name.clone(),
-            Column::ExplicitTarget(table, col_name, _) => format!("{}.{}", table, col_name),
-            Column::WildcardOf(table, _) => format!("{}.*", table),
+            Column::ExplicitTarget(table, col_name, _) => format!("{table}.{col_name}"),
+            Column::WildcardOf(table, _) => format!("{table}.*"),
             Column::Wildcard(_) => "*".to_string(),
         }
     }
@@ -685,12 +568,12 @@ impl<'a> SqlGenContext<'a> {
                 if *n == (*n as i64) as f64 {
                     format!("{}", *n as i64)
                 } else {
-                    format!("{}", n)
+                    format!("{n}")
                 }
             }
             Literal::String(s) => {
                 let escaped = s.replace('\'', "''");
-                format!("'{}'", escaped)
+                format!("'{escaped}'")
             }
             Literal::Boolean(true) => "TRUE".to_string(),
             Literal::Boolean(false) => "FALSE".to_string(),
@@ -716,42 +599,42 @@ impl<'a> SqlGenContext<'a> {
     fn gen_method_call(&mut self, mc: &MethodCall) -> String {
         let target = self.gen_expr(&mc.target);
         match mc.method.as_str() {
-            "isNull" => format!("{} IS NULL", target),
-            "isNotNull" => format!("{} IS NOT NULL", target),
+            "isNull" => format!("{target} IS NULL"),
+            "isNotNull" => format!("{target} IS NOT NULL"),
             "like" => {
                 let pattern = self.gen_expr(&mc.args[0]);
-                format!("{} LIKE {}", target, pattern)
+                format!("{target} LIKE {pattern}")
             }
             "ilike" => {
                 let pattern = self.gen_expr(&mc.args[0]);
-                format!("{} ILIKE {}", target, pattern)
+                format!("{target} ILIKE {pattern}")
             }
             "between" => {
                 let a = self.gen_expr(&mc.args[0]);
                 let b = self.gen_expr(&mc.args[1]);
-                format!("{} BETWEEN {} AND {}", target, a, b)
+                format!("{target} BETWEEN {a} AND {b}")
             }
             "eqAny" => {
                 let arr = self.gen_expr(&mc.args[0]);
-                format!("{} = ANY({})", target, arr)
+                format!("{target} = ANY({arr})")
             }
             "neAny" if mc.args.len() == 1 => {
                 let arg = self.gen_expr(&mc.args[0]);
-                format!("NOT ({} = ANY({}))", target, arg)
+                format!("NOT ({target} = ANY({arg}))")
             }
             "in" => {
                 let items: Vec<String> = mc.args.iter().map(|a| self.gen_expr(a)).collect();
                 format!("{} IN ({})", target, items.join(", "))
             }
-            "asc" => format!("{} ASC", target),
-            "desc" => format!("{} DESC", target),
+            "asc" => format!("{target} ASC"),
+            "desc" => format!("{target} DESC"),
             "contains" => {
                 let val = self.gen_expr(&mc.args[0]);
-                format!("{} @> {}", target, val)
+                format!("{target} @> {val}")
             }
-            "toLowerCase" => format!("LOWER({})", target),
-            "toUpperCase" => format!("UPPER({})", target),
-            "trim" => format!("TRIM({})", target),
+            "toLowerCase" => format!("LOWER({target})"),
+            "toUpperCase" => format!("UPPER({target})"),
+            "trim" => format!("TRIM({target})"),
             _ => {
                 let args: Vec<String> = mc.args.iter().map(|a| self.gen_expr(a)).collect();
                 format!("{}.{}({})", target, mc.method, args.join(", "))
@@ -843,11 +726,10 @@ impl<'a> SqlGenContext<'a> {
                     );
 
                     let join_sql = if alias == target_table {
-                        format!("{} {} ON {}", join_type, target_table, condition_sql)
+                        format!("{join_type} {target_table} ON {condition_sql}")
                     } else {
                         format!(
-                            "{} {} AS {} ON {}",
-                            join_type, target_table, alias, condition_sql
+                            "{join_type} {target_table} AS {alias} ON {condition_sql}"
                         )
                     };
 
@@ -879,7 +761,7 @@ impl<'a> SqlGenContext<'a> {
         if resolved_any {
             // The last segment is the column on the resolved table.
             let col = segments.last().unwrap();
-            format!("{}.{}", current_table, col)
+            format!("{current_table}.{col}")
         } else {
             // No relations resolved — fall back
             let target = self.gen_expr(&pa.target);
@@ -901,7 +783,7 @@ impl<'a> SqlGenContext<'a> {
         let alias = if *count == 1 {
             table.to_string()
         } else {
-            format!("{}_{}", table, count)
+            format!("{table}_{count}")
         };
 
         self.relation_alias_map
@@ -940,7 +822,7 @@ impl<'a> SqlGenContext<'a> {
                     BinaryOp::Divide => "/",
                     BinaryOp::Remainder => "%",
                 };
-                format!("{} {} {}", l, op_str, r)
+                format!("{l} {op_str} {r}")
             }
             Expression::Atomic(AtomicExpression::Column(Column::ExplicitTarget(tbl, col, _))) => {
                 let alias = if tbl == target_table {
@@ -950,7 +832,7 @@ impl<'a> SqlGenContext<'a> {
                 } else {
                     tbl.as_str()
                 };
-                format!("{}.{}", alias, col)
+                format!("{alias}.{col}")
             }
             _ => self.gen_expr(expr),
         }
@@ -1023,7 +905,7 @@ impl<'a> SqlGenContext<'a> {
             let col_sql = self.gen_expr(&se.expr);
             // If the select expression has an explicit alias, emit it
             if let Some(ref alias) = se.alias {
-                columns.push(format!("{} AS {}", col_sql, alias));
+                columns.push(format!("{col_sql} AS {alias}"));
             } else {
                 columns.push(col_sql);
             }
@@ -1049,7 +931,7 @@ impl<'a> SqlGenContext<'a> {
             if self.is_dynamic {
                 self.static_where_sql = Some(w.clone());
             }
-            format!("WHERE {}", w)
+            format!("WHERE {w}")
         });
 
         let group_by_sql = group_by.map(|exprs| {
@@ -1059,7 +941,7 @@ impl<'a> SqlGenContext<'a> {
 
         let having_sql = having.map(|cond| {
             let h = self.gen_expr(cond);
-            format!("HAVING {}", h)
+            format!("HAVING {h}")
         });
 
         let order_by_sql = order_by.map(|exprs| {
@@ -1068,8 +950,8 @@ impl<'a> SqlGenContext<'a> {
                 .map(|e| {
                     let expr_sql = self.gen_expr(&e.expr);
                     match &e.direction {
-                        Some(OrderDirection::Asc) => format!("{} ASC", expr_sql),
-                        Some(OrderDirection::Desc) => format!("{} DESC", expr_sql),
+                        Some(OrderDirection::Asc) => format!("{expr_sql} ASC"),
+                        Some(OrderDirection::Desc) => format!("{expr_sql} DESC"),
                         None => expr_sql,
                     }
                 })
@@ -1079,12 +961,12 @@ impl<'a> SqlGenContext<'a> {
 
         let limit_sql = limit.map(|expr| {
             let l = self.gen_expr(expr);
-            format!("LIMIT {}", l)
+            format!("LIMIT {l}")
         });
 
         let offset_sql = offset.map(|expr| {
             let o = self.gen_expr(expr);
-            format!("OFFSET {}", o)
+            format!("OFFSET {o}")
         });
 
         // FROM
@@ -1134,10 +1016,10 @@ impl<'a> SqlGenContext<'a> {
             let union_sql = self.gen_select(&union.select);
             match union.union_type {
                 UnionType::Union => {
-                    sql.push_str(&format!(" UNION {}", union_sql));
+                    sql.push_str(&format!(" UNION {union_sql}"));
                 }
                 UnionType::UnionAll => {
-                    sql.push_str(&format!(" UNION ALL {}", union_sql));
+                    sql.push_str(&format!(" UNION ALL {union_sql}"));
                 }
             }
         }
@@ -1315,7 +1197,7 @@ impl<'a> SqlGenContext<'a> {
             let conflict_cols = on_conflict.columns.join(", ");
             match &on_conflict.action {
                 OnConflictAction::DoNothing => {
-                    sql.push_str(&format!(" ON CONFLICT ({}) DO NOTHING", conflict_cols));
+                    sql.push_str(&format!(" ON CONFLICT ({conflict_cols}) DO NOTHING"));
                 }
                 OnConflictAction::DoUpdate(sets) => {
                     let set_parts: Vec<String> = sets
@@ -1323,7 +1205,7 @@ impl<'a> SqlGenContext<'a> {
                         .map(|(col, expr)| {
                             let val = self.gen_expr(expr);
                             let val = self.maybe_enum_cast(col, val);
-                            format!("{} = {}", col, val)
+                            format!("{col} = {val}")
                         })
                         .collect();
                     sql.push_str(&format!(
@@ -1356,7 +1238,7 @@ impl<'a> SqlGenContext<'a> {
             .map(|(col, expr)| {
                 let val = self.gen_expr(expr);
                 let val = self.maybe_enum_cast(col, val);
-                format!("{} = {}", col, val)
+                format!("{col} = {val}")
             })
             .collect();
 
@@ -1368,7 +1250,7 @@ impl<'a> SqlGenContext<'a> {
 
         if let Some(where_clause) = &update.where_clause {
             let w = self.gen_expr(where_clause);
-            sql.push_str(&format!(" WHERE {}", w));
+            sql.push_str(&format!(" WHERE {w}"));
         }
 
         if let Some(returning) = &update.returning {
@@ -1386,7 +1268,7 @@ impl<'a> SqlGenContext<'a> {
 
         if let Some(where_clause) = &delete.where_clause {
             let w = self.gen_expr(where_clause);
-            sql.push_str(&format!(" WHERE {}", w));
+            sql.push_str(&format!(" WHERE {w}"));
         }
 
         if let Some(returning) = &delete.returning {
@@ -1535,7 +1417,7 @@ mod tests {
         for (op, expected) in ops {
             let expr = binary(num(1.0), op, num(2.0));
             let sql = ctx.gen_expr(&expr);
-            assert!(sql.contains(expected), "Expected '{}' in '{}'", expected, sql);
+            assert!(sql.contains(expected), "Expected '{expected}' in '{sql}'");
         }
     }
 
@@ -1558,7 +1440,7 @@ mod tests {
         let reg = RelationRegistry::empty();
         let mut ctx = SqlGenContext::new(&reg);
         assert_eq!(ctx.gen_expr(&num(42.0)), "42");
-        assert_eq!(ctx.gen_expr(&num(3.14)), "3.14");
+        assert_eq!(ctx.gen_expr(&num(3.15)), "3.15");
         assert_eq!(ctx.gen_expr(&str_lit("hello")), "'hello'");
         assert_eq!(ctx.gen_expr(&str_lit("it's")), "'it''s'");
         assert_eq!(ctx.gen_expr(&bool_lit(true)), "TRUE");
@@ -2913,11 +2795,10 @@ mod tests {
                 r#"
 query test($min: i32) {{
   from(reviews)
-  .where(reviews.rating {} $min)
+  .where(reviews.rating {op} $min)
   .select(reviews.rating)
 }}
-"#,
-                op
+"#
             );
             let stmt = parse_first_select(&input);
             let result = generate_select_sql(&stmt);

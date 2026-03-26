@@ -190,7 +190,7 @@ pub(super) fn resolve_select_fields(
             // MethodCall: derive name from the method or target
             Expression::Atomic(AtomicExpression::MethodCall(_mc)) => {
                 let name = extract_name_from_expr(&sel.expr)
-                    .unwrap_or_else(|| format!("col_{}", col_idx));
+                    .unwrap_or_else(|| format!("col_{col_idx}"));
                 fields.push(RowField {
                     name,
                     rust_type: "String".to_string(),
@@ -203,7 +203,7 @@ pub(super) fn resolve_select_fields(
             // Call expressions: check if it's an aggregate function call
             Expression::Atomic(AtomicExpression::Call(_call)) => {
                 let name = extract_name_from_expr(&sel.expr)
-                    .unwrap_or_else(|| format!("col_{}", col_idx));
+                    .unwrap_or_else(|| format!("col_{col_idx}"));
                 if let Some(func_type) = infer_aggregate_function_type(&sel.expr) {
                     let inner_expr = extract_aggregate_inner_expr(&sel.expr);
                     let typ = aggregate_return_type_with_schema(&func_type, inner_expr, Some(schema));
@@ -228,7 +228,7 @@ pub(super) fn resolve_select_fields(
             _ => {
                 // Unknown expression – fallback
                 let name = extract_name_from_expr(&sel.expr)
-                    .unwrap_or_else(|| format!("col_{}", col_idx));
+                    .unwrap_or_else(|| format!("col_{col_idx}"));
                 fields.push(RowField {
                     name,
                     rust_type: "String".to_string(),
@@ -426,7 +426,7 @@ pub(super) fn extract_name_from_atomic(atomic: &AtomicExpression) -> Option<Stri
                 AggregateFunctionType::Max => "max",
             };
             if let Some(inner_name) = extract_name_from_expr(&agg.expr) {
-                Some(format!("{}_{}", prefix, inner_name))
+                Some(format!("{prefix}_{inner_name}"))
             } else {
                 Some(prefix.to_string())
             }
@@ -457,7 +457,7 @@ pub(super) fn make_row_field(column: &str, table: &str, typ: &Type, registry: &V
         // Use the valtype wrapper. The getter is still the raw type getter.
         let getter = nextsql_type_to_row_getter(typ);
         let (rust_type, wrapper) = match typ {
-            Type::Optional(_) => (format!("Option<{}>", vt_name), Some(vt_name.clone())),
+            Type::Optional(_) => (format!("Option<{vt_name}>"), Some(vt_name.clone())),
             _ => (vt_name.clone(), Some(vt_name.clone())),
         };
         RowField {
@@ -477,7 +477,7 @@ pub(super) fn make_row_field(column: &str, table: &str, typ: &Type, registry: &V
             "get_string".to_string()
         };
         let rust_type = if is_optional {
-            format!("Option<{}>", rust_enum)
+            format!("Option<{rust_enum}>")
         } else {
             rust_enum
         };
@@ -571,7 +571,7 @@ pub(super) fn aggregate_field_info(agg: &AggregateFunction, idx: usize, schema: 
         AggregateFunctionType::Max => "max",
     };
     let typ = aggregate_return_type_with_schema(&agg.function_type, Some(&agg.expr), schema);
-    (format!("{}_{}", name, idx), typ)
+    (format!("{name}_{idx}"), typ)
 }
 
 /// Check if a query's SELECT clause is a simple `table.*` on a single table (no joins, no aggregates).
@@ -645,13 +645,13 @@ pub(super) fn column_to_rust_type(
     let typ = effective_type(&col.column_type, col.nullable);
     if let Some((vt_name, _)) = registry.lookup(table_name, &col.name) {
         match &typ {
-            Type::Optional(_) => format!("Option<{}>", vt_name),
+            Type::Optional(_) => format!("Option<{vt_name}>"),
             _ => vt_name.clone(),
         }
     } else if let Some(enum_name) = extract_enum_type_name(&typ, schema) {
         let rust_enum = enum_rust_type(&enum_name);
         match &typ {
-            Type::Optional(_) => format!("Option<{}>", rust_enum),
+            Type::Optional(_) => format!("Option<{rust_enum}>"),
             _ => rust_enum,
         }
     } else {

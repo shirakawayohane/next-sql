@@ -282,14 +282,14 @@ impl Display for Type {
             "{}",
             match self {
                 Type::BuiltIn(b) => b.to_string(),
-                Type::Optional(t) => format!("{}?", t),
+                Type::Optional(t) => format!("{t}?"),
                 Type::Utility(u) => {
                     match u {
                         UtilityType::Insertable(t) => format!("Insertable<{}>", t.0),
                         UtilityType::ChangeSet(t) => format!("ChangeSet<{}>", t.0),
                     }
                 }
-                Type::Array(inner) => format!("[{}]", inner),
+                Type::Array(inner) => format!("[{inner}]"),
                 Type::UserDefined(name) => name.to_string(),
             }
         )

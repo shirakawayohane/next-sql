@@ -191,49 +191,49 @@ async fn main() {
     match cli.command {
         Commands::Init { dir, no_skill } => {
             if let Err(e) = handle_init_command(dir, no_skill) {
-                eprintln!("Error: {}", e);
+                eprintln!("Error: {e}");
                 std::process::exit(1);
             }
         }
         Commands::Migration { action } => {
             if let Err(e) = handle_migration_command(action).await {
-                eprintln!("Error: {}", e);
+                eprintln!("Error: {e}");
                 std::process::exit(1);
             }
         }
         Commands::Parse { file } => {
             if let Err(e) = handle_parse_command(file) {
-                eprintln!("Error: {}", e);
+                eprintln!("Error: {e}");
                 std::process::exit(1);
             }
         }
         Commands::Gen { dir } => {
             if let Err(e) = handle_generate_command(dir).await {
-                eprintln!("Error: {}", e);
+                eprintln!("Error: {e}");
                 std::process::exit(1);
             }
         }
         Commands::Check { dir } => {
             if let Err(e) = handle_check_command(dir).await {
-                eprintln!("Error: {}", e);
+                eprintln!("Error: {e}");
                 std::process::exit(1);
             }
         }
         Commands::ValidateConfig { config } => {
             if let Err(e) = handle_validate_config_command(config) {
-                eprintln!("Error: {}", e);
+                eprintln!("Error: {e}");
                 std::process::exit(1);
             }
         }
         Commands::Watch { dir } => {
             if let Err(e) = handle_watch_command(dir).await {
-                eprintln!("Error: {}", e);
+                eprintln!("Error: {e}");
                 std::process::exit(1);
             }
         }
         Commands::Update => {
             if let Err(e) = handle_update_command().await {
-                eprintln!("Error: {}", e);
+                eprintln!("Error: {e}");
                 std::process::exit(1);
             }
         }
@@ -435,8 +435,8 @@ async fn handle_migration_command(
             } else {
                 println!("Migration Status:");
                 println!(
-                    "{:<30} {:<20} {:<10} {}",
-                    "Migration", "Executed At", "Success", "Error"
+                    "{:<30} {:<20} {:<10} Error",
+                    "Migration", "Executed At", "Success"
                 );
                 println!("{:-<80}", "");
 
@@ -490,7 +490,7 @@ async fn handle_generate_command(
 
     if !result.errors.is_empty() {
         for err in &result.errors {
-            eprintln!("Error: {}", err);
+            eprintln!("Error: {err}");
         }
         return Err(format!("{} error(s) during code generation", result.errors.len()).into());
     }
@@ -520,10 +520,10 @@ async fn handle_watch_command(dir: PathBuf) -> Result<(), Box<dyn std::error::Er
 
     eprintln!("[watch] Running initial generation...");
     if let Err(e) = handle_generate_command(dir.clone()).await {
-        eprintln!("[watch] {}", e);
+        eprintln!("[watch] {e}");
     }
 
-    eprintln!("[watch] Watching for changes in {}...", dir_display);
+    eprintln!("[watch] Watching for changes in {dir_display}...");
 
     let (tx, rx) = mpsc::channel();
     let mut debouncer = new_debouncer(Duration::from_millis(300), tx)?;
@@ -558,12 +558,12 @@ async fn handle_watch_command(dir: PathBuf) -> Result<(), Box<dyn std::error::Er
                 if has_relevant_change {
                     eprintln!("\n[watch] Change detected, regenerating...");
                     if let Err(e) = handle_generate_command(dir.clone()).await {
-                        eprintln!("[watch] {}", e);
+                        eprintln!("[watch] {e}");
                     }
                 }
             }
             Ok(Err(e)) => {
-                eprintln!("[watch] Watcher error: {}", e);
+                eprintln!("[watch] Watcher error: {e}");
             }
             Err(_) => {
                 eprintln!("[watch] Watcher disconnected");
@@ -606,9 +606,9 @@ async fn resolve_schema(
                         match connect_database(db_url).await {
                             Ok(client) => match resolve_schema_with_cache(&client, &cp).await {
                                 Ok(schema) => return Ok(schema),
-                                Err(e) => eprintln!("Warning: could not load schema from database: {}", e),
+                                Err(e) => eprintln!("Warning: could not load schema from database: {e}"),
                             },
-                            Err(e) => eprintln!("Warning: could not connect to database: {}", e),
+                            Err(e) => eprintln!("Warning: could not connect to database: {e}"),
                         }
                     }
                 }
@@ -624,11 +624,11 @@ async fn resolve_schema(
                         return Ok(schema);
                     }
                     Err(e) => {
-                        eprintln!("Warning: could not parse schema.json: {}", e);
+                        eprintln!("Warning: could not parse schema.json: {e}");
                     }
                 },
                 Err(e) => {
-                    eprintln!("Warning: could not read schema.json: {}", e);
+                    eprintln!("Warning: could not read schema.json: {e}");
                 }
             }
         }
@@ -708,7 +708,7 @@ async fn connect_database(db_url: &str) -> Result<tokio_postgres::Client, Box<dy
     // Spawn the connection task - it needs to run in the background
     tokio::spawn(async move {
         if let Err(e) = connection.await {
-            eprintln!("Database connection error: {}", e);
+            eprintln!("Database connection error: {e}");
         }
     });
     Ok(client)
@@ -766,7 +766,7 @@ async fn handle_check_command(
                 "{label_color}error[{label}]{reset}{bold}: {}{reset}",
                 diag.message
             );
-            eprintln!("  {cyan}-->{reset} {}", location);
+            eprintln!("  {cyan}-->{reset} {location}");
             eprintln!();
         }
 
@@ -785,7 +785,7 @@ async fn handle_update_command() -> Result<(), Box<dyn std::error::Error>> {
     const GITHUB_API: &str = "https://api.github.com/repos";
 
     let current_version = env!("CARGO_PKG_VERSION");
-    println!("Current version: v{}", current_version);
+    println!("Current version: v{current_version}");
     println!("Checking for updates...");
 
     let target_triple = get_target_triple()?;
@@ -795,11 +795,11 @@ async fn handle_update_command() -> Result<(), Box<dyn std::error::Error>> {
         .build()?;
 
     let release: serde_json::Value = client
-        .get(format!("{}/{}/releases/latest", GITHUB_API, REPO))
+        .get(format!("{GITHUB_API}/{REPO}/releases/latest"))
         .send()
         .await?
         .error_for_status()
-        .map_err(|e| format!("Failed to fetch latest release: {}", e))?
+        .map_err(|e| format!("Failed to fetch latest release: {e}"))?
         .json()
         .await?;
 
@@ -809,11 +809,11 @@ async fn handle_update_command() -> Result<(), Box<dyn std::error::Error>> {
 
     let latest_version = tag_name.trim_start_matches('v');
     if latest_version == current_version {
-        println!("Already up to date (v{}).", current_version);
+        println!("Already up to date (v{current_version}).");
         return Ok(());
     }
 
-    println!("New version available: {} (current: v{})", tag_name, current_version);
+    println!("New version available: {tag_name} (current: v{current_version})");
 
     let assets = release["assets"]
         .as_array()
@@ -829,7 +829,7 @@ async fn handle_update_command() -> Result<(), Box<dyn std::error::Error>> {
                 && name.contains(&target_triple)
                 && !name.ends_with(".sha256")
         })
-        .ok_or_else(|| format!("No release asset found for target: {}", target_triple))?;
+        .ok_or_else(|| format!("No release asset found for target: {target_triple}"))?;
 
     let asset_name = asset["name"].as_str().unwrap_or("unknown");
     let download_url = asset["browser_download_url"]
@@ -839,17 +839,17 @@ async fn handle_update_command() -> Result<(), Box<dyn std::error::Error>> {
     // Find the corresponding .sha256 checksum file
     let sha256_asset = assets.iter().find(|a| {
         let name = a["name"].as_str().unwrap_or("");
-        name == format!("{}.sha256", asset_name)
+        name == format!("{asset_name}.sha256")
     });
 
-    println!("Downloading {}...", asset_name);
+    println!("Downloading {asset_name}...");
 
     let response = client
         .get(download_url)
         .send()
         .await?
         .error_for_status()
-        .map_err(|e| format!("Failed to download: {}", e))?;
+        .map_err(|e| format!("Failed to download: {e}"))?;
 
     let bytes = response.bytes().await?;
 
@@ -864,7 +864,7 @@ async fn handle_update_command() -> Result<(), Box<dyn std::error::Error>> {
             .send()
             .await?
             .error_for_status()
-            .map_err(|e| format!("Failed to download .sha256 file: {}", e))?;
+            .map_err(|e| format!("Failed to download .sha256 file: {e}"))?;
 
         let sha256_content = sha256_response.text().await?;
 
@@ -882,9 +882,8 @@ async fn handle_update_command() -> Result<(), Box<dyn std::error::Error>> {
         if computed_hash != expected_hash {
             return Err(format!(
                 "SHA256 checksum mismatch!
-  Expected: {}
-  Computed: {}",
-                expected_hash, computed_hash
+  Expected: {expected_hash}
+  Computed: {computed_hash}"
             )
             .into());
         }
@@ -920,7 +919,7 @@ async fn handle_update_command() -> Result<(), Box<dyn std::error::Error>> {
             return Err("Failed to extract archive".into());
         }
     } else {
-        return Err(format!("Unsupported archive format: {}", asset_name).into());
+        return Err(format!("Unsupported archive format: {asset_name}").into());
     }
 
     // Find the nsql binary in extracted files
@@ -947,7 +946,7 @@ async fn handle_update_command() -> Result<(), Box<dyn std::error::Error>> {
             if let Err(e) = std::fs::copy(&new_binary, &current_exe) {
                 // Restore backup
                 let _ = std::fs::rename(&backup_path, &current_exe);
-                return Err(format!("Failed to install new binary: {}", e).into());
+                return Err(format!("Failed to install new binary: {e}").into());
             }
             #[cfg(unix)]
             {
@@ -960,13 +959,13 @@ async fn handle_update_command() -> Result<(), Box<dyn std::error::Error>> {
     // Remove backup
     let _ = std::fs::remove_file(&backup_path);
 
-    println!("Successfully updated to {}!", tag_name);
+    println!("Successfully updated to {tag_name}!");
 
     // Update skill files if .claude directory exists
     let cwd = std::env::current_dir()?;
     if let Some(claude_dir) = config::find_claude_dir(&cwd) {
         if let Err(e) = config::install_skill_files(&claude_dir) {
-            eprintln!("Warning: Failed to update skill files: {}", e);
+            eprintln!("Warning: Failed to update skill files: {e}");
         }
     }
 
@@ -982,7 +981,7 @@ fn get_target_triple() -> Result<String, Box<dyn std::error::Error>> {
         ("x86_64", "macos") => "x86_64-apple-darwin",
         ("x86_64", "linux") => "x86_64-unknown-linux-gnu",
         ("x86_64", "windows") => "x86_64-pc-windows-msvc",
-        _ => return Err(format!("Unsupported platform: {}-{}", arch, os).into()),
+        _ => return Err(format!("Unsupported platform: {arch}-{os}").into()),
     };
 
     Ok(triple.to_string())
@@ -992,12 +991,12 @@ fn find_binary_in_dir(dir: &Path, name: &str) -> Result<PathBuf, Box<dyn std::er
     for entry in walkdir(dir)? {
         let entry = entry?;
         if entry.file_name().to_string_lossy() == name
-            || entry.file_name().to_string_lossy() == format!("{}.exe", name)
+            || entry.file_name().to_string_lossy() == format!("{name}.exe")
         {
             return Ok(entry.path().to_path_buf());
         }
     }
-    Err(format!("Binary '{}' not found in extracted archive", name).into())
+    Err(format!("Binary '{name}' not found in extracted archive").into())
 }
 
 fn walkdir(
@@ -1058,7 +1057,7 @@ fn handle_parse_command(file: PathBuf) -> Result<(), Box<dyn std::error::Error>>
             }
         }
         Err(e) => {
-            eprintln!("Parse error: {}", e);
+            eprintln!("Parse error: {e}");
             return Err(e.into());
         }
     }

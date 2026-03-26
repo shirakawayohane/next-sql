@@ -74,10 +74,9 @@ impl<'a> CompletionProvider<'a> {
                     completions.push(CompletionItem {
                         label: field_name.to_string(),
                         kind: Some(CompletionItemKind::FIELD),
-                        detail: Some(format!("{}: {}", field_name, field_type)),
+                        detail: Some(format!("{field_name}: {field_type}")),
                         documentation: Some(Documentation::String(format!(
-                            "Field '{}' of input type '{}'",
-                            field_name, input_type_name
+                            "Field '{field_name}' of input type '{input_type_name}'"
                         ))),
                         insert_text: Some(field_name.to_string()),
                         ..Default::default()
@@ -157,15 +156,14 @@ impl<'a> CompletionProvider<'a> {
                 let var_name = &arg_cap[1];
                 let var_type = &arg_cap[2];
                 completions.push(CompletionItem {
-                    label: format!("${}", var_name),
+                    label: format!("${var_name}"),
                     kind: Some(CompletionItemKind::VARIABLE),
-                    detail: Some(format!("{}: {}", var_name, var_type)),
+                    detail: Some(format!("{var_name}: {var_type}")),
                     documentation: Some(Documentation::String(format!(
-                        "Parameter '{}' of type '{}'",
-                        var_name, var_type
+                        "Parameter '{var_name}' of type '{var_type}'"
                     ))),
                     // filter_text allows matching when user types "$na" -> matches "$name"
-                    filter_text: Some(format!("${}", var_name)),
+                    filter_text: Some(format!("${var_name}")),
                     insert_text: Some(var_name.to_string()),
                     ..Default::default()
                 });
@@ -178,7 +176,7 @@ impl<'a> CompletionProvider<'a> {
     pub async fn get_completions(&self, position: Position) -> Vec<CompletionItem> {
         let mut completions = Vec::new();
 
-        eprintln!("LSP: get_completions called at position: {:?}", position);
+        eprintln!("LSP: get_completions called at position: {position:?}");
 
         // カーソル位置の前の文字を取得
         let lines: Vec<&str> = self.text.lines().collect();
@@ -212,13 +210,13 @@ impl<'a> CompletionProvider<'a> {
         // カーソル位置までのテキスト（複数行のExpression判定用）
         let text_up_to_cursor = if position.line > 0 {
             let previous_lines: String = lines[..position.line as usize].join("\n");
-            format!("{}\n{}", previous_lines, before_cursor)
+            format!("{previous_lines}\n{before_cursor}")
         } else {
             before_cursor.to_string()
         };
 
-        eprintln!("LSP: Text before cursor: '{}'", before_cursor);
-        eprintln!("LSP: Text after cursor: '{}'", after_cursor);
+        eprintln!("LSP: Text before cursor: '{before_cursor}'");
+        eprintln!("LSP: Text after cursor: '{after_cursor}'");
 
         // "$" の後でのvariable名補完
         if Self::is_variable_completion_context(before_cursor) {
@@ -230,7 +228,7 @@ impl<'a> CompletionProvider<'a> {
         // "Insertable<" の後でのモデル名補完
         if is_after_insertable_angle_bracket(before_cursor) {
             eprintln!("LSP: Detected Insertable< context");
-            let has_closing_bracket = after_cursor.chars().next() == Some('>');
+            let has_closing_bracket = after_cursor.starts_with('>');
             completions.extend(self.get_model_completions_for_insertable(has_closing_bracket, position, current_line).await);
         }
         // "$variable: " の後での型補完

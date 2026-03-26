@@ -17,11 +17,11 @@ fn resolve_param_rust_type(typ: &Type, registry: &ValTypeRegistry, input_registr
         Type::UserDefined(name) if input_registry.get(name).is_some() => name.clone(),
         Type::Array(inner) => {
             let inner_type = resolve_param_rust_type(inner, registry, input_registry, schema);
-            format!("Vec<{}>", inner_type)
+            format!("Vec<{inner_type}>")
         }
         Type::Optional(inner) => {
             let inner_type = resolve_param_rust_type(inner, registry, input_registry, schema);
-            format!("Option<{}>", inner_type)
+            format!("Option<{inner_type}>")
         }
         other => nextsql_type_to_rust(other),
     }
@@ -95,13 +95,13 @@ pub(super) fn find_valtype_params(args: &[Argument], param_order: &[String], reg
 /// Emit a Row struct + its `from_row` impl.
 pub(super) fn emit_row_struct(out: &mut String, struct_name: &str, fields: &[RowField]) {
     out.push_str("#[derive(Debug, Clone)]\n");
-    out.push_str(&format!("pub struct {} {{\n", struct_name));
+    out.push_str(&format!("pub struct {struct_name} {{\n"));
     for f in fields {
         out.push_str(&format!("    pub {}: {},\n", to_snake_case(&f.name), f.rust_type));
     }
     out.push_str("}\n\n");
 
-    out.push_str(&format!("impl {} {{\n", struct_name));
+    out.push_str(&format!("impl {struct_name} {{\n"));
     out.push_str("    pub fn from_row(row: &dyn nextsql_backend_rust_runtime::Row) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {\n");
     out.push_str("        Ok(Self {\n");
     for (i, f) in fields.iter().enumerate() {
@@ -141,16 +141,14 @@ pub(super) fn emit_query_fn_no_params(
     sql: &str,
 ) {
     out.push_str(&format!(
-        "pub async fn {}(\n    client: &(impl nextsql_backend_rust_runtime::QueryExecutor + ?Sized),\n) -> Result<Vec<{}>, Box<dyn std::error::Error + Send + Sync>> {{\n",
-        fn_name, row_struct
+        "pub async fn {fn_name}(\n    client: &(impl nextsql_backend_rust_runtime::QueryExecutor + ?Sized),\n) -> Result<Vec<{row_struct}>, Box<dyn std::error::Error + Send + Sync>> {{\n"
     ));
     out.push_str(&format!(
         "    let rows = client.query(\n        \"{}\",\n        &[],\n    ).await?;\n",
         sql.replace('\"', "\\\"")
     ));
     out.push_str(&format!(
-        "    rows.iter().map(|row| {}::from_row(row)).collect()\n",
-        row_struct
+        "    rows.iter().map(|row| {row_struct}::from_row(row)).collect()\n"
     ));
     out.push_str("}\n\n");
 }
@@ -162,8 +160,7 @@ pub(super) fn emit_execute_fn_no_params(
     sql: &str,
 ) {
     out.push_str(&format!(
-        "pub async fn {}(\n    client: &(impl nextsql_backend_rust_runtime::QueryExecutor + ?Sized),\n) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {{\n",
-        fn_name
+        "pub async fn {fn_name}(\n    client: &(impl nextsql_backend_rust_runtime::QueryExecutor + ?Sized),\n) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {{\n"
     ));
     out.push_str(&format!(
         "    let count = client.execute(\n        \"{}\",\n        &[],\n    ).await?;\n",
@@ -228,9 +225,9 @@ fn gen_param_binding(
             .unwrap_or(false);
 
         if needs_valtype_unwrap {
-            format!("&{}.{}.0 as &dyn nextsql_backend_rust_runtime::ToSqlParam", var_snake, field_snake)
+            format!("&{var_snake}.{field_snake}.0 as &dyn nextsql_backend_rust_runtime::ToSqlParam")
         } else {
-            format!("&{}.{} as &dyn nextsql_backend_rust_runtime::ToSqlParam", var_snake, field_snake)
+            format!("&{var_snake}.{field_snake} as &dyn nextsql_backend_rust_runtime::ToSqlParam")
         }
     } else {
         let arg = args.iter().find(|a| a.name == param_key);
@@ -239,17 +236,17 @@ fn gen_param_binding(
         // Exception: ValType .0 access needs & because it dereferences into the inner value.
         match arg.map(|a| &a.typ) {
             Some(Type::UserDefined(name)) if registry.is_valtype(name) => {
-                format!("&{}.0 as &dyn nextsql_backend_rust_runtime::ToSqlParam", field)
+                format!("&{field}.0 as &dyn nextsql_backend_rust_runtime::ToSqlParam")
             }
             Some(Type::Array(inner)) if matches!(inner.as_ref(), Type::UserDefined(name) if registry.is_valtype(name)) => {
                 // Vec<ValType> needs conversion — handled via prelude
-                format!("&__{}_inner as &dyn nextsql_backend_rust_runtime::ToSqlParam", field)
+                format!("&__{field}_inner as &dyn nextsql_backend_rust_runtime::ToSqlParam")
             }
             Some(Type::Optional(inner)) if matches!(inner.as_ref(), Type::UserDefined(name) if registry.is_valtype(name)) => {
-                format!("&__{}_inner as &dyn nextsql_backend_rust_runtime::ToSqlParam", field)
+                format!("&__{field}_inner as &dyn nextsql_backend_rust_runtime::ToSqlParam")
             }
             _ => {
-                format!("{} as &dyn nextsql_backend_rust_runtime::ToSqlParam", field)
+                format!("{field} as &dyn nextsql_backend_rust_runtime::ToSqlParam")
             }
         }
     }
@@ -284,6 +281,7 @@ fn gen_individual_valtype_prelude(
 }
 
 /// Emit an async query function with individual parameters (no Params struct).
+#[allow(clippy::too_many_arguments)]
 pub(super) fn emit_query_fn_individual_params(
     out: &mut String,
     fn_name: &str,
@@ -297,13 +295,11 @@ pub(super) fn emit_query_fn_individual_params(
 ) {
     // Function signature
     out.push_str(&format!(
-        "pub async fn {}(\n    client: &(impl nextsql_backend_rust_runtime::QueryExecutor + ?Sized),\n",
-        fn_name,
+        "pub async fn {fn_name}(\n    client: &(impl nextsql_backend_rust_runtime::QueryExecutor + ?Sized),\n",
     ));
     emit_individual_fn_params(out, args, registry, input_registry, schema);
     out.push_str(&format!(
-        ") -> Result<Vec<{}>, Box<dyn std::error::Error + Send + Sync>> {{\n",
-        row_struct,
+        ") -> Result<Vec<{row_struct}>, Box<dyn std::error::Error + Send + Sync>> {{\n",
     ));
 
     // ValType conversion prelude
@@ -321,13 +317,13 @@ pub(super) fn emit_query_fn_individual_params(
         bindings.join(", "),
     ));
     out.push_str(&format!(
-        "    rows.iter().map(|row| {}::from_row(row)).collect()\n",
-        row_struct,
+        "    rows.iter().map(|row| {row_struct}::from_row(row)).collect()\n",
     ));
     out.push_str("}\n\n");
 }
 
 /// Emit an async execute function with individual parameters (no Params struct).
+#[allow(clippy::too_many_arguments)]
 pub(super) fn emit_execute_fn_individual_params(
     out: &mut String,
     fn_name: &str,
@@ -339,8 +335,7 @@ pub(super) fn emit_execute_fn_individual_params(
     schema: &DatabaseSchema,
 ) {
     out.push_str(&format!(
-        "pub async fn {}(\n    client: &(impl nextsql_backend_rust_runtime::QueryExecutor + ?Sized),\n",
-        fn_name,
+        "pub async fn {fn_name}(\n    client: &(impl nextsql_backend_rust_runtime::QueryExecutor + ?Sized),\n",
     ));
     emit_individual_fn_params(out, args, registry, input_registry, schema);
     out.push_str(") -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {\n");
@@ -363,6 +358,7 @@ pub(super) fn emit_execute_fn_individual_params(
 
 /// Emit an async query function with dynamic SQL building for when-clause queries,
 /// using individual parameters instead of a Params struct.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn emit_dynamic_query_fn_individual_params(
     out: &mut String,
     fn_name: &str,
@@ -375,13 +371,11 @@ pub(super) fn emit_dynamic_query_fn_individual_params(
 ) {
     // Function signature
     out.push_str(&format!(
-        "#[allow(unused_assignments)]\npub async fn {}(\n    client: &(impl nextsql_backend_rust_runtime::QueryExecutor + ?Sized),\n",
-        fn_name,
+        "#[allow(unused_assignments)]\npub async fn {fn_name}(\n    client: &(impl nextsql_backend_rust_runtime::QueryExecutor + ?Sized),\n",
     ));
     emit_individual_fn_params(out, args, registry, input_registry, schema);
     out.push_str(&format!(
-        ") -> Result<Vec<{}>, Box<dyn std::error::Error + Send + Sync>> {{\n",
-        row_struct,
+        ") -> Result<Vec<{row_struct}>, Box<dyn std::error::Error + Send + Sync>> {{\n",
     ));
 
     // Build a map of arg name -> Argument for type lookups
@@ -406,7 +400,7 @@ pub(super) fn emit_dynamic_query_fn_individual_params(
     let static_param_count = gen.params.len();
     for pname in &gen.params {
         let binding = gen_param_binding(pname, args, registry, input_registry);
-        out.push_str(&format!("    bind_params.push({});\n", binding));
+        out.push_str(&format!("    bind_params.push({binding});\n"));
     }
 
     out.push_str(&format!("    let mut idx = {}usize;\n\n", static_param_count + 1));
@@ -428,7 +422,7 @@ pub(super) fn emit_dynamic_query_fn_individual_params(
             };
 
             if is_optional {
-                out.push_str(&format!("    if {}.is_some() {{\n", condition_var));
+                out.push_str(&format!("    if {condition_var}.is_some() {{\n"));
             } else {
                 out.push_str("    {\n");
             }
@@ -445,7 +439,7 @@ pub(super) fn emit_dynamic_query_fn_individual_params(
                     wc.clause_sql,
                 ));
                 let binding = gen_param_binding(&wc.params_in_clause[0], args, registry, input_registry);
-                out.push_str(&format!("        bind_params.push({});\n", binding));
+                out.push_str(&format!("        bind_params.push({binding});\n"));
                 out.push_str("        idx += 1;\n");
             } else {
                 out.push_str(&format!(
@@ -456,15 +450,15 @@ pub(super) fn emit_dynamic_query_fn_individual_params(
                     if i == 0 {
                         out.push_str(", idx");
                     } else {
-                        out.push_str(&format!(", idx + {}", i));
+                        out.push_str(&format!(", idx + {i}"));
                     }
                 }
                 out.push_str("));\n");
                 for p in &wc.params_in_clause {
                     let binding = gen_param_binding(p, args, registry, input_registry);
-                    out.push_str(&format!("        bind_params.push({});\n", binding));
+                    out.push_str(&format!("        bind_params.push({binding});\n"));
                 }
-                out.push_str(&format!("        idx += {};\n", param_count));
+                out.push_str(&format!("        idx += {param_count};\n"));
             }
 
             out.push_str("    }\n");
@@ -561,7 +555,7 @@ pub(super) fn emit_dynamic_query_fn_individual_params(
                     true
                 };
                 if is_optional {
-                    out.push_str(&format!("        if {}.is_some() {{\n", cond_field));
+                    out.push_str(&format!("        if {cond_field}.is_some() {{\n"));
                 } else {
                     out.push_str("        {\n");
                 }
@@ -611,8 +605,7 @@ pub(super) fn emit_dynamic_query_fn_individual_params(
 
     out.push_str("    let rows = client.query(&sql, &bind_params).await?;\n");
     out.push_str(&format!(
-        "    rows.iter().map(|row| {}::from_row(row)).collect()\n",
-        row_struct
+        "    rows.iter().map(|row| {row_struct}::from_row(row)).collect()\n"
     ));
     out.push_str("}\n\n");
 }
@@ -627,12 +620,7 @@ fn emit_individual_fn_params(
 ) {
     for arg in args {
         let rust_type = resolve_param_rust_type(&arg.typ, registry, input_registry, schema);
-        // Check if this is an input type (pass by reference)
-        let is_input = matches!(&arg.typ, Type::UserDefined(name) if input_registry.get(name).is_some());
-        if is_input {
-            out.push_str(&format!("    {}: &{},\n", to_snake_case(&arg.name), rust_type));
-        } else {
-            out.push_str(&format!("    {}: &{},\n", to_snake_case(&arg.name), rust_type));
-        }
+        let name = to_snake_case(&arg.name);
+        out.push_str(&format!("    {name}: &{rust_type},\n"));
     }
 }

@@ -44,8 +44,7 @@ impl<'a> DiagnosticsProvider<'a> {
                 if let Some(schema_cache) = &self.schema_cache {
                     if let Some(file_uri) = &self.file_uri {
                         eprintln!(
-                            "DiagnosticsProvider: Schema cache available, file_uri: {}",
-                            file_uri
+                            "DiagnosticsProvider: Schema cache available, file_uri: {file_uri}"
                         );
                         // 型検証を有効化
                         diagnostics.extend(self.validate_types(&_module, schema_cache, file_uri).await);
@@ -53,9 +52,9 @@ impl<'a> DiagnosticsProvider<'a> {
                 }
             }
             Ok(Err(error)) => {
-                eprintln!("DiagnosticsProvider: Parse error: {:?}", error);
+                eprintln!("DiagnosticsProvider: Parse error: {error:?}");
                 // パースエラーを診断として追加
-                let diagnostic = self.create_diagnostic_from_parse_error(error);
+                let diagnostic = self.create_diagnostic_from_parse_error(*error);
                 diagnostics.push(diagnostic);
             }
             Err(panic_info) => {
@@ -64,9 +63,9 @@ impl<'a> DiagnosticsProvider<'a> {
                 } else if let Some(s) = panic_info.downcast_ref::<String>() {
                     s.clone()
                 } else {
-                    format!("{:?}", panic_info)
+                    format!("{panic_info:?}")
                 };
-                eprintln!("DiagnosticsProvider: Parser panicked: {}", msg);
+                eprintln!("DiagnosticsProvider: Parser panicked: {msg}");
 
                 // パニックエラーを診断として追加
                 diagnostics.push(Diagnostic {
@@ -84,7 +83,7 @@ impl<'a> DiagnosticsProvider<'a> {
                     code: None,
                     code_description: None,
                     source: Some("nextsql".to_string()),
-                    message: format!("Internal parser error: {}", msg),
+                    message: format!("Internal parser error: {msg}"),
                     related_information: None,
                     tags: None,
                     data: None,
@@ -117,7 +116,7 @@ impl<'a> DiagnosticsProvider<'a> {
                         "Expected one of: {}",
                         positives
                             .iter()
-                            .map(|r| format!("{:?}", r))
+                            .map(|r| format!("{r:?}"))
                             .collect::<Vec<_>>()
                             .join(", ")
                     )
@@ -126,7 +125,7 @@ impl<'a> DiagnosticsProvider<'a> {
                         "Unexpected: {}",
                         negatives
                             .iter()
-                            .map(|r| format!("{:?}", r))
+                            .map(|r| format!("{r:?}"))
                             .collect::<Vec<_>>()
                             .join(", ")
                     )

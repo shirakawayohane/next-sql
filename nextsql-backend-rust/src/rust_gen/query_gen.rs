@@ -60,11 +60,12 @@ pub(super) fn find_select_and_aggregate_clauses(
     (select, aggregate)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn generate_query(out: &mut String, query: &Query, schema: &DatabaseSchema, model_tables: &mut HashSet<String>, registry: &ValTypeRegistry, rel_registry: &sql_gen::RelationRegistry, errors: &mut Vec<String>, input_registry: &InputTypeRegistry) {
     let name = &query.decl.name;
     let fn_name = to_snake_case(name);
     let pascal = to_pascal_case(name);
-    let row_struct = format!("{}Row", pascal);
+    let row_struct = format!("{pascal}Row");
 
     // We only handle the first statement in the body for code generation.
     let stmt = match query.body.statements.first() {
@@ -177,11 +178,12 @@ pub(super) fn generate_query(out: &mut String, query: &Query, schema: &DatabaseS
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn generate_mutation(out: &mut String, mutation: &Mutation, schema: &DatabaseSchema, model_tables: &mut HashSet<String>, registry: &ValTypeRegistry, rel_registry: &sql_gen::RelationRegistry, naming: &NamingConfig, input_registry: &InputTypeRegistry, generated_utility_types: &mut HashSet<String>) {
     let name = &mutation.decl.name;
     let fn_name = to_snake_case(name);
     let pascal = to_pascal_case(name);
-    let row_struct = format!("{}Row", pascal);
+    let row_struct = format!("{pascal}Row");
     let param_style = determine_param_style(&mutation.decl.arguments);
 
     for item in &mutation.body.items {
@@ -380,6 +382,7 @@ pub(super) fn find_batch_insertable_param(args: &[Argument]) -> Option<(String, 
 }
 
 /// Generate the Insertable params struct, builder, and dynamic INSERT function.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn generate_insertable_mutation(
     out: &mut String,
     mutation: &Mutation,
@@ -396,7 +399,7 @@ pub(super) fn generate_insertable_mutation(
     let name = &mutation.decl.name;
     let fn_name = to_snake_case(name);
     let pascal = to_pascal_case(name);
-    let row_struct = format!("{}Row", pascal);
+    let row_struct = format!("{pascal}Row");
 
     let table = match schema.get_table(insertable_table_name) {
         Some(t) => t,
@@ -416,7 +419,7 @@ pub(super) fn generate_insertable_mutation(
     // ── Insertable struct (skip if already generated for this table) ──
     if generated_utility_types.insert(insertable_struct.clone()) {
         out.push_str("#[derive(Debug, Clone)]\n");
-        out.push_str(&format!("pub struct {} {{\n", insertable_struct));
+        out.push_str(&format!("pub struct {insertable_struct} {{\n"));
         for col in &insertable_columns {
             let base_type = column_to_rust_type(col, &table.name, registry, schema);
             // Fields with defaults or nullable get Option<T>
@@ -436,9 +439,9 @@ pub(super) fn generate_insertable_mutation(
         out.push_str("}\n\n");
 
         // ── Builder struct ──
-        let builder_struct = format!("{}Builder", insertable_struct);
+        let builder_struct = format!("{insertable_struct}Builder");
         out.push_str("#[derive(Debug, Clone)]\n");
-        out.push_str(&format!("pub struct {} {{\n", builder_struct));
+        out.push_str(&format!("pub struct {builder_struct} {{\n"));
         for col in &insertable_columns {
             let base_type = column_to_rust_type(col, &table.name, registry, schema);
             // All builder fields are Option
@@ -453,9 +456,9 @@ pub(super) fn generate_insertable_mutation(
         out.push_str("}\n\n");
 
         // ── builder() constructor ──
-        out.push_str(&format!("impl {} {{\n", insertable_struct));
-        out.push_str(&format!("    pub fn builder() -> {} {{\n", builder_struct));
-        out.push_str(&format!("        {} {{\n", builder_struct));
+        out.push_str(&format!("impl {insertable_struct} {{\n"));
+        out.push_str(&format!("    pub fn builder() -> {builder_struct} {{\n"));
+        out.push_str(&format!("        {builder_struct} {{\n"));
         for col in &insertable_columns {
             out.push_str(&format!("            {}: None,\n", to_snake_case(&col.name)));
         }
@@ -464,7 +467,7 @@ pub(super) fn generate_insertable_mutation(
         out.push_str("}\n\n");
 
         // ── Builder impl with setter methods ──
-        out.push_str(&format!("impl {} {{\n", builder_struct));
+        out.push_str(&format!("impl {builder_struct} {{\n"));
         for col in &insertable_columns {
             let col_snake = to_snake_case(&col.name);
             let base_type = column_to_rust_type(col, &table.name, registry, schema);
@@ -476,14 +479,13 @@ pub(super) fn generate_insertable_mutation(
                 base_type.clone()
             };
             out.push_str(&format!(
-                "    pub fn {}(mut self, value: {}) -> Self {{\n        self.{} = Some(value);\n        self\n    }}\n",
-                col_snake, inner_type, col_snake,
+                "    pub fn {col_snake}(mut self, value: {inner_type}) -> Self {{\n        self.{col_snake} = Some(value);\n        self\n    }}\n",
             ));
         }
 
         // ── build() method ──
-        out.push_str(&format!("    pub fn build(self) -> Result<{}, String> {{\n", insertable_struct));
-        out.push_str(&format!("        Ok({} {{\n", insertable_struct));
+        out.push_str(&format!("    pub fn build(self) -> Result<{insertable_struct}, String> {{\n"));
+        out.push_str(&format!("        Ok({insertable_struct} {{\n"));
         for col in &insertable_columns {
             let col_snake = to_snake_case(&col.name);
             let base_type = column_to_rust_type(col, &table.name, registry, schema);
@@ -491,16 +493,15 @@ pub(super) fn generate_insertable_mutation(
             if is_optional {
                 if base_type.starts_with("Option<") {
                     // nullable field: builder's None → None, Some(v) → Some(v)
-                    out.push_str(&format!("            {}: self.{},\n", col_snake, col_snake));
+                    out.push_str(&format!("            {col_snake}: self.{col_snake},\n"));
                 } else {
                     // has_default but not nullable: builder's Option becomes struct's Option
-                    out.push_str(&format!("            {}: self.{},\n", col_snake, col_snake));
+                    out.push_str(&format!("            {col_snake}: self.{col_snake},\n"));
                 }
             } else {
                 // Required field: must be set
                 out.push_str(&format!(
-                    "            {}: self.{}.ok_or_else(|| \"{} is required\".to_string())?,\n",
-                    col_snake, col_snake, col_snake,
+                    "            {col_snake}: self.{col_snake}.ok_or_else(|| \"{col_snake} is required\".to_string())?,\n",
                 ));
             }
         }
@@ -514,12 +515,12 @@ pub(super) fn generate_insertable_mutation(
     let other_args: Vec<&Argument> = mutation.decl.arguments.iter()
         .filter(|a| a.name != insertable_var_name)
         .collect();
-    let params_struct = format!("{}Params", pascal);
+    let params_struct = format!("{pascal}Params");
     let has_other_params = !other_args.is_empty();
 
     if has_other_params {
         out.push_str("#[derive(Debug, Clone)]\n");
-        out.push_str(&format!("pub struct {} {{\n", params_struct));
+        out.push_str(&format!("pub struct {params_struct} {{\n"));
         for arg in &mutation.decl.arguments {
             if arg.name == insertable_var_name {
                 out.push_str(&format!(
@@ -567,13 +568,11 @@ pub(super) fn generate_insertable_mutation(
     if has_returning {
         let row_type = effective_row.as_ref().unwrap();
         out.push_str(&format!(
-            "pub async fn {}(\n    client: &(impl nextsql_backend_rust_runtime::QueryExecutor + ?Sized),\n    params: &{},\n) -> Result<Vec<{}>, Box<dyn std::error::Error + Send + Sync>> {{\n",
-            fn_name, actual_params_struct, row_type,
+            "pub async fn {fn_name}(\n    client: &(impl nextsql_backend_rust_runtime::QueryExecutor + ?Sized),\n    params: &{actual_params_struct},\n) -> Result<Vec<{row_type}>, Box<dyn std::error::Error + Send + Sync>> {{\n",
         ));
     } else {
         out.push_str(&format!(
-            "pub async fn {}(\n    client: &(impl nextsql_backend_rust_runtime::QueryExecutor + ?Sized),\n    params: &{},\n) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {{\n",
-            fn_name, actual_params_struct,
+            "pub async fn {fn_name}(\n    client: &(impl nextsql_backend_rust_runtime::QueryExecutor + ?Sized),\n    params: &{actual_params_struct},\n) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {{\n",
         ));
     }
 
@@ -590,20 +589,18 @@ pub(super) fn generate_insertable_mutation(
         let cast_suffix = String::new();
         if is_optional {
             out.push_str(&format!(
-                "    if let Some(ref v) = {}.{} {{\n",
-                insertable_access, col_snake,
+                "    if let Some(ref v) = {insertable_access}.{col_snake} {{\n",
             ));
             out.push_str(&format!("        columns.push(\"{}\");\n", col.name));
             out.push_str("        bind_params.push(v);\n");
-            out.push_str(&format!("        cast_suffixes.push(\"{}\");\n", cast_suffix));
+            out.push_str(&format!("        cast_suffixes.push(\"{cast_suffix}\");\n"));
             out.push_str("    }\n");
         } else {
             out.push_str(&format!("    columns.push(\"{}\");\n", col.name));
             out.push_str(&format!(
-                "    bind_params.push(&{}.{});\n",
-                insertable_access, col_snake,
+                "    bind_params.push(&{insertable_access}.{col_snake});\n",
             ));
-            out.push_str(&format!("    cast_suffixes.push(\"{}\");\n", cast_suffix));
+            out.push_str(&format!("    cast_suffixes.push(\"{cast_suffix}\");\n"));
         }
     }
 
@@ -612,7 +609,7 @@ pub(super) fn generate_insertable_mutation(
 
     // Build the returning clause
     let returning_sql = if let Some(ref returning) = insert.returning {
-        let cols: Vec<String> = returning.iter().map(|c| format_column_sql(c)).collect();
+        let cols: Vec<String> = returning.iter().map(format_column_sql).collect();
         Some(cols.join(", "))
     } else {
         None
@@ -620,13 +617,11 @@ pub(super) fn generate_insertable_mutation(
 
     if let Some(ref ret_sql) = returning_sql {
         out.push_str(&format!(
-            "    let sql = format!(\"INSERT INTO {} ({{}}) VALUES ({{}}) RETURNING {}\", columns.join(\", \"), placeholders.join(\", \"));\n",
-            insertable_table_name, ret_sql,
+            "    let sql = format!(\"INSERT INTO {insertable_table_name} ({{}}) VALUES ({{}}) RETURNING {ret_sql}\", columns.join(\", \"), placeholders.join(\", \"));\n",
         ));
     } else {
         out.push_str(&format!(
-            "    let sql = format!(\"INSERT INTO {} ({{}}) VALUES ({{}})\", columns.join(\", \"), placeholders.join(\", \"));\n",
-            insertable_table_name,
+            "    let sql = format!(\"INSERT INTO {insertable_table_name} ({{}}) VALUES ({{}})\", columns.join(\", \"), placeholders.join(\", \"));\n",
         ));
     }
 
@@ -635,8 +630,7 @@ pub(super) fn generate_insertable_mutation(
         let row_type = effective_row.as_ref().unwrap();
         out.push_str("    let rows = client.query(&sql, &bind_params).await?;\n");
         out.push_str(&format!(
-            "    rows.iter().map(|row| {}::from_row(row)).collect()\n",
-            row_type,
+            "    rows.iter().map(|row| {row_type}::from_row(row)).collect()\n",
         ));
     } else {
         out.push_str("    let count = client.execute(&sql, &bind_params).await?;\n");
@@ -649,6 +643,7 @@ pub(super) fn generate_insertable_mutation(
 
 /// Generate the Insertable struct (shared with single-insert) and a batch INSERT function
 /// that takes `&[InsertableStruct]` and builds a multi-row VALUES clause dynamically.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn generate_batch_insertable_mutation(
     out: &mut String,
     mutation: &Mutation,
@@ -665,7 +660,7 @@ pub(super) fn generate_batch_insertable_mutation(
     let name = &mutation.decl.name;
     let fn_name = to_snake_case(name);
     let pascal = to_pascal_case(name);
-    let row_struct = format!("{}Row", pascal);
+    let row_struct = format!("{pascal}Row");
 
     let table = match schema.get_table(insertable_table_name) {
         Some(t) => t,
@@ -685,7 +680,7 @@ pub(super) fn generate_batch_insertable_mutation(
     // ── Insertable struct (same as single-insert, skip if already generated) ──
     if generated_utility_types.insert(insertable_struct.clone()) {
         out.push_str("#[derive(Debug, Clone)]\n");
-        out.push_str(&format!("pub struct {} {{\n", insertable_struct));
+        out.push_str(&format!("pub struct {insertable_struct} {{\n"));
         for col in &insertable_columns {
             let base_type = column_to_rust_type(col, &table.name, registry, schema);
             let is_optional = col.nullable || col.has_default;
@@ -722,13 +717,11 @@ pub(super) fn generate_batch_insertable_mutation(
     if has_returning {
         let row_type = effective_row.as_ref().unwrap();
         out.push_str(&format!(
-            "pub async fn {}(\n    client: &(impl nextsql_backend_rust_runtime::QueryExecutor + ?Sized),\n    params: &[{}],\n) -> Result<Vec<{}>, Box<dyn std::error::Error + Send + Sync>> {{\n",
-            fn_name, insertable_struct, row_type,
+            "pub async fn {fn_name}(\n    client: &(impl nextsql_backend_rust_runtime::QueryExecutor + ?Sized),\n    params: &[{insertable_struct}],\n) -> Result<Vec<{row_type}>, Box<dyn std::error::Error + Send + Sync>> {{\n",
         ));
     } else {
         out.push_str(&format!(
-            "pub async fn {}(\n    client: &(impl nextsql_backend_rust_runtime::QueryExecutor + ?Sized),\n    params: &[{}],\n) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {{\n",
-            fn_name, insertable_struct,
+            "pub async fn {fn_name}(\n    client: &(impl nextsql_backend_rust_runtime::QueryExecutor + ?Sized),\n    params: &[{insertable_struct}],\n) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {{\n",
         ));
     }
 
@@ -761,19 +754,14 @@ pub(super) fn generate_batch_insertable_mutation(
     // Push each column value
     for col in &insertable_columns {
         let col_snake = to_snake_case(&col.name);
-        let is_optional = col.nullable || col.has_default;
-        if is_optional {
-            out.push_str(&format!("        bind_params.push(&item.{});\n", col_snake));
-        } else {
-            out.push_str(&format!("        bind_params.push(&item.{});\n", col_snake));
-        }
+        out.push_str(&format!("        bind_params.push(&item.{col_snake});\n"));
     }
 
     out.push_str("    }\n");
 
     // Build returning clause
     let returning_sql = if let Some(ref returning) = insert.returning {
-        let cols: Vec<String> = returning.iter().map(|c| format_column_sql(c)).collect();
+        let cols: Vec<String> = returning.iter().map(format_column_sql).collect();
         Some(cols.join(", "))
     } else {
         None
@@ -782,13 +770,11 @@ pub(super) fn generate_batch_insertable_mutation(
     // Build SQL
     if let Some(ref ret_sql) = returning_sql {
         out.push_str(&format!(
-            "    let sql = format!(\"INSERT INTO {} ({{}}) VALUES {{}} RETURNING {}\", columns.join(\", \"), value_groups.join(\", \"));\n",
-            insertable_table_name, ret_sql,
+            "    let sql = format!(\"INSERT INTO {insertable_table_name} ({{}}) VALUES {{}} RETURNING {ret_sql}\", columns.join(\", \"), value_groups.join(\", \"));\n",
         ));
     } else {
         out.push_str(&format!(
-            "    let sql = format!(\"INSERT INTO {} ({{}}) VALUES {{}}\", columns.join(\", \"), value_groups.join(\", \"));\n",
-            insertable_table_name,
+            "    let sql = format!(\"INSERT INTO {insertable_table_name} ({{}}) VALUES {{}}\", columns.join(\", \"), value_groups.join(\", \"));\n",
         ));
     }
 
@@ -797,8 +783,7 @@ pub(super) fn generate_batch_insertable_mutation(
         let row_type = effective_row.as_ref().unwrap();
         out.push_str("    let rows = client.query(&sql, &bind_params).await?;\n");
         out.push_str(&format!(
-            "    rows.iter().map(|row| {}::from_row(row)).collect()\n",
-            row_type,
+            "    rows.iter().map(|row| {row_type}::from_row(row)).collect()\n",
         ));
     } else {
         out.push_str("    let count = client.execute(&sql, &bind_params).await?;\n");
@@ -840,6 +825,7 @@ pub(super) fn find_updatable_param(
 
 /// Generate the Changes struct, Default impl, Params struct, and dynamic UPDATE function
 /// for a ChangeSet mutation.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn generate_updatable_mutation(
     out: &mut String,
     mutation: &Mutation,
@@ -856,14 +842,14 @@ pub(super) fn generate_updatable_mutation(
     let name = &mutation.decl.name;
     let fn_name = to_snake_case(name);
     let pascal = to_pascal_case(name);
-    let row_struct = format!("{}Row", pascal);
+    let row_struct = format!("{pascal}Row");
 
     let table_pascal = table_name_to_model_name(updatable_table_name);
     let changes_struct = naming.update_struct_name(&table_pascal);
     let params_struct = {
-        let candidate = format!("{}Params", pascal);
+        let candidate = format!("{pascal}Params");
         if candidate == changes_struct {
-            format!("{}Input", pascal)
+            format!("{pascal}Input")
         } else {
             candidate
         }
@@ -884,7 +870,7 @@ pub(super) fn generate_updatable_mutation(
     // ── Changes struct (skip if already generated for this table) ──
     if generated_utility_types.insert(changes_struct.clone()) {
         out.push_str("#[derive(Debug, Clone)]\n");
-        out.push_str(&format!("pub struct {} {{\n", changes_struct));
+        out.push_str(&format!("pub struct {changes_struct} {{\n"));
         for col in &updatable_columns {
             let inner_type = column_to_rust_type(col, &table.name, registry, schema);
             out.push_str(&format!(
@@ -896,7 +882,7 @@ pub(super) fn generate_updatable_mutation(
         out.push_str("}\n\n");
 
         // ── Default impl ──
-        out.push_str(&format!("impl Default for {} {{\n", changes_struct));
+        out.push_str(&format!("impl Default for {changes_struct} {{\n"));
         out.push_str("    fn default() -> Self {\n");
         out.push_str("        Self {\n");
         for col in &updatable_columns {
@@ -913,7 +899,7 @@ pub(super) fn generate_updatable_mutation(
     // ── Params struct ──
     // Non-updatable args get normal types, the updatable arg gets the Changes struct type.
     out.push_str("#[derive(Debug, Clone)]\n");
-    out.push_str(&format!("pub struct {} {{\n", params_struct));
+    out.push_str(&format!("pub struct {params_struct} {{\n"));
     for arg in &mutation.decl.arguments {
         if arg.name == updatable_var_name {
             out.push_str(&format!(
@@ -955,13 +941,11 @@ pub(super) fn generate_updatable_mutation(
     if has_returning {
         let row_type = effective_row.as_ref().unwrap();
         out.push_str(&format!(
-            "pub async fn {}(\n    client: &(impl nextsql_backend_rust_runtime::QueryExecutor + ?Sized),\n    params: &{},\n) -> Result<Vec<{}>, Box<dyn std::error::Error + Send + Sync>> {{\n",
-            fn_name, params_struct, row_type,
+            "pub async fn {fn_name}(\n    client: &(impl nextsql_backend_rust_runtime::QueryExecutor + ?Sized),\n    params: &{params_struct},\n) -> Result<Vec<{row_type}>, Box<dyn std::error::Error + Send + Sync>> {{\n",
         ));
     } else {
         out.push_str(&format!(
-            "pub async fn {}(\n    client: &(impl nextsql_backend_rust_runtime::QueryExecutor + ?Sized),\n    params: &{},\n) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {{\n",
-            fn_name, params_struct,
+            "pub async fn {fn_name}(\n    client: &(impl nextsql_backend_rust_runtime::QueryExecutor + ?Sized),\n    params: &{params_struct},\n) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {{\n",
         ));
     }
 
@@ -981,8 +965,8 @@ pub(super) fn generate_updatable_mutation(
     // Bind non-updatable params first and track their indices
     for arg in &non_updatable_args {
         let snake_name = to_snake_case(&arg.name);
-        out.push_str(&format!("    bind_params.push(&params.{});\n", snake_name));
-        out.push_str(&format!("    let {}_idx = idx;\n", snake_name));
+        out.push_str(&format!("    bind_params.push(&params.{snake_name});\n"));
+        out.push_str(&format!("    let {snake_name}_idx = idx;\n"));
         out.push_str("    idx += 1;\n\n");
     }
 
@@ -993,16 +977,14 @@ pub(super) fn generate_updatable_mutation(
         // Determine if this column needs an enum type cast
         // No enum type cast for parameters — PG handles implicit text-to-enum conversion
         out.push_str(&format!(
-            "    if params.{}.{}.is_set() {{\n",
-            updatable_snake, col_snake,
+            "    if params.{updatable_snake}.{col_snake}.is_set() {{\n",
         ));
         out.push_str(&format!(
             "        set_parts.push(format!(\"{} = ${{}}\", idx));\n",
             col.name,
         ));
         out.push_str(&format!(
-            "        bind_params.push(&params.{}.{});\n",
-            updatable_snake, col_snake,
+            "        bind_params.push(&params.{updatable_snake}.{col_snake});\n",
         ));
         out.push_str("        idx += 1;\n");
         out.push_str("    }\n");
@@ -1024,7 +1006,7 @@ pub(super) fn generate_updatable_mutation(
     // Generate the WHERE clause using the same SQL gen logic to get the template
     let where_sql = if let Some(ref where_clause) = update.where_clause {
         let mut where_parts = String::new();
-        generate_where_sql_template(&mut where_parts, where_clause, &non_updatable_args);
+        generate_where_sql_template(&mut where_parts, where_clause);
         Some(where_parts)
     } else {
         None
@@ -1032,7 +1014,7 @@ pub(super) fn generate_updatable_mutation(
 
     // Build returning columns string
     let returning_sql = if let Some(ref returning) = update.returning {
-        let cols: Vec<String> = returning.iter().map(|c| format_column_sql(c)).collect();
+        let cols: Vec<String> = returning.iter().map(format_column_sql).collect();
         Some(cols.join(", "))
     } else {
         None
@@ -1045,11 +1027,11 @@ pub(super) fn generate_updatable_mutation(
     out.push_str(" SET {}");
 
     if let Some(ref where_sql) = where_sql {
-        out.push_str(&format!(" WHERE {}", where_sql));
+        out.push_str(&format!(" WHERE {where_sql}"));
     }
 
     if let Some(ref ret_sql) = returning_sql {
-        out.push_str(&format!(" RETURNING {}", ret_sql));
+        out.push_str(&format!(" RETURNING {ret_sql}"));
     }
 
     out.push_str("\",\n        set_parts.join(\", \"),\n");
@@ -1057,7 +1039,7 @@ pub(super) fn generate_updatable_mutation(
     // Add format args for WHERE clause placeholders
     for arg in &non_updatable_args {
         let snake_name = to_snake_case(&arg.name);
-        format_args.push(format!("        {}_idx", snake_name));
+        format_args.push(format!("        {snake_name}_idx"));
     }
     if !format_args.is_empty() {
         out.push_str(&format_args.join(",\n"));
@@ -1071,8 +1053,7 @@ pub(super) fn generate_updatable_mutation(
         let row_type = effective_row.as_ref().unwrap();
         out.push_str("    let rows = client.query(&sql, &bind_params).await?;\n");
         out.push_str(&format!(
-            "    rows.iter().map(|row| {}::from_row(row)).collect()\n",
-            row_type,
+            "    rows.iter().map(|row| {row_type}::from_row(row)).collect()\n",
         ));
     } else {
         out.push_str("    let count = client.execute(&sql, &bind_params).await?;\n");
@@ -1086,11 +1067,10 @@ pub(super) fn generate_updatable_mutation(
 pub(super) fn generate_where_sql_template(
     out: &mut String,
     expr: &Expression,
-    non_updatable_args: &[&Argument],
 ) {
     match expr {
         Expression::Binary { left, op, right } => {
-            generate_where_sql_template(out, left, non_updatable_args);
+            generate_where_sql_template(out, left);
             let op_str = match op {
                 BinaryOp::Equal => " = ",
                 BinaryOp::Unequal => " != ",
@@ -1107,13 +1087,13 @@ pub(super) fn generate_where_sql_template(
                 BinaryOp::Remainder => " % ",
             };
             out.push_str(op_str);
-            generate_where_sql_template(out, right, non_updatable_args);
+            generate_where_sql_template(out, right);
         }
         Expression::Unary { op, expr } => {
             match op {
                 UnaryOp::Not => out.push_str("NOT "),
             }
-            generate_where_sql_template(out, expr, non_updatable_args);
+            generate_where_sql_template(out, expr);
         }
         Expression::Atomic(atomic) => {
             match atomic {
@@ -1127,7 +1107,7 @@ pub(super) fn generate_where_sql_template(
                 AtomicExpression::Literal(lit) => {
                     match lit {
                         Literal::Numeric(n) => out.push_str(&n.to_string()),
-                        Literal::String(s) => out.push_str(&format!("'{}'", s)),
+                        Literal::String(s) => out.push_str(&format!("'{s}'")),
                         Literal::Boolean(b) => out.push_str(if *b { "TRUE" } else { "FALSE" }),
                         Literal::Null => out.push_str("NULL"),
                         _ => {}
@@ -1135,43 +1115,43 @@ pub(super) fn generate_where_sql_template(
                 }
                 AtomicExpression::MethodCall(mc) => {
                     let mut target_sql = String::new();
-                    generate_where_sql_template(&mut target_sql, &mc.target, non_updatable_args);
+                    generate_where_sql_template(&mut target_sql, &mc.target);
                     match mc.method.as_str() {
-                        "isNull" => out.push_str(&format!("{} IS NULL", target_sql)),
-                        "isNotNull" => out.push_str(&format!("{} IS NOT NULL", target_sql)),
+                        "isNull" => out.push_str(&format!("{target_sql} IS NULL")),
+                        "isNotNull" => out.push_str(&format!("{target_sql} IS NOT NULL")),
                         "like" => {
                             let mut arg_sql = String::new();
-                            generate_where_sql_template(&mut arg_sql, &mc.args[0], non_updatable_args);
-                            out.push_str(&format!("{} LIKE {}", target_sql, arg_sql));
+                            generate_where_sql_template(&mut arg_sql, &mc.args[0]);
+                            out.push_str(&format!("{target_sql} LIKE {arg_sql}"));
                         }
                         "ilike" => {
                             let mut arg_sql = String::new();
-                            generate_where_sql_template(&mut arg_sql, &mc.args[0], non_updatable_args);
-                            out.push_str(&format!("{} ILIKE {}", target_sql, arg_sql));
+                            generate_where_sql_template(&mut arg_sql, &mc.args[0]);
+                            out.push_str(&format!("{target_sql} ILIKE {arg_sql}"));
                         }
                         "between" => {
                             let mut lo = String::new();
                             let mut hi = String::new();
-                            generate_where_sql_template(&mut lo, &mc.args[0], non_updatable_args);
-                            generate_where_sql_template(&mut hi, &mc.args[1], non_updatable_args);
-                            out.push_str(&format!("{} BETWEEN {} AND {}", target_sql, lo, hi));
+                            generate_where_sql_template(&mut lo, &mc.args[0]);
+                            generate_where_sql_template(&mut hi, &mc.args[1]);
+                            out.push_str(&format!("{target_sql} BETWEEN {lo} AND {hi}"));
                         }
                         "eqAny" => {
                             let mut arg_sql = String::new();
-                            generate_where_sql_template(&mut arg_sql, &mc.args[0], non_updatable_args);
-                            out.push_str(&format!("{} = ANY({})", target_sql, arg_sql));
+                            generate_where_sql_template(&mut arg_sql, &mc.args[0]);
+                            out.push_str(&format!("{target_sql} = ANY({arg_sql})"));
                         }
                         "contains" => {
                             let mut arg_sql = String::new();
-                            generate_where_sql_template(&mut arg_sql, &mc.args[0], non_updatable_args);
-                            out.push_str(&format!("{} @> {}", target_sql, arg_sql));
+                            generate_where_sql_template(&mut arg_sql, &mc.args[0]);
+                            out.push_str(&format!("{target_sql} @> {arg_sql}"));
                         }
                         other => {
                             // Generic fallback: METHOD(target, args...)
                             let mut all_args = vec![target_sql];
                             for arg in &mc.args {
                                 let mut arg_sql = String::new();
-                                generate_where_sql_template(&mut arg_sql, arg, non_updatable_args);
+                                generate_where_sql_template(&mut arg_sql, arg);
                                 all_args.push(arg_sql);
                             }
                             out.push_str(&format!("{}({})", other, all_args.join(", ")));
@@ -1182,7 +1162,7 @@ pub(super) fn generate_where_sql_template(
                     let mut args = Vec::new();
                     for arg in &call.args {
                         let mut arg_sql = String::new();
-                        generate_where_sql_template(&mut arg_sql, arg, non_updatable_args);
+                        generate_where_sql_template(&mut arg_sql, arg);
                         args.push(arg_sql);
                     }
                     out.push_str(&format!("{}({})", call.callee, args.join(", ")));
@@ -1196,9 +1176,9 @@ pub(super) fn generate_where_sql_template(
 /// Format a Column AST node to SQL string.
 pub(super) fn format_column_sql(col: &Column) -> String {
     match col {
-        Column::ExplicitTarget(table, column, _) => format!("{}.{}", table, column),
+        Column::ExplicitTarget(table, column, _) => format!("{table}.{column}"),
         Column::ImplicitTarget(column, _) => column.clone(),
-        Column::WildcardOf(table, _) => format!("{}.*", table),
+        Column::WildcardOf(table, _) => format!("{table}.*"),
         Column::Wildcard(_) => "*".to_string(),
     }
 }

@@ -20,6 +20,12 @@ pub struct TypeSystem {
     pub types: HashMap<String, TypeDefinition>,
 }
 
+impl Default for TypeSystem {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TypeSystem {
     pub fn new() -> Self {
         Self {
@@ -35,11 +41,11 @@ impl TypeSystem {
 
             // Generate Insertable<T> type
             let insertable_type = self.create_insertable_type(table_name, table);
-            self.types.insert(format!("Insertable<{}>", table_name), insertable_type);
+            self.types.insert(format!("Insertable<{table_name}>"), insertable_type);
 
             // Generate ChangeSet<T> type
             let updatable_type = self.create_updatable_type(table_name, table);
-            self.types.insert(format!("ChangeSet<{}>", table_name), updatable_type);
+            self.types.insert(format!("ChangeSet<{table_name}>"), updatable_type);
         }
     }
 
@@ -76,7 +82,7 @@ impl TypeSystem {
             .collect();
 
         TypeDefinition {
-            name: format!("Insertable<{}>", table_name),
+            name: format!("Insertable<{table_name}>"),
             fields,
         }
     }
@@ -99,7 +105,7 @@ impl TypeSystem {
             .collect();
 
         TypeDefinition {
-            name: format!("ChangeSet<{}>", table_name),
+            name: format!("ChangeSet<{table_name}>"),
             fields,
         }
     }
@@ -111,10 +117,10 @@ impl TypeSystem {
     pub fn resolve_utility_type(&self, utility_type: &str, type_arg: &str) -> Option<TypeDefinition> {
         match utility_type {
             "Insertable" => {
-                self.types.get(&format!("Insertable<{}>", type_arg)).cloned()
+                self.types.get(&format!("Insertable<{type_arg}>")).cloned()
             }
             "ChangeSet" => {
-                self.types.get(&format!("ChangeSet<{}>", type_arg)).cloned()
+                self.types.get(&format!("ChangeSet<{type_arg}>")).cloned()
             }
             _ => None,
         }
@@ -125,7 +131,7 @@ impl TypeSystem {
             // Check utility types
             (Type::Utility(UtilityType::Insertable(insertable)), to) => {
                 if let Type::UserDefined(table_name) = &*insertable.0 {
-                    if let Some(insertable_def) = self.resolve_utility_type("Insertable", &table_name) {
+                    if let Some(insertable_def) = self.resolve_utility_type("Insertable", table_name) {
                         // Check if the Insertable type is assignable to the target
                         return self.check_object_assignability(&insertable_def, to);
                     }
@@ -134,7 +140,7 @@ impl TypeSystem {
             }
             (Type::Utility(UtilityType::ChangeSet(updatable)), to) => {
                 if let Type::UserDefined(table_name) = &*updatable.0 {
-                    if let Some(updatable_def) = self.resolve_utility_type("ChangeSet", &table_name) {
+                    if let Some(updatable_def) = self.resolve_utility_type("ChangeSet", table_name) {
                         return self.check_object_assignability(&updatable_def, to);
                     }
                 }
@@ -142,32 +148,30 @@ impl TypeSystem {
             }
             _ => {
                 // Use existing type compatibility logic
-                self.basic_type_compatibility(from_type, to_type)
+                basic_type_compatibility(from_type, to_type)
             }
         }
     }
 
     fn check_object_assignability(&self, from_def: &TypeDefinition, to_type: &Type) -> bool {
-        // This would be used to check if an object type (like Insertable<User>)
-        // is assignable to another type
         match to_type {
             Type::UserDefined(type_name) => {
-                // For now, just check if the names match the pattern
-                from_def.name == format!("Insertable<{}>", type_name)
+                from_def.name == format!("Insertable<{type_name}>")
+                    || from_def.name == format!("ChangeSet<{type_name}>")
             }
             _ => false,
         }
     }
+}
 
-    fn basic_type_compatibility(&self, from: &Type, to: &Type) -> bool {
-        match (from, to) {
-            (Type::BuiltIn(a), Type::BuiltIn(b)) => a == b,
-            (Type::UserDefined(a), Type::UserDefined(b)) => a == b,
-            (Type::Optional(a), Type::Optional(b)) => self.basic_type_compatibility(a, b),
-            (a, Type::Optional(b)) => self.basic_type_compatibility(a, b),
-            (Type::Array(a), Type::Array(b)) => self.basic_type_compatibility(a, b),
-            _ => false,
-        }
+fn basic_type_compatibility(from: &Type, to: &Type) -> bool {
+    match (from, to) {
+        (Type::BuiltIn(a), Type::BuiltIn(b)) => a == b,
+        (Type::UserDefined(a), Type::UserDefined(b)) => a == b,
+        (Type::Optional(a), Type::Optional(b)) => basic_type_compatibility(a, b),
+        (a, Type::Optional(b)) => basic_type_compatibility(a, b),
+        (Type::Array(a), Type::Array(b)) => basic_type_compatibility(a, b),
+        _ => false,
     }
 }
 

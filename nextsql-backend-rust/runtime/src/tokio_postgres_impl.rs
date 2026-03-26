@@ -273,11 +273,9 @@ impl QueryExecutor for PgClient {
 impl Client for PgClient {
     type Transaction<'a> = PgTransaction<'a>;
 
-    fn transaction(&mut self) -> impl std::future::Future<Output = Result<Self::Transaction<'_>, Self::Error>> + Send {
-        async move {
-            let tx = self.inner.transaction().await?;
-            Ok(PgTransaction { inner: tx })
-        }
+    async fn transaction(&mut self) -> Result<Self::Transaction<'_>, Self::Error> {
+        let tx = self.inner.transaction().await?;
+        Ok(PgTransaction { inner: tx })
     }
 }
 
@@ -335,18 +333,12 @@ impl QueryExecutor for PgTransaction<'_> {
 impl Transaction for PgTransaction<'_> {
     type Nested<'a> = PgTransaction<'a> where Self: 'a;
 
-    fn transaction(&mut self) -> impl std::future::Future<Output = Result<Self::Nested<'_>, Self::Error>> + Send {
-        async move {
-            let tx = self.inner.transaction().await?;
-            Ok(PgTransaction { inner: tx })
-        }
+    async fn transaction(&mut self) -> Result<Self::Nested<'_>, Self::Error> {
+        let tx = self.inner.transaction().await?;
+        Ok(PgTransaction { inner: tx })
     }
 
-    fn commit(self) -> impl std::future::Future<Output = Result<(), Self::Error>> + Send {
-        async move { self.inner.commit().await }
-    }
+    async fn commit(self) -> Result<(), Self::Error> { self.inner.commit().await }
 
-    fn rollback(self) -> impl std::future::Future<Output = Result<(), Self::Error>> + Send {
-        async move { self.inner.rollback().await }
-    }
+    async fn rollback(self) -> Result<(), Self::Error> { self.inner.rollback().await }
 }

@@ -172,7 +172,7 @@ mod tests {
         let result = NextSqlConfig::validate_config(&config);
         assert!(result.is_err());
         let error_msg = result.unwrap_err().to_string();
-        println!("Error message: {}", error_msg);
+        println!("Error message: {error_msg}");
         assert!(error_msg.contains("validation") || error_msg.contains("enum"));
     }
 
@@ -193,7 +193,7 @@ target_directory = "../generated"
 
         let result = NextSqlConfig::load_from_file(&file_path);
         if let Err(e) = &result {
-            println!("Error loading valid config: {}", e);
+            println!("Error loading valid config: {e}");
         }
         assert!(result.is_ok());
 

@@ -82,12 +82,10 @@ impl QueryExecutor for PooledPgClient {
 impl Client for PooledPgClient {
     type Transaction<'a> = PgTransaction<'a>;
 
-    fn transaction(
+    async fn transaction(
         &mut self,
-    ) -> impl std::future::Future<Output = Result<Self::Transaction<'_>, Self::Error>> + Send {
-        async move {
-            let tx = self.inner_mut().transaction().await?;
-            Ok(PgTransaction::new(tx))
-        }
+    ) -> Result<Self::Transaction<'_>, Self::Error> {
+        let tx = self.inner_mut().transaction().await?;
+        Ok(PgTransaction::new(tx))
     }
 }

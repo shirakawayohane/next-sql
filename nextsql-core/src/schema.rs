@@ -31,6 +31,12 @@ pub struct ColumnSchema {
     pub default_value: Option<String>,
 }
 
+impl Default for DatabaseSchema {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DatabaseSchema {
     pub fn new() -> Self {
         Self {
@@ -104,19 +110,19 @@ impl std::fmt::Display for SchemaError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             SchemaError::TableNotFound(table) => {
-                write!(f, "Table '{}' not found", table)
+                write!(f, "Table '{table}' not found")
             }
             SchemaError::ColumnNotFound { table, column } => {
-                write!(f, "Column '{}' not found in table '{}'", column, table)
+                write!(f, "Column '{column}' not found in table '{table}'")
             }
             SchemaError::TypeMismatch { expected, actual } => {
-                write!(f, "Type mismatch: expected {:?}, got {:?}", expected, actual)
+                write!(f, "Type mismatch: expected {expected:?}, got {actual:?}")
             }
             SchemaError::RequiredFieldMissing { table, field } => {
-                write!(f, "Required field '{}' is missing in table '{}'", field, table)
+                write!(f, "Required field '{field}' is missing in table '{table}'")
             }
             SchemaError::UnknownField { table, field } => {
-                write!(f, "Unknown field '{}' in table '{}'", field, table)
+                write!(f, "Unknown field '{field}' in table '{table}'")
             }
         }
     }

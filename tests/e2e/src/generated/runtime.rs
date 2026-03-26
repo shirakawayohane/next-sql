@@ -6,7 +6,9 @@ use std::future::Future;
 /// - `Unchanged`: field is not included in the SET clause
 /// - `Set(T)`: field is set to the given value (use `Set(None)` for nullable columns to set NULL)
 #[derive(Debug, Clone, PartialEq)]
+#[derive(Default)]
 pub enum UpdateField<T> {
+    #[default]
     Unchanged,
     Set(T),
 }
@@ -21,11 +23,6 @@ impl<T> UpdateField<T> {
     }
 }
 
-impl<T> Default for UpdateField<T> {
-    fn default() -> Self {
-        UpdateField::Unchanged
-    }
-}
 
 /// Trait for values that can be bound as SQL query parameters.
 pub trait ToSqlParam: Send + Sync {

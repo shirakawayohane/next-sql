@@ -233,18 +233,16 @@ impl<'a> TypeValidator<'a> {
                 }
                 Expression::Atomic(AtomicExpression::Variable(var)) => {
                     // Check if the variable's type is a known input type
-                    if let Some(var_type) = self.variables.get(&var.name) {
-                        if let Type::UserDefined(type_name) = var_type {
-                            if let Some(input_type) = self.input_types.get(type_name).cloned() {
-                                if !input_type.fields.iter().any(|f| f.name == property_access.property) {
-                                    self.errors.push(ValidationError {
-                                        message: format!(
-                                            "Field '{}' not found in input type '{}'",
-                                            property_access.property, type_name
-                                        ),
-                                        span: var.span.clone(),
-                                    });
-                                }
+                    if let Some(Type::UserDefined(type_name)) = self.variables.get(&var.name) {
+                        if let Some(input_type) = self.input_types.get(type_name).cloned() {
+                            if !input_type.fields.iter().any(|f| f.name == property_access.property) {
+                                self.errors.push(ValidationError {
+                                    message: format!(
+                                        "Field '{}' not found in input type '{}'",
+                                        property_access.property, type_name
+                                    ),
+                                    span: var.span.clone(),
+                                });
                             }
                         }
                     }
@@ -264,7 +262,7 @@ impl<'a> TypeValidator<'a> {
                 // This is table.something — check table exists
                 if !self.schema.tables.contains_key(table_name) && !self.valid_tables.contains(table_name) {
                     self.errors.push(ValidationError {
-                        message: format!("Table '{}' not found", table_name),
+                        message: format!("Table '{table_name}' not found"),
                         span: span.clone(),
                     });
                 }
@@ -295,13 +293,13 @@ impl<'a> TypeValidator<'a> {
                     // It's a valid column, or it could be a relation name
                     if !table.has_column(column_name) && !self.is_relation_for_table(column_name, table_name) {
                         self.errors.push(ValidationError {
-                            message: format!("Column '{}' not found in table '{}'", column_name, table_name),
+                            message: format!("Column '{column_name}' not found in table '{table_name}'"),
                             span: span.clone(),
                         });
                     }
                 } else {
                     self.errors.push(ValidationError {
-                        message: format!("Table '{}' not found", table_name),
+                        message: format!("Table '{table_name}' not found"),
                         span: span.clone(),
                     });
                 }
@@ -313,7 +311,7 @@ impl<'a> TypeValidator<'a> {
             Column::WildcardOf(table_name, span) => {
                 if !self.schema.tables.contains_key(table_name) {
                     self.errors.push(ValidationError {
-                        message: format!("Table '{}' not found", table_name),
+                        message: format!("Table '{table_name}' not found"),
                         span: span.clone(),
                     });
                 }
@@ -460,7 +458,7 @@ impl<'a> TypeValidator<'a> {
                 // 実テーブル名をチェック
                 if !self.valid_tables.contains(target) {
                     self.errors.push(ValidationError {
-                        message: format!("Table '{}' not found", target),
+                        message: format!("Table '{target}' not found"),
                         span: target_span.cloned(),
                     });
                 }
@@ -476,7 +474,7 @@ impl<'a> TypeValidator<'a> {
                     for (field_name, field_value) in &obj.fields {
                         if !table_columns.contains(field_name) {
                             self.errors.push(ValidationError {
-                                message: format!("Unknown field '{}' in table '{}'", field_name, target),
+                                message: format!("Unknown field '{field_name}' in table '{target}'"),
                                 span: Self::extract_span(field_value),
                             });
                         }
@@ -487,7 +485,7 @@ impl<'a> TypeValidator<'a> {
                     for column in table.get_required_columns() {
                         if !provided_fields.contains(&column.name) {
                             self.errors.push(ValidationError {
-                                message: format!("Required field '{}' is missing in table '{}'", column.name, target),
+                                message: format!("Required field '{}' is missing in table '{target}'", column.name),
                                 span: obj.span.clone().or_else(|| target_span.cloned()),
                             });
                         }
@@ -558,7 +556,7 @@ impl<'a> TypeValidator<'a> {
                 // 実テーブル名をチェック
                 if !self.valid_tables.contains(target_name) {
                     self.errors.push(ValidationError {
-                        message: format!("Table '{}' not found", target_name),
+                        message: format!("Table '{target_name}' not found"),
                         span: target_span.cloned(),
                     });
                 }
@@ -570,7 +568,7 @@ impl<'a> TypeValidator<'a> {
         if let Some(var_name) = set_variable {
             if !self.variables.contains_key(var_name) {
                 self.errors.push(ValidationError {
-                    message: format!("Undefined variable: ${}", var_name),
+                    message: format!("Undefined variable: ${var_name}"),
                     span: target_span.cloned(),
                 });
             } else if let Some(var_type) = self.variables.get(var_name) {
@@ -580,8 +578,7 @@ impl<'a> TypeValidator<'a> {
                             if table_name != target_name {
                                 self.errors.push(ValidationError {
                                     message: format!(
-                                        "Type mismatch: variable ${} is ChangeSet<{}>, but updating '{}'",
-                                        var_name, table_name, target_name
+                                        "Type mismatch: variable ${var_name} is ChangeSet<{table_name}>, but updating '{target_name}'"
                                     ),
                                     span: target_span.cloned(),
                                 });
@@ -591,8 +588,7 @@ impl<'a> TypeValidator<'a> {
                     _ => {
                         self.errors.push(ValidationError {
                             message: format!(
-                                "UPDATE .set() variable must be ChangeSet<T> typed, but ${} has type {:?}",
-                                var_name, var_type
+                                "UPDATE .set() variable must be ChangeSet<T> typed, but ${var_name} has type {var_type:?}"
                             ),
                             span: target_span.cloned(),
                         });
@@ -609,7 +605,7 @@ impl<'a> TypeValidator<'a> {
                 }
                 None => {
                     self.errors.push(ValidationError {
-                        message: format!("Unknown field '{}' in table '{}'", field_name, target_name),
+                        message: format!("Unknown field '{field_name}' in table '{target_name}'"),
                         span: target_span.cloned(),
                     });
                 }
@@ -698,8 +694,7 @@ impl<'a> TypeValidator<'a> {
                 if !self.types_compatible(&literal_type, expected_type) {
                     self.errors.push(ValidationError {
                         message: format!(
-                            "Type mismatch for field '{}': expected {:?}, got {:?}",
-                            field_name, expected_type, literal_type
+                            "Type mismatch for field '{field_name}': expected {expected_type:?}, got {literal_type:?}"
                         ),
                         span: None,
                     });

@@ -17,10 +17,9 @@ pub trait TableCompletionProvider {
                     completions.push(CompletionItem {
                         label: table_name.clone(),
                         kind: Some(CompletionItemKind::CLASS),
-                        detail: Some(format!("Table: {}", table_name)),
+                        detail: Some(format!("Table: {table_name}")),
                         documentation: Some(Documentation::String(format!(
-                            "Table {} from database schema",
-                            table_name
+                            "Table {table_name} from database schema"
                         ))),
                         insert_text: Some(table_name.clone()),
                         ..Default::default()

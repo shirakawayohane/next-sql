@@ -107,7 +107,7 @@ pub fn generate_rust_module(
 ) -> GeneratedRustFile {
     let result = generate_rust_file(module, schema);
     GeneratedRustFile {
-        filename: format!("{}.rs", module_name),
+        filename: format!("{module_name}.rs"),
         content: result.content,
         errors: result.errors,
     }
@@ -153,8 +153,8 @@ pub fn generate_valtype_file(modules: &[&Module], schema: &DatabaseSchema) -> Ge
     for (name, base_type) in sorted {
         let rust_base = nextsql_type_to_rust(&Type::BuiltIn(base_type.clone()));
         out.push_str("#[derive(Debug, Clone, PartialEq)]\n");
-        out.push_str(&format!("pub struct {}(pub {});\n\n", name, rust_base));
-        out.push_str(&format!("impl nextsql_backend_rust_runtime::ToSqlParam for {} {{\n", name));
+        out.push_str(&format!("pub struct {name}(pub {rust_base});\n\n"));
+        out.push_str(&format!("impl nextsql_backend_rust_runtime::ToSqlParam for {name} {{\n"));
         out.push_str("    fn as_any(&self) -> &(dyn std::any::Any + Send + Sync) {\n");
         out.push_str("        &self.0\n");
         out.push_str("    }\n");
@@ -324,14 +324,14 @@ fn generate_db_enums(out: &mut String, schema: &DatabaseSchema, used_enums: &Has
 
         // Enum definition
         out.push_str("#[derive(Debug, Clone, PartialEq)]\n");
-        out.push_str(&format!("pub enum {} {{\n", rust_name));
+        out.push_str(&format!("pub enum {rust_name} {{\n"));
         for variant in &enum_schema.variants {
             out.push_str(&format!("    {},\n", to_pascal_case_type(variant)));
         }
         out.push_str("}\n\n");
 
         // Display impl (for SQL parameter binding - converts to the PostgreSQL string value)
-        out.push_str(&format!("impl std::fmt::Display for {} {{\n", rust_name));
+        out.push_str(&format!("impl std::fmt::Display for {rust_name} {{\n"));
         out.push_str("    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {\n");
         out.push_str("        match self {\n");
         for variant in &enum_schema.variants {
@@ -347,7 +347,7 @@ fn generate_db_enums(out: &mut String, schema: &DatabaseSchema, used_enums: &Has
         out.push_str("}\n\n");
 
         // FromStr impl (for parsing from database strings)
-        out.push_str(&format!("impl std::str::FromStr for {} {{\n", rust_name));
+        out.push_str(&format!("impl std::str::FromStr for {rust_name} {{\n"));
         out.push_str("    type Err = String;\n");
         out.push_str("    fn from_str(s: &str) -> Result<Self, Self::Err> {\n");
         out.push_str("        match s {\n");
@@ -360,15 +360,14 @@ fn generate_db_enums(out: &mut String, schema: &DatabaseSchema, used_enums: &Has
             ));
         }
         out.push_str(&format!(
-            "            _ => Err(format!(\"Unknown {} variant: {{}}\", s)),\n",
-            rust_name
+            "            _ => Err(format!(\"Unknown {rust_name} variant: {{}}\", s)),\n"
         ));
         out.push_str("        }\n");
         out.push_str("    }\n");
         out.push_str("}\n\n");
 
         // ToSqlParam impl
-        out.push_str(&format!("impl nextsql_backend_rust_runtime::ToSqlParam for {} {{\n", rust_name));
+        out.push_str(&format!("impl nextsql_backend_rust_runtime::ToSqlParam for {rust_name} {{\n"));
         out.push_str("    fn as_any(&self) -> &(dyn std::any::Any + Send + Sync) {\n");
         out.push_str("        self\n");
         out.push_str("    }\n");
@@ -1084,13 +1083,13 @@ mod tests {
 
         let result = generate_rust_file(&module, &schema).content;
         // Verify valtype struct is generated
-        assert!(result.contains("pub struct UserId(pub uuid::Uuid)"), "missing valtype struct: {}", result);
+        assert!(result.contains("pub struct UserId(pub uuid::Uuid)"), "missing valtype struct: {result}");
         // Verify ToSqlParam impl
-        assert!(result.contains("impl nextsql_backend_rust_runtime::ToSqlParam for UserId"), "missing ToSqlParam impl: {}", result);
+        assert!(result.contains("impl nextsql_backend_rust_runtime::ToSqlParam for UserId"), "missing ToSqlParam impl: {result}");
         // Verify User model uses UserId for id field
-        assert!(result.contains("pub id: UserId"), "id should be UserId: {}", result);
+        assert!(result.contains("pub id: UserId"), "id should be UserId: {result}");
         // Verify from_row wraps with UserId
-        assert!(result.contains("UserId(row.get_uuid(0))"), "from_row should wrap with UserId: {}", result);
+        assert!(result.contains("UserId(row.get_uuid(0))"), "from_row should wrap with UserId: {result}");
     }
 
     #[test]
@@ -1150,7 +1149,7 @@ mod tests {
 
         let result = generate_rust_file(&module, &schema).content;
         // posts.author_id should be inferred as UserId from the relation
-        assert!(result.contains("pub author_id: UserId"), "author_id should be UserId: {}", result);
+        assert!(result.contains("pub author_id: UserId"), "author_id should be UserId: {result}");
     }
 
     #[test]
@@ -1187,7 +1186,7 @@ mod tests {
 
         let result = generate_rust_file(&module, &schema).content;
         // Params should use UserId
-        assert!(result.contains("pub id: UserId"), "params id should be UserId: {}", result);
+        assert!(result.contains("pub id: UserId"), "params id should be UserId: {result}");
     }
 
     #[test]
@@ -1230,15 +1229,15 @@ query countOrdersByStatus() {
         let content = &result.content;
 
         // COUNT should produce i64
-        assert!(content.contains("pub order_count: i64"), "COUNT should produce i64, got:\n{}", content);
+        assert!(content.contains("pub order_count: i64"), "COUNT should produce i64, got:\n{content}");
         // SUM over f64 column should produce f64
-        assert!(content.contains("pub total_amount: f64"), "SUM over f64 should produce f64, got:\n{}", content);
+        assert!(content.contains("pub total_amount: f64"), "SUM over f64 should produce f64, got:\n{content}");
         // AVG should produce f64
-        assert!(content.contains("pub avg_amount: f64"), "AVG should produce f64, got:\n{}", content);
+        assert!(content.contains("pub avg_amount: f64"), "AVG should produce f64, got:\n{content}");
         // MIN should produce f64
-        assert!(content.contains("pub min_amount: f64"), "MIN should produce f64, got:\n{}", content);
+        assert!(content.contains("pub min_amount: f64"), "MIN should produce f64, got:\n{content}");
         // MAX should produce f64
-        assert!(content.contains("pub max_amount: f64"), "MAX should produce f64, got:\n{}", content);
+        assert!(content.contains("pub max_amount: f64"), "MAX should produce f64, got:\n{content}");
         // status should remain String (from schema)
         assert!(content.contains("pub status: String"), "status should remain String");
     }
@@ -1287,23 +1286,23 @@ query countOrdersByStatus() {
         let content = &result.content;
 
         // Should have UpdateField in the Changes struct
-        assert!(content.contains("UpdateField<String>"), "city should be UpdateField<String>: {}", content);
-        assert!(content.contains("UpdateField<Option<String>>"), "notes should be UpdateField<Option<String>>: {}", content);
+        assert!(content.contains("UpdateField<String>"), "city should be UpdateField<String>: {content}");
+        assert!(content.contains("UpdateField<Option<String>>"), "notes should be UpdateField<Option<String>>: {content}");
         // Should have Default impl
-        assert!(content.contains("impl Default for"), "Should have Default impl: {}", content);
-        assert!(content.contains("Unchanged"), "Default should use Unchanged: {}", content);
+        assert!(content.contains("impl Default for"), "Should have Default impl: {content}");
+        assert!(content.contains("Unchanged"), "Default should use Unchanged: {content}");
         // Should have dynamic SQL building
-        assert!(content.contains("set_parts"), "Should build SET parts dynamically: {}", content);
-        assert!(content.contains("is_set()"), "Should check is_set(): {}", content);
+        assert!(content.contains("set_parts"), "Should build SET parts dynamically: {content}");
+        assert!(content.contains("is_set()"), "Should check is_set(): {content}");
         // Should have ChangeSet struct (named via NamingConfig: Update{Table}Params)
         assert!(content.contains("pub struct UpdateAddresse") || content.contains("pub struct UpdateAddress"),
-            "Should have ChangeSet struct: {}", content);
+            "Should have ChangeSet struct: {content}");
         // Should have Params struct with changes field
-        assert!(content.contains("pub changes: Update"), "Should have changes field in Params: {}", content);
+        assert!(content.contains("pub changes: Update"), "Should have changes field in Params: {content}");
         // Should have id param with valtype
-        assert!(content.contains("pub id: AddressId"), "Should have id with AddressId type: {}", content);
+        assert!(content.contains("pub id: AddressId"), "Should have id with AddressId type: {content}");
         // Should return Result<u64>
-        assert!(content.contains("Result<u64,"), "Should return u64 for non-returning: {}", content);
+        assert!(content.contains("Result<u64,"), "Should return u64 for non-returning: {content}");
     }
 
     #[test]
@@ -1342,11 +1341,11 @@ query countOrdersByStatus() {
 
         // Should have RETURNING with model struct
         assert!(content.contains("pub struct Addresse {") || content.contains("pub struct Address {"),
-            "Should have model struct for returning: {}", content);
+            "Should have model struct for returning: {content}");
         // Should return Vec, not u64
-        assert!(content.contains("Result<Vec<"), "Should return Vec for returning: {}", content);
+        assert!(content.contains("Result<Vec<"), "Should return Vec for returning: {content}");
         // Should use client.query
-        assert!(content.contains("client.query(&sql"), "Should use client.query for returning: {}", content);
+        assert!(content.contains("client.query(&sql"), "Should use client.query for returning: {content}");
     }
 
     #[test]
@@ -1415,13 +1414,11 @@ query countOrdersByStatus() {
         // Should have app_id as uuid::Uuid, NOT String
         assert!(
             content.contains("pub app_id: uuid::Uuid"),
-            "Aliased column should resolve to uuid::Uuid, not String. Got: {}",
-            content
+            "Aliased column should resolve to uuid::Uuid, not String. Got: {content}"
         );
         assert!(
             !content.contains("pub app_id: String"),
-            "Aliased column should NOT be String. Got: {}",
-            content
+            "Aliased column should NOT be String. Got: {content}"
         );
     }
 
@@ -1471,50 +1468,43 @@ query countOrdersByStatus() {
         // Should generate the insertable struct
         assert!(
             result.contains("pub struct InsertUserParams {"),
-            "Should generate InsertUserParams struct: {}",
-            result
+            "Should generate InsertUserParams struct: {result}"
         );
 
         // Function should take a slice parameter
         assert!(
             result.contains("params: &[InsertUserParams]"),
-            "Should take slice parameter: {}",
-            result
+            "Should take slice parameter: {result}"
         );
 
         // Should contain batch insert logic
         assert!(
             result.contains("value_groups"),
-            "Should build value_groups for batch insert: {}",
-            result
+            "Should build value_groups for batch insert: {result}"
         );
 
         // Should have empty check
         assert!(
             result.contains("if params.is_empty()"),
-            "Should check for empty params: {}",
-            result
+            "Should check for empty params: {result}"
         );
 
         // Should build dynamic SQL with VALUES
         assert!(
             result.contains("INSERT INTO users"),
-            "Should generate INSERT INTO users: {}",
-            result
+            "Should generate INSERT INTO users: {result}"
         );
 
         // Should contain RETURNING
         assert!(
             result.contains("RETURNING *"),
-            "Should contain RETURNING clause: {}",
-            result
+            "Should contain RETURNING clause: {result}"
         );
 
         // Should use User model since it's a wildcard return (singularized table name)
         assert!(
             result.contains("pub struct User {"),
-            "Should use User model for wildcard RETURNING: {}",
-            result
+            "Should use User model for wildcard RETURNING: {result}"
         );
     }
 
@@ -1563,15 +1553,13 @@ query countOrdersByStatus() {
         // Function should return u64
         assert!(
             result.contains("Result<u64, Box<dyn std::error::Error + Send + Sync>>"),
-            "Should return u64 without RETURNING: {}",
-            result
+            "Should return u64 without RETURNING: {result}"
         );
 
         // Should use execute, not query
         assert!(
             result.contains("client.execute("),
-            "Should use execute without RETURNING: {}",
-            result
+            "Should use execute without RETURNING: {result}"
         );
     }
 
@@ -1661,14 +1649,12 @@ query countOrdersByStatus() {
         // RoleType enum should be generated (used by accounts.role)
         assert!(
             result.contains("pub enum RoleType {"),
-            "RoleType enum should be generated: {}",
-            result
+            "RoleType enum should be generated: {result}"
         );
         // UnusedStatus enum should NOT be generated (only used by tasks table, not referenced)
         assert!(
             !result.contains("pub enum UnusedStatus {"),
-            "UnusedStatus enum should NOT be generated: {}",
-            result
+            "UnusedStatus enum should NOT be generated: {result}"
         );
     }
 }

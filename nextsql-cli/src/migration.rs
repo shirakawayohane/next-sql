@@ -35,7 +35,7 @@ impl MigrationManager {
         
         let now: DateTime<Local> = Local::now();
         let timestamp = now.format("%Y%m%d%H%M%S").to_string();
-        let migration_name = format!("{}_{}", timestamp, name);
+        let migration_name = format!("{timestamp}_{name}");
         let migration_dir = self.migrations_dir.join(&migration_name);
         
         if migration_dir.exists() {
@@ -51,14 +51,14 @@ impl MigrationManager {
             "-- Migration: {}\n-- Created at: {}\n{}\n\n-- Write your up migration here\n",
             name,
             now.format("%Y-%m-%d %H:%M:%S"),
-            description.map(|d| format!("-- Description: {}", d)).unwrap_or_default()
+            description.map(|d| format!("-- Description: {d}")).unwrap_or_default()
         );
         
         let down_sql_content = format!(
             "-- Migration: {}\n-- Created at: {}\n{}\n\n-- Write your down migration here\n",
             name,
             now.format("%Y-%m-%d %H:%M:%S"),
-            description.map(|d| format!("-- Description: {}", d)).unwrap_or_default()
+            description.map(|d| format!("-- Description: {d}")).unwrap_or_default()
         );
         
         fs::write(&up_sql_path, up_sql_content)?;
@@ -116,7 +116,7 @@ impl MigrationManager {
         let migration_path = self.get_migration_path(timestamp);
         
         if !migration_path.exists() {
-            return Err(format!("Migration not found: {}", timestamp).into());
+            return Err(format!("Migration not found: {timestamp}").into());
         }
 
         let sql_file = match direction {
@@ -129,8 +129,8 @@ impl MigrationManager {
         }
 
         let sql_content = fs::read_to_string(&sql_file)?;
-        println!("Running migration {} ({})", timestamp, direction);
-        println!("SQL content:\n{}", sql_content);
+        println!("Running migration {timestamp} ({direction})");
+        println!("SQL content:\n{sql_content}");
         
         Ok(())
     }
