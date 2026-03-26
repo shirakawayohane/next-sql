@@ -30,7 +30,7 @@ impl Default for DatabaseConfig {
             port: 5438,
             database: "nextsql".to_string(),
             username: "nextsql".to_string(),
-            password: "password".to_string(),
+            password: String::new(),
         }
     }
 }
@@ -332,7 +332,7 @@ mod tests {
         let config = DatabaseConfig::default();
         assert_eq!(
             config.connection_string(),
-            "postgres://nextsql:password@localhost:5438/nextsql"
+            "postgres://nextsql:@localhost:5438/nextsql"
         );
     }
 

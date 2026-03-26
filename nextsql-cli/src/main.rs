@@ -129,9 +129,9 @@ enum MigrationCommands {
         /// Database username
         #[arg(long, default_value = "nextsql")]
         username: String,
-        /// Database password
-        #[arg(long, default_value = "password")]
-        password: String,
+        /// Database password (can also be set via NEXTSQL_DB_PASSWORD env var)
+        #[arg(long, env = "NEXTSQL_DB_PASSWORD")]
+        password: Option<String>,
     },
     /// Run migration down against database
     DbDown {
@@ -152,9 +152,9 @@ enum MigrationCommands {
         /// Database username
         #[arg(long, default_value = "nextsql")]
         username: String,
-        /// Database password
-        #[arg(long, default_value = "password")]
-        password: String,
+        /// Database password (can also be set via NEXTSQL_DB_PASSWORD env var)
+        #[arg(long, env = "NEXTSQL_DB_PASSWORD")]
+        password: Option<String>,
     },
     /// Show database migration status
     DbStatus {
@@ -170,9 +170,9 @@ enum MigrationCommands {
         /// Database username
         #[arg(long, default_value = "nextsql")]
         username: String,
-        /// Database password
-        #[arg(long, default_value = "password")]
-        password: String,
+        /// Database password (can also be set via NEXTSQL_DB_PASSWORD env var)
+        #[arg(long, env = "NEXTSQL_DB_PASSWORD")]
+        password: Option<String>,
     },
 }
 
@@ -323,7 +323,7 @@ async fn handle_migration_command(
                 port,
                 database,
                 username,
-                password,
+                password: password.unwrap_or_default(),
             };
             let db_manager = DatabaseMigrationManager::new(&config).await?;
             let file_manager = MigrationManager::new(dir);
@@ -394,7 +394,7 @@ async fn handle_migration_command(
                 port,
                 database,
                 username,
-                password,
+                password: password.unwrap_or_default(),
             };
             let db_manager = DatabaseMigrationManager::new(&config).await?;
             let file_manager = MigrationManager::new(dir);
@@ -424,7 +424,7 @@ async fn handle_migration_command(
                 port,
                 database,
                 username,
-                password,
+                password: password.unwrap_or_default(),
             };
             let db_manager = DatabaseMigrationManager::new(&config).await?;
 
@@ -706,7 +706,11 @@ fn find_project_root(start: &Path) -> Option<PathBuf> {
 fn connect_database(db_url: &str) -> Result<postgres::Client, Box<dyn std::error::Error>> {
     let mut config = db_url.parse::<postgres::Config>()?;
     config.connect_timeout(std::time::Duration::from_secs(3));
-    let client = config.connect(postgres::NoTls)?;
+    let connector = native_tls::TlsConnector::builder()
+        .danger_accept_invalid_certs(false)
+        .build()?;
+    let tls = postgres_native_tls::MakeTlsConnector::new(connector);
+    let client = config.connect(tls)?;
     Ok(client)
 }
 

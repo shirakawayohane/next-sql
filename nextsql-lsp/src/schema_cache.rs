@@ -90,8 +90,14 @@ impl SchemaCache {
     async fn load_schema_from_database(&self, db_url: &str) -> Result<DatabaseSchema, Box<dyn std::error::Error + Send + Sync>> {
         let db_url = db_url.to_string();
         tokio::task::spawn_blocking(move || {
-            let config = db_url.parse::<postgres::Config>()?;
-            let mut client = config.connect(postgres::NoTls)?;
+            let mut config = db_url.parse::<postgres::Config>()?;
+            config.connect_timeout(std::time::Duration::from_secs(3));
+            let connector = native_tls::TlsConnector::builder()
+                .danger_accept_invalid_certs(false)
+                .build()
+                .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { Box::new(e) })?;
+            let tls = postgres_native_tls::MakeTlsConnector::new(connector);
+            let mut client = config.connect(tls)?;
             let schema = SchemaLoader::load_from_database(&mut client)?;
             Ok(schema)
         })
