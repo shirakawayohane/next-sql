@@ -144,7 +144,7 @@ mutation deleteInactiveUsers() {
 
 ### doUpdate
 
-Specify conflict columns and the update set:
+Specify conflict columns and the update set. Multiple conflict columns can be listed comma-separated:
 
 ```nsql
 mutation upsertUser($email: string, $name: string) {
@@ -157,6 +157,16 @@ mutation upsertUser($email: string, $name: string) {
     name: excluded(name),
   })
   .returning(users.*)
+}
+
+// Multiple conflict columns
+mutation upsertOrderItem($order_id: uuid, $product_id: uuid, $quantity: i32) {
+  insert(order_items)
+  .value({ order_id: $order_id, product_id: $product_id, quantity: $quantity })
+  .onConflict(order_id, product_id).doUpdate({
+    quantity: $quantity,
+  })
+  .returning(order_items.*)
 }
 ```
 

@@ -86,6 +86,42 @@ insert_params = "Insert{Table}Params"
 update_params = "Update{Table}Params"
 ```
 
+## Input Types
+
+`input` declares a named struct that groups multiple parameters. Use it to bundle related fields into a single argument rather than listing each field individually.
+
+```nsql
+input CreateUserInput {
+  name: string,
+  email: string,
+  role: string?
+}
+```
+
+Reference an input type as a parameter type, then access its fields with dot notation:
+
+```nsql
+mutation createUser($input: CreateUserInput) {
+  insert(users)
+  .value({
+    name: $input.name,
+    email: $input.email,
+    role: $input.role,
+  })
+  .returning(users.*)
+}
+```
+
+Input types can be mixed with other parameters in the same signature:
+
+```nsql
+query findByOwner($orgId: uuid, $filter: UserFilter) {
+  from(users)
+  .where(users.org_id == $orgId && users.status == $filter.status)
+  .select(users.*)
+}
+```
+
 ## Value Types (valtype)
 
 Define named type aliases for semantic clarity:

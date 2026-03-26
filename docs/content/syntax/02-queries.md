@@ -67,10 +67,13 @@ query findDistinctEmails() {
 
 ### orderBy
 
-Sorts results. Each column must specify `.asc()` or `.desc()`.
+Sorts results. Optionally specify direction with `.asc()` or `.desc()`; without a direction, the default is ascending.
 
 ```nsql
 .orderBy(users.name.asc(), users.created_at.desc())
+
+// Direction is optional — defaults to ascending
+.orderBy(users.name)
 ```
 
 ### limit / offset
