@@ -829,6 +829,12 @@ async fn handle_update_command() -> Result<(), Box<dyn std::error::Error>> {
         .as_str()
         .ok_or("Missing download URL")?;
 
+    // Find the corresponding .sha256 checksum file
+    let sha256_asset = assets.iter().find(|a| {
+        let name = a["name"].as_str().unwrap_or("");
+        name == format!("{}.sha256", asset_name)
+    });
+
     println!("Downloading {}...", asset_name);
 
     let response = client
@@ -839,6 +845,47 @@ async fn handle_update_command() -> Result<(), Box<dyn std::error::Error>> {
         .map_err(|e| format!("Failed to download: {}", e))?;
 
     let bytes = response.bytes().await?;
+
+    // Verify SHA256 checksum if .sha256 file is available
+    if let Some(sha256_asset) = sha256_asset {
+        let sha256_url = sha256_asset["browser_download_url"]
+            .as_str()
+            .ok_or("Missing download URL for .sha256 file")?;
+
+        let sha256_response = client
+            .get(sha256_url)
+            .send()
+            .await?
+            .error_for_status()
+            .map_err(|e| format!("Failed to download .sha256 file: {}", e))?;
+
+        let sha256_content = sha256_response.text().await?;
+
+        // cargo-dist format: "<hash>  <filename>"
+        let expected_hash = sha256_content
+            .split_whitespace()
+            .next()
+            .ok_or("Invalid .sha256 file format: empty content")?;
+
+        use sha2::Digest;
+        let mut hasher = sha2::Sha256::new();
+        hasher.update(&bytes);
+        let computed_hash = format!("{:x}", hasher.finalize());
+
+        if computed_hash != expected_hash {
+            return Err(format!(
+                "SHA256 checksum mismatch!
+  Expected: {}
+  Computed: {}",
+                expected_hash, computed_hash
+            )
+            .into());
+        }
+
+        println!("SHA256 checksum verified.");
+    } else {
+        println!("Warning: No .sha256 checksum file found for this release. Skipping verification.");
+    }
 
     let current_exe = std::env::current_exe()?;
     let tmp_dir = tempfile::tempdir()?;
