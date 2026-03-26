@@ -74,47 +74,43 @@ impl<'a> TypeValidator<'a> {
             }
         }
 
-        // First pass: collect all function signatures, variables, and relations
+        // First pass: collect relations (file-scoped)
         for toplevel in &module.toplevels {
-            match toplevel {
-                crate::ast::TopLevel::Query(query) => {
-                    for arg in &query.decl.arguments {
-                        self.variables.insert(arg.name.clone(), arg.typ.clone());
+            if let crate::ast::TopLevel::Relation(relation) = toplevel {
+                let is_optional = relation.decl.modifiers.iter()
+                    .any(|m| matches!(m, crate::ast::RelationModifier::Optional));
+
+                self.relations.insert(
+                    relation.decl.name.clone(),
+                    RelationInfo {
+                        for_table: relation.decl.for_table.clone(),
+                        returning_type: relation.decl.returning_type.clone(),
+                        join_condition: relation.join_condition.clone(),
+                        is_optional,
                     }
-                }
-                crate::ast::TopLevel::Mutation(mutation) => {
-                    for arg in &mutation.decl.arguments {
-                        self.variables.insert(arg.name.clone(), arg.typ.clone());
-                    }
-                }
-                crate::ast::TopLevel::Relation(relation) => {
-                    let is_optional = relation.decl.modifiers.iter()
-                        .any(|m| matches!(m, crate::ast::RelationModifier::Optional));
-                    
-                    self.relations.insert(
-                        relation.decl.name.clone(),
-                        RelationInfo {
-                            for_table: relation.decl.for_table.clone(),
-                            returning_type: relation.decl.returning_type.clone(),
-                            join_condition: relation.join_condition.clone(),
-                            is_optional,
-                        }
-                    );
-                }
-                _ => {}
+                );
             }
         }
 
-        // Second pass: validate function bodies
+        // Second pass: validate each query/mutation with its own variable scope
         for toplevel in &module.toplevels {
             match toplevel {
                 crate::ast::TopLevel::Query(query) => {
+                    self.variables.clear();
+                    for arg in &query.decl.arguments {
+                        self.variables.insert(arg.name.clone(), arg.typ.clone());
+                    }
                     self.validate_query_body(&query.body);
                 }
                 crate::ast::TopLevel::Mutation(mutation) => {
+                    self.variables.clear();
+                    for arg in &mutation.decl.arguments {
+                        self.variables.insert(arg.name.clone(), arg.typ.clone());
+                    }
                     self.validate_mutation_body(&mutation.body);
                 }
                 crate::ast::TopLevel::Relation(relation) => {
+                    self.variables.clear();
                     self.validate_relation(relation);
                 }
                 _ => {}
