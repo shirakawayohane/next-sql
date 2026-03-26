@@ -1,0 +1,7 @@
+[files]
+includes = ["*.nsql"]
+type_files = ["types.nsql"]
+
+[target]
+target_language = "rust"
+target_directory = "generated"
