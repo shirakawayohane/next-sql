@@ -88,21 +88,22 @@ impl SchemaCache {
     }
 
     async fn load_schema_from_database(&self, db_url: &str) -> Result<DatabaseSchema, Box<dyn std::error::Error + Send + Sync>> {
-        let db_url = db_url.to_string();
-        tokio::task::spawn_blocking(move || {
-            let mut config = db_url.parse::<postgres::Config>()?;
-            config.connect_timeout(std::time::Duration::from_secs(3));
-            let connector = native_tls::TlsConnector::builder()
-                .danger_accept_invalid_certs(false)
-                .build()
-                .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { Box::new(e) })?;
-            let tls = postgres_native_tls::MakeTlsConnector::new(connector);
-            let mut client = config.connect(tls)?;
-            let schema = SchemaLoader::load_from_database(&mut client)?;
-            Ok(schema)
-        })
-        .await
-        .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { Box::new(e) })?
+        let config = db_url.parse::<tokio_postgres::Config>()?;
+        let connector = native_tls::TlsConnector::builder()
+            .danger_accept_invalid_certs(false)
+            .build()
+            .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { Box::new(e) })?;
+        let tls = postgres_native_tls::MakeTlsConnector::new(connector);
+        let (client, connection) = config.connect(tls).await
+            .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { Box::new(e) })?;
+        tokio::spawn(async move {
+            if let Err(e) = connection.await {
+                eprintln!("Database connection error: {}", e);
+            }
+        });
+        let schema = SchemaLoader::load_from_database(&client).await
+            .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { Box::new(e) })?;
+        Ok(schema)
     }
 
     pub fn find_project_root(&self, file_path: &Path) -> Option<PathBuf> {

@@ -865,47 +865,46 @@ impl NextSqlLanguageServer {
             .log_message(MessageType::INFO, "Found next-sql.toml, loading database schema...")
             .await;
 
-        let cache = schema_cache.clone();
-        match tokio::task::spawn_blocking(move || {
+        let result: std::result::Result<nextsql_core::DatabaseSchema, String> = (|| async {
             // Read and parse config
-            let config_str = match std::fs::read_to_string(&config_path) {
-                Ok(s) => s,
-                Err(e) => return Err(format!("Failed to read next-sql.toml: {}", e)),
-            };
+            let config_str = std::fs::read_to_string(&config_path)
+                .map_err(|e| format!("Failed to read next-sql.toml: {}", e))?;
 
-            let config: nextsql_core::config::NextSqlConfig = match toml::from_str(&config_str) {
-                Ok(c) => c,
-                Err(e) => return Err(format!("Failed to parse next-sql.toml: {}", e)),
-            };
+            let config: nextsql_core::config::NextSqlConfig = toml::from_str(&config_str)
+                .map_err(|e| format!("Failed to parse next-sql.toml: {}", e))?;
 
-            let db_url = match config.database_url {
-                Some(url) => url,
-                None => return Err("No database_url in next-sql.toml".to_string()),
-            };
+            let db_url = config.database_url
+                .ok_or_else(|| "No database_url in next-sql.toml".to_string())?;
 
             // Connect to database and load schema
-            let config = match db_url.parse::<postgres::Config>() {
-                Ok(c) => c,
-                Err(e) => return Err(format!("Invalid database_url: {}", e)),
-            };
+            let pg_config = db_url.parse::<tokio_postgres::Config>()
+                .map_err(|e| format!("Invalid database_url: {}", e))?;
 
-            let mut pg_client = match config.connect(postgres::NoTls) {
-                Ok(c) => c,
-                Err(e) => return Err(format!("Failed to connect to database: {}", e)),
-            };
+            let connector = native_tls::TlsConnector::builder()
+                .danger_accept_invalid_certs(false)
+                .build()
+                .map_err(|e| format!("Failed to create TLS connector: {}", e))?;
+            let tls = postgres_native_tls::MakeTlsConnector::new(connector);
 
-            match nextsql_core::SchemaLoader::load_from_database(&mut pg_client) {
-                Ok(schema) => Ok(schema),
-                Err(e) => Err(format!("Failed to load schema from database: {}", e)),
-            }
-        })
-        .await
-        {
-            Ok(Ok(schema)) => {
+            let (pg_client, connection) = pg_config.connect(tls).await
+                .map_err(|e| format!("Failed to connect to database: {}", e))?;
+
+            tokio::spawn(async move {
+                if let Err(e) = connection.await {
+                    eprintln!("Database connection error: {}", e);
+                }
+            });
+
+            nextsql_core::SchemaLoader::load_from_database(&pg_client).await
+                .map_err(|e| format!("Failed to load schema from database: {}", e))
+        })().await;
+
+        match result {
+            Ok(schema) => {
                 let table_count = schema.tables.len();
-                cache.insert_schema(root.clone(), schema).await;
+                schema_cache.insert_schema(root.clone(), schema).await;
                 // プロジェクト内の全.nsqlファイルからValType定義をキャッシュに充填
-                cache.populate_valtype_cache(&root).await;
+                schema_cache.populate_valtype_cache(&root).await;
                 client
                     .log_message(
                         MessageType::INFO,
@@ -916,19 +915,11 @@ impl NextSqlLanguageServer {
                     )
                     .await;
             }
-            Ok(Err(msg)) => {
+            Err(msg) => {
                 client
                     .log_message(
                         MessageType::WARNING,
                         format!("Schema loading skipped: {}", msg),
-                    )
-                    .await;
-            }
-            Err(e) => {
-                client
-                    .log_message(
-                        MessageType::WARNING,
-                        format!("Schema loading task failed: {}", e),
                     )
                     .await;
             }

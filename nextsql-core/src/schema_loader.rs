@@ -1,12 +1,12 @@
 use crate::schema::{DatabaseSchema, TableSchema, ColumnSchema, EnumSchema};
 use crate::ast::{Type, BuiltInType};
-use postgres::{Client, Error};
+use tokio_postgres::{Client, Error};
 use std::collections::BTreeMap;
 
 pub struct SchemaLoader;
 
 impl SchemaLoader {
-    pub fn load_from_database(client: &mut Client) -> Result<DatabaseSchema, Error> {
+    pub async fn load_from_database(client: &Client) -> Result<DatabaseSchema, Error> {
         let mut schema = DatabaseSchema::new();
 
         // Use pg_catalog directly instead of information_schema views for performance.
@@ -45,7 +45,7 @@ impl SchemaLoader {
             ORDER BY cls.relname, att.attnum
         "#;
 
-        let rows = client.query(query, &[])?;
+        let rows = client.query(query, &[]).await?;
 
         let mut tables: BTreeMap<String, TableSchema> = BTreeMap::new();
 
@@ -88,7 +88,7 @@ impl SchemaLoader {
             ORDER BY t.typname, e.enumsortorder
         "#;
 
-        let enum_rows = client.query(enum_query, &[])?;
+        let enum_rows = client.query(enum_query, &[]).await?;
 
         let mut enums: BTreeMap<String, Vec<String>> = BTreeMap::new();
         for row in enum_rows {
@@ -130,7 +130,7 @@ impl SchemaLoader {
     /// Fetch a lightweight fingerprint of the public schema.
     /// Uses pg_catalog directly for minimal overhead.
     /// Returns a hash string that changes when any table/column DDL changes.
-    pub fn fetch_schema_fingerprint(client: &mut Client) -> Result<String, Error> {
+    pub async fn fetch_schema_fingerprint(client: &Client) -> Result<String, Error> {
         let query = r#"
             SELECT md5(
                 COALESCE((
@@ -160,7 +160,7 @@ impl SchemaLoader {
                 ), '')
             )
         "#;
-        let row = client.query_one(query, &[])?;
+        let row = client.query_one(query, &[]).await?;
         let hash: Option<String> = row.get(0);
         Ok(hash.unwrap_or_default())
     }

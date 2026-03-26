@@ -208,13 +208,13 @@ async fn main() {
             }
         }
         Commands::Gen { dir } => {
-            if let Err(e) = handle_generate_command(dir) {
+            if let Err(e) = handle_generate_command(dir).await {
                 eprintln!("Error: {}", e);
                 std::process::exit(1);
             }
         }
         Commands::Check { dir } => {
-            if let Err(e) = handle_check_command(dir) {
+            if let Err(e) = handle_check_command(dir).await {
                 eprintln!("Error: {}", e);
                 std::process::exit(1);
             }
@@ -226,7 +226,7 @@ async fn main() {
             }
         }
         Commands::Watch { dir } => {
-            if let Err(e) = handle_watch_command(dir) {
+            if let Err(e) = handle_watch_command(dir).await {
                 eprintln!("Error: {}", e);
                 std::process::exit(1);
             }
@@ -457,14 +457,14 @@ async fn handle_migration_command(
     Ok(())
 }
 
-fn handle_generate_command(
+async fn handle_generate_command(
     dir: PathBuf,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Load config from next-sql.toml (required)
     let nsql_config_path = dir.join("next-sql.toml");
     let nsql_config = config::NextSqlConfig::load_from_file(&nsql_config_path)?;
 
-    let db_schema = resolve_schema(&dir)?;
+    let db_schema = resolve_schema(&dir).await?;
 
     let target_directory = &nsql_config.target.target_directory;
     let output_dir = dir.join(target_directory).join("src");
@@ -502,7 +502,7 @@ fn handle_generate_command(
     Ok(())
 }
 
-fn handle_watch_command(dir: PathBuf) -> Result<(), Box<dyn std::error::Error>> {
+async fn handle_watch_command(dir: PathBuf) -> Result<(), Box<dyn std::error::Error>> {
     use notify_debouncer_mini::{new_debouncer, DebouncedEventKind};
     use std::sync::mpsc;
     use std::time::Duration;
@@ -519,7 +519,7 @@ fn handle_watch_command(dir: PathBuf) -> Result<(), Box<dyn std::error::Error>> 
         .to_string();
 
     eprintln!("[watch] Running initial generation...");
-    if let Err(e) = handle_generate_command(dir.clone()) {
+    if let Err(e) = handle_generate_command(dir.clone()).await {
         eprintln!("[watch] {}", e);
     }
 
@@ -557,7 +557,7 @@ fn handle_watch_command(dir: PathBuf) -> Result<(), Box<dyn std::error::Error>> 
 
                 if has_relevant_change {
                     eprintln!("\n[watch] Change detected, regenerating...");
-                    if let Err(e) = handle_generate_command(dir.clone()) {
+                    if let Err(e) = handle_generate_command(dir.clone()).await {
                         eprintln!("[watch] {}", e);
                     }
                 }
@@ -584,7 +584,7 @@ struct SchemaCache {
     schema: nextsql_core::schema::DatabaseSchema,
 }
 
-fn resolve_schema(
+async fn resolve_schema(
     source: &Path,
 ) -> Result<nextsql_core::schema::DatabaseSchema, Box<dyn std::error::Error>> {
     use nextsql_core::schema::DatabaseSchema;
@@ -603,16 +603,12 @@ fn resolve_schema(
                 if let Some(ref db_url) = config.database_url {
                     if !db_url.is_empty() {
                         let cp = cache_path.clone();
-                        match tokio::task::block_in_place(|| {
-                            let mut client = connect_database(db_url)?;
-                            resolve_schema_with_cache(&mut client, &cp)
-                        }) {
-                            Ok(schema) => {
-                                return Ok(schema);
-                            }
-                            Err(e) => {
-                                eprintln!("Warning: could not load schema from database: {}", e);
-                            }
+                        match connect_database(db_url).await {
+                            Ok(client) => match resolve_schema_with_cache(&client, &cp).await {
+                                Ok(schema) => return Ok(schema),
+                                Err(e) => eprintln!("Warning: could not load schema from database: {}", e),
+                            },
+                            Err(e) => eprintln!("Warning: could not connect to database: {}", e),
                         }
                     }
                 }
@@ -650,14 +646,13 @@ fn resolve_schema(
 }
 
 /// Compare DB fingerprint against cache. If unchanged, use cache; otherwise full-load and update.
-/// Must be called within tokio::task::block_in_place because postgres crate uses block_on internally.
-fn resolve_schema_with_cache(
-    client: &mut postgres::Client,
+async fn resolve_schema_with_cache(
+    client: &tokio_postgres::Client,
     cache_path: &Option<PathBuf>,
 ) -> Result<nextsql_core::schema::DatabaseSchema, Box<dyn std::error::Error>> {
     use nextsql_core::SchemaLoader;
 
-    let fingerprint = SchemaLoader::fetch_schema_fingerprint(client)?;
+    let fingerprint = SchemaLoader::fetch_schema_fingerprint(client).await?;
 
     // Check if cache matches
     if let Some(ref cp) = cache_path {
@@ -669,7 +664,7 @@ fn resolve_schema_with_cache(
     }
 
     // Cache miss or fingerprint mismatch — full load
-    let schema = SchemaLoader::load_from_database(client)?;
+    let schema = SchemaLoader::load_from_database(client).await?;
 
     // Save cache
     if let Some(ref cp) = cache_path {
@@ -703,23 +698,28 @@ fn find_project_root(start: &Path) -> Option<PathBuf> {
 }
 
 /// Connect to the database and return the client.
-fn connect_database(db_url: &str) -> Result<postgres::Client, Box<dyn std::error::Error>> {
-    let mut config = db_url.parse::<postgres::Config>()?;
-    config.connect_timeout(std::time::Duration::from_secs(3));
+async fn connect_database(db_url: &str) -> Result<tokio_postgres::Client, Box<dyn std::error::Error>> {
+    let config = db_url.parse::<tokio_postgres::Config>()?;
     let connector = native_tls::TlsConnector::builder()
         .danger_accept_invalid_certs(false)
         .build()?;
     let tls = postgres_native_tls::MakeTlsConnector::new(connector);
-    let client = config.connect(tls)?;
+    let (client, connection) = config.connect(tls).await?;
+    // Spawn the connection task - it needs to run in the background
+    tokio::spawn(async move {
+        if let Err(e) = connection.await {
+            eprintln!("Database connection error: {}", e);
+        }
+    });
     Ok(client)
 }
 
-fn handle_check_command(
+async fn handle_check_command(
     dir: PathBuf,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use nextsql_codegen::{CheckConfig, DiagnosticSource};
 
-    let db_schema = resolve_schema(&dir)?;
+    let db_schema = resolve_schema(&dir).await?;
 
     let nsql_config_path = dir.join("next-sql.toml");
     let nsql_config = config::NextSqlConfig::load_from_file(&nsql_config_path)?;
