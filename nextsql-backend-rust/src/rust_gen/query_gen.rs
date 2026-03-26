@@ -177,7 +177,7 @@ pub(super) fn generate_query(out: &mut String, query: &Query, schema: &DatabaseS
     }
 }
 
-pub(super) fn generate_mutation(out: &mut String, mutation: &Mutation, schema: &DatabaseSchema, model_tables: &mut HashSet<String>, registry: &ValTypeRegistry, rel_registry: &sql_gen::RelationRegistry, naming: &NamingConfig, input_registry: &InputTypeRegistry) {
+pub(super) fn generate_mutation(out: &mut String, mutation: &Mutation, schema: &DatabaseSchema, model_tables: &mut HashSet<String>, registry: &ValTypeRegistry, rel_registry: &sql_gen::RelationRegistry, naming: &NamingConfig, input_registry: &InputTypeRegistry, generated_utility_types: &mut HashSet<String>) {
     let name = &mutation.decl.name;
     let fn_name = to_snake_case(name);
     let pascal = to_pascal_case(name);
@@ -194,7 +194,7 @@ pub(super) fn generate_mutation(out: &mut String, mutation: &Mutation, schema: &
                         if let Some((var_name, table_name)) = batch_info {
                             generate_batch_insertable_mutation(
                                 out, mutation, insert, &var_name, &table_name,
-                                schema, model_tables, registry, rel_registry, naming,
+                                schema, model_tables, registry, rel_registry, naming, generated_utility_types,
                             );
                             continue;
                         }
@@ -204,7 +204,7 @@ pub(super) fn generate_mutation(out: &mut String, mutation: &Mutation, schema: &
                         if let Some((var_name, table_name)) = insertable_info {
                             generate_insertable_mutation(
                                 out, mutation, insert, &var_name, &table_name,
-                                schema, model_tables, registry, rel_registry, naming,
+                                schema, model_tables, registry, rel_registry, naming, generated_utility_types,
                             );
                             continue;
                         }
@@ -262,6 +262,7 @@ pub(super) fn generate_mutation(out: &mut String, mutation: &Mutation, schema: &
                                 registry,
                                 rel_registry,
                                 naming,
+                                generated_utility_types,
                             );
                         } else {
                             let gen = sql_gen::generate_update_sql_with_schema(update, rel_registry, Some(schema));
@@ -390,6 +391,7 @@ pub(super) fn generate_insertable_mutation(
     registry: &ValTypeRegistry,
     _rel_registry: &sql_gen::RelationRegistry,
     naming: &NamingConfig,
+    generated_utility_types: &mut HashSet<String>,
 ) {
     let name = &mutation.decl.name;
     let fn_name = to_snake_case(name);
@@ -411,99 +413,101 @@ pub(super) fn generate_insertable_mutation(
         .filter(|c| !(c.primary_key && c.has_default))
         .collect();
 
-    // ── Insertable struct ──
-    out.push_str("#[derive(Debug, Clone)]\n");
-    out.push_str(&format!("pub struct {} {{\n", insertable_struct));
-    for col in &insertable_columns {
-        let base_type = column_to_rust_type(col, &table.name, registry, schema);
-        // Fields with defaults or nullable get Option<T>
-        let is_optional = col.nullable || col.has_default;
-        if is_optional {
-            // If column_to_rust_type already wrapped in Option (nullable), use as-is
-            // Otherwise wrap in Option
-            if base_type.starts_with("Option<") {
+    // ── Insertable struct (skip if already generated for this table) ──
+    if generated_utility_types.insert(insertable_struct.clone()) {
+        out.push_str("#[derive(Debug, Clone)]\n");
+        out.push_str(&format!("pub struct {} {{\n", insertable_struct));
+        for col in &insertable_columns {
+            let base_type = column_to_rust_type(col, &table.name, registry, schema);
+            // Fields with defaults or nullable get Option<T>
+            let is_optional = col.nullable || col.has_default;
+            if is_optional {
+                // If column_to_rust_type already wrapped in Option (nullable), use as-is
+                // Otherwise wrap in Option
+                if base_type.starts_with("Option<") {
+                    out.push_str(&format!("    pub {}: {},\n", to_snake_case(&col.name), base_type));
+                } else {
+                    out.push_str(&format!("    pub {}: Option<{}>,\n", to_snake_case(&col.name), base_type));
+                }
+            } else {
                 out.push_str(&format!("    pub {}: {},\n", to_snake_case(&col.name), base_type));
-            } else {
-                out.push_str(&format!("    pub {}: Option<{}>,\n", to_snake_case(&col.name), base_type));
             }
-        } else {
-            out.push_str(&format!("    pub {}: {},\n", to_snake_case(&col.name), base_type));
         }
-    }
-    out.push_str("}\n\n");
+        out.push_str("}\n\n");
 
-    // ── Builder struct ──
-    let builder_struct = format!("{}Builder", insertable_struct);
-    out.push_str("#[derive(Debug, Clone)]\n");
-    out.push_str(&format!("pub struct {} {{\n", builder_struct));
-    for col in &insertable_columns {
-        let base_type = column_to_rust_type(col, &table.name, registry, schema);
-        // All builder fields are Option
-        if base_type.starts_with("Option<") {
-            // For nullable fields, the builder stores Option<Option<T>>
-            // but we simplify: builder stores the same type as struct
-            out.push_str(&format!("    {}: {},\n", to_snake_case(&col.name), base_type));
-        } else {
-            out.push_str(&format!("    {}: Option<{}>,\n", to_snake_case(&col.name), base_type));
-        }
-    }
-    out.push_str("}\n\n");
-
-    // ── builder() constructor ──
-    out.push_str(&format!("impl {} {{\n", insertable_struct));
-    out.push_str(&format!("    pub fn builder() -> {} {{\n", builder_struct));
-    out.push_str(&format!("        {} {{\n", builder_struct));
-    for col in &insertable_columns {
-        out.push_str(&format!("            {}: None,\n", to_snake_case(&col.name)));
-    }
-    out.push_str("        }\n");
-    out.push_str("    }\n");
-    out.push_str("}\n\n");
-
-    // ── Builder impl with setter methods ──
-    out.push_str(&format!("impl {} {{\n", builder_struct));
-    for col in &insertable_columns {
-        let col_snake = to_snake_case(&col.name);
-        let base_type = column_to_rust_type(col, &table.name, registry, schema);
-        // Setter takes the inner value (not Option)
-        let inner_type = if base_type.starts_with("Option<") {
-            // For nullable fields, setter takes the inner type
-            base_type[7..base_type.len()-1].to_string()
-        } else {
-            base_type.clone()
-        };
-        out.push_str(&format!(
-            "    pub fn {}(mut self, value: {}) -> Self {{\n        self.{} = Some(value);\n        self\n    }}\n",
-            col_snake, inner_type, col_snake,
-        ));
-    }
-
-    // ── build() method ──
-    out.push_str(&format!("    pub fn build(self) -> Result<{}, String> {{\n", insertable_struct));
-    out.push_str(&format!("        Ok({} {{\n", insertable_struct));
-    for col in &insertable_columns {
-        let col_snake = to_snake_case(&col.name);
-        let base_type = column_to_rust_type(col, &table.name, registry, schema);
-        let is_optional = col.nullable || col.has_default;
-        if is_optional {
+        // ── Builder struct ──
+        let builder_struct = format!("{}Builder", insertable_struct);
+        out.push_str("#[derive(Debug, Clone)]\n");
+        out.push_str(&format!("pub struct {} {{\n", builder_struct));
+        for col in &insertable_columns {
+            let base_type = column_to_rust_type(col, &table.name, registry, schema);
+            // All builder fields are Option
             if base_type.starts_with("Option<") {
-                // nullable field: builder's None → None, Some(v) → Some(v)
-                out.push_str(&format!("            {}: self.{},\n", col_snake, col_snake));
+                // For nullable fields, the builder stores Option<Option<T>>
+                // but we simplify: builder stores the same type as struct
+                out.push_str(&format!("    {}: {},\n", to_snake_case(&col.name), base_type));
             } else {
-                // has_default but not nullable: builder's Option becomes struct's Option
-                out.push_str(&format!("            {}: self.{},\n", col_snake, col_snake));
+                out.push_str(&format!("    {}: Option<{}>,\n", to_snake_case(&col.name), base_type));
             }
-        } else {
-            // Required field: must be set
+        }
+        out.push_str("}\n\n");
+
+        // ── builder() constructor ──
+        out.push_str(&format!("impl {} {{\n", insertable_struct));
+        out.push_str(&format!("    pub fn builder() -> {} {{\n", builder_struct));
+        out.push_str(&format!("        {} {{\n", builder_struct));
+        for col in &insertable_columns {
+            out.push_str(&format!("            {}: None,\n", to_snake_case(&col.name)));
+        }
+        out.push_str("        }\n");
+        out.push_str("    }\n");
+        out.push_str("}\n\n");
+
+        // ── Builder impl with setter methods ──
+        out.push_str(&format!("impl {} {{\n", builder_struct));
+        for col in &insertable_columns {
+            let col_snake = to_snake_case(&col.name);
+            let base_type = column_to_rust_type(col, &table.name, registry, schema);
+            // Setter takes the inner value (not Option)
+            let inner_type = if base_type.starts_with("Option<") {
+                // For nullable fields, setter takes the inner type
+                base_type[7..base_type.len()-1].to_string()
+            } else {
+                base_type.clone()
+            };
             out.push_str(&format!(
-                "            {}: self.{}.ok_or_else(|| \"{} is required\".to_string())?,\n",
-                col_snake, col_snake, col_snake,
+                "    pub fn {}(mut self, value: {}) -> Self {{\n        self.{} = Some(value);\n        self\n    }}\n",
+                col_snake, inner_type, col_snake,
             ));
         }
+
+        // ── build() method ──
+        out.push_str(&format!("    pub fn build(self) -> Result<{}, String> {{\n", insertable_struct));
+        out.push_str(&format!("        Ok({} {{\n", insertable_struct));
+        for col in &insertable_columns {
+            let col_snake = to_snake_case(&col.name);
+            let base_type = column_to_rust_type(col, &table.name, registry, schema);
+            let is_optional = col.nullable || col.has_default;
+            if is_optional {
+                if base_type.starts_with("Option<") {
+                    // nullable field: builder's None → None, Some(v) → Some(v)
+                    out.push_str(&format!("            {}: self.{},\n", col_snake, col_snake));
+                } else {
+                    // has_default but not nullable: builder's Option becomes struct's Option
+                    out.push_str(&format!("            {}: self.{},\n", col_snake, col_snake));
+                }
+            } else {
+                // Required field: must be set
+                out.push_str(&format!(
+                    "            {}: self.{}.ok_or_else(|| \"{} is required\".to_string())?,\n",
+                    col_snake, col_snake, col_snake,
+                ));
+            }
+        }
+        out.push_str("        })\n");
+        out.push_str("    }\n");
+        out.push_str("}\n\n");
     }
-    out.push_str("        })\n");
-    out.push_str("    }\n");
-    out.push_str("}\n\n");
 
     // ── Params struct ──
     // If there are other params besides the insertable, create a wrapper
@@ -656,6 +660,7 @@ pub(super) fn generate_batch_insertable_mutation(
     registry: &ValTypeRegistry,
     _rel_registry: &sql_gen::RelationRegistry,
     naming: &NamingConfig,
+    generated_utility_types: &mut HashSet<String>,
 ) {
     let name = &mutation.decl.name;
     let fn_name = to_snake_case(name);
@@ -677,23 +682,25 @@ pub(super) fn generate_batch_insertable_mutation(
         .filter(|c| !(c.primary_key && c.has_default))
         .collect();
 
-    // ── Insertable struct (same as single-insert) ──
-    out.push_str("#[derive(Debug, Clone)]\n");
-    out.push_str(&format!("pub struct {} {{\n", insertable_struct));
-    for col in &insertable_columns {
-        let base_type = column_to_rust_type(col, &table.name, registry, schema);
-        let is_optional = col.nullable || col.has_default;
-        if is_optional {
-            if base_type.starts_with("Option<") {
-                out.push_str(&format!("    pub {}: {},\n", to_snake_case(&col.name), base_type));
+    // ── Insertable struct (same as single-insert, skip if already generated) ──
+    if generated_utility_types.insert(insertable_struct.clone()) {
+        out.push_str("#[derive(Debug, Clone)]\n");
+        out.push_str(&format!("pub struct {} {{\n", insertable_struct));
+        for col in &insertable_columns {
+            let base_type = column_to_rust_type(col, &table.name, registry, schema);
+            let is_optional = col.nullable || col.has_default;
+            if is_optional {
+                if base_type.starts_with("Option<") {
+                    out.push_str(&format!("    pub {}: {},\n", to_snake_case(&col.name), base_type));
+                } else {
+                    out.push_str(&format!("    pub {}: Option<{}>,\n", to_snake_case(&col.name), base_type));
+                }
             } else {
-                out.push_str(&format!("    pub {}: Option<{}>,\n", to_snake_case(&col.name), base_type));
+                out.push_str(&format!("    pub {}: {},\n", to_snake_case(&col.name), base_type));
             }
-        } else {
-            out.push_str(&format!("    pub {}: {},\n", to_snake_case(&col.name), base_type));
         }
+        out.push_str("}\n\n");
     }
-    out.push_str("}\n\n");
 
     // ── Determine return type ──
     let has_returning = insert.returning.is_some();
@@ -844,6 +851,7 @@ pub(super) fn generate_updatable_mutation(
     registry: &ValTypeRegistry,
     _rel_registry: &sql_gen::RelationRegistry,
     naming: &NamingConfig,
+    generated_utility_types: &mut HashSet<String>,
 ) {
     let name = &mutation.decl.name;
     let fn_name = to_snake_case(name);
@@ -873,32 +881,34 @@ pub(super) fn generate_updatable_mutation(
         .filter(|c| !c.primary_key)
         .collect();
 
-    // ── Changes struct ──
-    out.push_str("#[derive(Debug, Clone)]\n");
-    out.push_str(&format!("pub struct {} {{\n", changes_struct));
-    for col in &updatable_columns {
-        let inner_type = column_to_rust_type(col, &table.name, registry, schema);
-        out.push_str(&format!(
-            "    pub {}: nextsql_backend_rust_runtime::UpdateField<{}>,\n",
-            to_snake_case(&col.name),
-            inner_type,
-        ));
-    }
-    out.push_str("}\n\n");
+    // ── Changes struct (skip if already generated for this table) ──
+    if generated_utility_types.insert(changes_struct.clone()) {
+        out.push_str("#[derive(Debug, Clone)]\n");
+        out.push_str(&format!("pub struct {} {{\n", changes_struct));
+        for col in &updatable_columns {
+            let inner_type = column_to_rust_type(col, &table.name, registry, schema);
+            out.push_str(&format!(
+                "    pub {}: nextsql_backend_rust_runtime::UpdateField<{}>,\n",
+                to_snake_case(&col.name),
+                inner_type,
+            ));
+        }
+        out.push_str("}\n\n");
 
-    // ── Default impl ──
-    out.push_str(&format!("impl Default for {} {{\n", changes_struct));
-    out.push_str("    fn default() -> Self {\n");
-    out.push_str("        Self {\n");
-    for col in &updatable_columns {
-        out.push_str(&format!(
-            "            {}: nextsql_backend_rust_runtime::UpdateField::Unchanged,\n",
-            to_snake_case(&col.name),
-        ));
+        // ── Default impl ──
+        out.push_str(&format!("impl Default for {} {{\n", changes_struct));
+        out.push_str("    fn default() -> Self {\n");
+        out.push_str("        Self {\n");
+        for col in &updatable_columns {
+            out.push_str(&format!(
+                "            {}: nextsql_backend_rust_runtime::UpdateField::Unchanged,\n",
+                to_snake_case(&col.name),
+            ));
+        }
+        out.push_str("        }\n");
+        out.push_str("    }\n");
+        out.push_str("}\n\n");
     }
-    out.push_str("        }\n");
-    out.push_str("    }\n");
-    out.push_str("}\n\n");
 
     // ── Params struct ──
     // Non-updatable args get normal types, the updatable arg gets the Changes struct type.

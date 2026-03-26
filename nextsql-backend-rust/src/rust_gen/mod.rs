@@ -227,11 +227,12 @@ pub fn generate_rust_file_full(module: &Module, schema: &DatabaseSchema, skip_va
     // First pass: generate queries/mutations into a buffer, collecting model table names
     let mut body = String::new();
     let mut model_tables: HashSet<String> = HashSet::new();
+    let mut generated_utility_types: HashSet<String> = HashSet::new();
 
     for toplevel in &module.toplevels {
         match toplevel {
             TopLevel::Query(q) => generate_query(&mut body, q, schema, &mut model_tables, &registry, &rel_registry, &mut errors, &input_registry),
-            TopLevel::Mutation(m) => generate_mutation(&mut body, m, schema, &mut model_tables, &registry, &rel_registry, naming, &input_registry),
+            TopLevel::Mutation(m) => generate_mutation(&mut body, m, schema, &mut model_tables, &registry, &rel_registry, naming, &input_registry, &mut generated_utility_types),
             // With, Relation, ValType, and Input are not directly translated to Rust code here
             TopLevel::With(_) | TopLevel::Relation(_) | TopLevel::ValType(_) | TopLevel::Input(_) => {}
         }

@@ -1,4 +1,28 @@
-/// Convert camelCase to snake_case.
+/// Check if a string is a Rust reserved keyword that requires `r#` escaping.
+fn is_rust_keyword(s: &str) -> bool {
+    matches!(
+        s,
+        "as" | "async" | "await" | "break" | "const" | "continue" | "crate" | "dyn" | "else"
+            | "enum" | "extern" | "false" | "fn" | "for" | "if" | "impl" | "in" | "let"
+            | "loop" | "match" | "mod" | "move" | "mut" | "pub" | "ref" | "return" | "self"
+            | "Self" | "static" | "struct" | "super" | "trait" | "true" | "type" | "unsafe"
+            | "use" | "where" | "while"
+            // Reserved for future use
+            | "abstract" | "become" | "box" | "do" | "final" | "macro" | "override" | "priv"
+            | "typeof" | "unsized" | "virtual" | "yield" | "try"
+    )
+}
+
+/// Escape a Rust identifier with `r#` prefix if it is a reserved keyword.
+pub(super) fn escape_rust_keyword(s: String) -> String {
+    if is_rust_keyword(&s) {
+        format!("r#{}", s)
+    } else {
+        s
+    }
+}
+
+/// Convert camelCase to snake_case, escaping Rust reserved keywords with `r#`.
 pub(super) fn to_snake_case(s: &str) -> String {
     let mut result = String::new();
     for (i, ch) in s.chars().enumerate() {
@@ -11,7 +35,7 @@ pub(super) fn to_snake_case(s: &str) -> String {
             result.push(ch);
         }
     }
-    result
+    escape_rust_keyword(result)
 }
 
 /// Convert camelCase to PascalCase (just capitalise the first letter).
