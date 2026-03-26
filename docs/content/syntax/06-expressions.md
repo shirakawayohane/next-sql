@@ -117,6 +117,17 @@ Used within `.aggregate()` or `.having()`:
 )
 ```
 
+### Aggregate Filter
+
+Append `.filter(condition)` to an aggregate function to apply a conditional filter before aggregating. Only rows matching the condition are included in the computation.
+
+```nsql
+.aggregate(
+  active_count: COUNT(users.id).filter(users.is_active == true),
+  paid_total: SUM(orders.amount).filter(orders.status == "paid")
+)
+```
+
 ## Subqueries
 
 Subqueries are wrapped in `$()`:
@@ -169,18 +180,6 @@ query getUser($id: uuid, $includeEmail: bool, $includePhone: bool) {
     when($includeEmail, users.email),
     when($includePhone, users.phone)
   )
-}
-```
-
-### switch / case
-
-Pattern matching in expressions:
-
-```nsql
-switch(users.status) {
-  case "active": "Active User"
-  case "inactive": "Inactive User"
-  default: "Unknown"
 }
 ```
 

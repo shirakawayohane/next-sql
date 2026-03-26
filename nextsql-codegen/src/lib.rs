@@ -4,7 +4,7 @@ use nextsql_core::schema::DatabaseSchema;
 
 /// Version of nextsql-backend-rust-runtime to reference in generated Cargo.toml.
 /// Kept in sync with workspace version by release-all.yml.
-const RUNTIME_CRATE_VERSION: &str = "0.3.3";
+const RUNTIME_CRATE_VERSION: &str = "0.4.3";
 
 pub struct CodegenConfig {
     /// Source directory containing .nsql files

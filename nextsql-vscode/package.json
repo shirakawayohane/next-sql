@@ -2,7 +2,7 @@
   "name": "nextsql-syntax",
   "displayName": "NextSQL Language Support",
   "description": "Syntax highlighting and language server for NextSQL language",
-  "version": "0.3.4",
+  "version": "0.4.3",
   "publisher": "instansys",
   "license": "MIT",
   "repository": {
