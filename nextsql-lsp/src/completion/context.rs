@@ -267,7 +267,7 @@ fn is_in_join_method_context(text: &str) -> bool {
     // Check for alias = context
     if text.contains("alias") && text.contains("=") {
         if let Some(equals_pos) = text.rfind('=') {
-            let after_equals = &text[equals_pos + 1..].trim();
+            let after_equals = text[equals_pos + 1..].trim();
             // Check if we have a simple identifier after = (no dots, parentheses, etc.)
             if after_equals.chars().all(|c| c.is_alphanumeric() || c == '_') && !after_equals.is_empty() {
                 eprintln!("LSP: Found alias = context");

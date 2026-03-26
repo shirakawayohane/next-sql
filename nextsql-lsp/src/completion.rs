@@ -119,7 +119,6 @@ impl<'a> CompletionProvider<'a> {
         });
 
         let mut best_match: Option<regex::Captures> = None;
-        let mut best_line = 0usize;
 
         // Scan from beginning to cursor to find the last (closest) declaration
         let text_up_to_cursor: String = lines[..=cursor_line.min(lines.len() - 1)].join("\n");
@@ -129,12 +128,10 @@ impl<'a> CompletionProvider<'a> {
             let line_num = text_up_to_cursor[..match_start].matches('\n').count();
             if line_num <= cursor_line {
                 best_match = Some(cap);
-                best_line = line_num;
             }
         }
 
         let mut completions = Vec::new();
-        let _ = best_line; // used for finding the closest match
 
         if let Some(cap) = best_match {
             let args_str = &cap[1];
@@ -439,7 +436,6 @@ mod tests {
     #[test]
     fn test_table_field_detection() {
         let text = "query test() { from(users) .where(users.";
-        let _provider = CompletionProvider::new(text);
 
         // テーブル名の後のドット
         let context =
