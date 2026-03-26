@@ -1,0 +1,5 @@
+mutation insertUsers($users: [Insertable<Users>]) {
+  insert(users)
+  .values($users)
+  .returning(*)
+}

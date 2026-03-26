@@ -1425,6 +1425,156 @@ query countOrdersByStatus() {
     }
 
     #[test]
+    fn test_generate_batch_insertable_mutation() {
+        let schema = users_schema();
+
+        // mutation insertUsers($users: [Insertable<Users>]) {
+        //   insert(users)
+        //   .values($users)
+        //   .returning(*)
+        // }
+        let module = Module {
+            toplevels: vec![TopLevel::Mutation(Mutation {
+                decl: MutationDecl {
+                    name: "insertUsers".to_string(),
+                    arguments: vec![Argument {
+                        name: "users".to_string(),
+                        typ: Type::Array(Box::new(Type::Utility(UtilityType::Insertable(
+                            Insertable(Box::new(Type::UserDefined("users".to_string()))),
+                        )))),
+                    }],
+                },
+                body: MutationBody {
+                    items: vec![MutationBodyItem::Mutation(MutationStatement::Insert(
+                        Insert {
+                            into: Target {
+                                name: "users".to_string(),
+                                span: None,
+                            },
+                            values: vec![Expression::Atomic(AtomicExpression::Variable(
+                                Variable {
+                                    name: "users".to_string(),
+                                    span: None,
+                                },
+                            ))],
+                            on_conflict: None,
+                            returning: Some(vec![Column::Wildcard(None)]),
+                        },
+                    ))],
+                },
+            })],
+        };
+
+        let result = generate_rust_file(&module, &schema).content;
+
+        // Should generate the insertable struct
+        assert!(
+            result.contains("pub struct InsertUserParams {"),
+            "Should generate InsertUserParams struct: {}",
+            result
+        );
+
+        // Function should take a slice parameter
+        assert!(
+            result.contains("params: &[InsertUserParams]"),
+            "Should take slice parameter: {}",
+            result
+        );
+
+        // Should contain batch insert logic
+        assert!(
+            result.contains("value_groups"),
+            "Should build value_groups for batch insert: {}",
+            result
+        );
+
+        // Should have empty check
+        assert!(
+            result.contains("if params.is_empty()"),
+            "Should check for empty params: {}",
+            result
+        );
+
+        // Should build dynamic SQL with VALUES
+        assert!(
+            result.contains("INSERT INTO users"),
+            "Should generate INSERT INTO users: {}",
+            result
+        );
+
+        // Should contain RETURNING
+        assert!(
+            result.contains("RETURNING *"),
+            "Should contain RETURNING clause: {}",
+            result
+        );
+
+        // Should use User model since it's a wildcard return (singularized table name)
+        assert!(
+            result.contains("pub struct User {"),
+            "Should use User model for wildcard RETURNING: {}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_generate_batch_insertable_mutation_without_returning() {
+        let schema = users_schema();
+
+        // mutation insertUsers($users: [Insertable<Users>]) {
+        //   insert(users)
+        //   .values($users)
+        // }
+        let module = Module {
+            toplevels: vec![TopLevel::Mutation(Mutation {
+                decl: MutationDecl {
+                    name: "insertUsers".to_string(),
+                    arguments: vec![Argument {
+                        name: "users".to_string(),
+                        typ: Type::Array(Box::new(Type::Utility(UtilityType::Insertable(
+                            Insertable(Box::new(Type::UserDefined("users".to_string()))),
+                        )))),
+                    }],
+                },
+                body: MutationBody {
+                    items: vec![MutationBodyItem::Mutation(MutationStatement::Insert(
+                        Insert {
+                            into: Target {
+                                name: "users".to_string(),
+                                span: None,
+                            },
+                            values: vec![Expression::Atomic(AtomicExpression::Variable(
+                                Variable {
+                                    name: "users".to_string(),
+                                    span: None,
+                                },
+                            ))],
+                            on_conflict: None,
+                            returning: None,
+                        },
+                    ))],
+                },
+            })],
+        };
+
+        let result = generate_rust_file(&module, &schema).content;
+
+        // Function should return u64
+        assert!(
+            result.contains("Result<u64, Box<dyn std::error::Error + Send + Sync>>"),
+            "Should return u64 without RETURNING: {}",
+            result
+        );
+
+        // Should use execute, not query
+        assert!(
+            result.contains("client.execute("),
+            "Should use execute without RETURNING: {}",
+            result
+        );
+    }
+
+    #[test]
     fn test_only_used_enums_are_generated() {
         use nextsql_core::schema::EnumSchema;
 

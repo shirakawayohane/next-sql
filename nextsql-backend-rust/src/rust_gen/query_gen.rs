@@ -33,6 +33,11 @@ fn determine_param_style(args: &[Argument]) -> ParamStyle {
         match &arg.typ {
             Type::Utility(UtilityType::Insertable(_)) => return ParamStyle::Insertable,
             Type::Utility(UtilityType::ChangeSet(_)) => return ParamStyle::ChangeSet,
+            Type::Array(inner) => {
+                if let Type::Utility(UtilityType::Insertable(_)) = inner.as_ref() {
+                    return ParamStyle::Insertable;
+                }
+            }
             _ => {}
         }
     }
@@ -184,6 +189,16 @@ pub(super) fn generate_mutation(out: &mut String, mutation: &Mutation, schema: &
             MutationBodyItem::Mutation(stmt) => {
                 match stmt {
                     MutationStatement::Insert(insert) => {
+                        // Check if this is a batch [Insertable<T>] mutation
+                        let batch_info = find_batch_insertable_param(&mutation.decl.arguments);
+                        if let Some((var_name, table_name)) = batch_info {
+                            generate_batch_insertable_mutation(
+                                out, mutation, insert, &var_name, &table_name,
+                                schema, model_tables, registry, rel_registry, naming,
+                            );
+                            continue;
+                        }
+
                         // Check if this is an Insertable<T> mutation
                         let insertable_info = find_insertable_param(&mutation.decl.arguments);
                         if let Some((var_name, table_name)) = insertable_info {
@@ -342,6 +357,21 @@ pub(super) fn find_insertable_param(args: &[Argument]) -> Option<(String, String
         if let Type::Utility(UtilityType::Insertable(Insertable(inner))) = &arg.typ {
             if let Type::UserDefined(table_name) = inner.as_ref() {
                 return Some((arg.name.clone(), table_name.clone()));
+            }
+        }
+    }
+    None
+}
+
+/// Check if any parameter is `[Insertable<table>]` (batch insert).
+/// Returns Some((variable_name, table_name)) if found.
+pub(super) fn find_batch_insertable_param(args: &[Argument]) -> Option<(String, String)> {
+    for arg in args {
+        if let Type::Array(inner) = &arg.typ {
+            if let Type::Utility(UtilityType::Insertable(Insertable(table_type))) = inner.as_ref() {
+                if let Type::UserDefined(table_name) = table_type.as_ref() {
+                    return Some((arg.name.clone(), table_name.clone()));
+                }
             }
         }
     }
@@ -592,6 +622,165 @@ pub(super) fn generate_insertable_mutation(
     } else {
         out.push_str(&format!(
             "    let sql = format!(\"INSERT INTO {} ({{}}) VALUES ({{}})\", columns.join(\", \"), placeholders.join(\", \"));\n",
+            insertable_table_name,
+        ));
+    }
+
+    // Execute
+    if has_returning {
+        let row_type = effective_row.as_ref().unwrap();
+        out.push_str("    let rows = client.query(&sql, &bind_params).await?;\n");
+        out.push_str(&format!(
+            "    rows.iter().map(|row| {}::from_row(row)).collect()\n",
+            row_type,
+        ));
+    } else {
+        out.push_str("    let count = client.execute(&sql, &bind_params).await?;\n");
+        out.push_str("    Ok(count)\n");
+    }
+    out.push_str("}\n\n");
+}
+
+// ── Batch Insertable (dynamic multi-row INSERT) codegen ──────────────────
+
+/// Generate the Insertable struct (shared with single-insert) and a batch INSERT function
+/// that takes `&[InsertableStruct]` and builds a multi-row VALUES clause dynamically.
+pub(super) fn generate_batch_insertable_mutation(
+    out: &mut String,
+    mutation: &Mutation,
+    insert: &Insert,
+    _insertable_var_name: &str,
+    insertable_table_name: &str,
+    schema: &DatabaseSchema,
+    model_tables: &mut HashSet<String>,
+    registry: &ValTypeRegistry,
+    _rel_registry: &sql_gen::RelationRegistry,
+    naming: &NamingConfig,
+) {
+    let name = &mutation.decl.name;
+    let fn_name = to_snake_case(name);
+    let pascal = to_pascal_case(name);
+    let row_struct = format!("{}Row", pascal);
+
+    let table = match schema.get_table(insertable_table_name) {
+        Some(t) => t,
+        None => return,
+    };
+
+    let table_pascal = table_name_to_model_name(insertable_table_name);
+    let insertable_struct = naming.insert_struct_name(&table_pascal);
+
+    // Determine insertable columns (exclude auto-generated PKs)
+    let insertable_columns: Vec<&nextsql_core::schema::ColumnSchema> = table
+        .columns
+        .iter()
+        .filter(|c| !(c.primary_key && c.has_default))
+        .collect();
+
+    // ── Insertable struct (same as single-insert) ──
+    out.push_str("#[derive(Debug, Clone)]\n");
+    out.push_str(&format!("pub struct {} {{\n", insertable_struct));
+    for col in &insertable_columns {
+        let base_type = column_to_rust_type(col, &table.name, registry, schema);
+        let is_optional = col.nullable || col.has_default;
+        if is_optional {
+            if base_type.starts_with("Option<") {
+                out.push_str(&format!("    pub {}: {},\n", to_snake_case(&col.name), base_type));
+            } else {
+                out.push_str(&format!("    pub {}: Option<{}>,\n", to_snake_case(&col.name), base_type));
+            }
+        } else {
+            out.push_str(&format!("    pub {}: {},\n", to_snake_case(&col.name), base_type));
+        }
+    }
+    out.push_str("}\n\n");
+
+    // ── Determine return type ──
+    let has_returning = insert.returning.is_some();
+    let effective_row = if let Some(ref returning) = insert.returning {
+        let use_model = is_simple_wildcard_returning(returning, &insert.into.name);
+        if let Some(ref tbl) = use_model {
+            model_tables.insert(tbl.clone());
+            Some(table_name_to_model_name(tbl))
+        } else {
+            let fields = resolve_returning_fields(returning, &insert.into.name, schema, registry);
+            emit_row_struct(out, &row_struct, &fields);
+            Some(row_struct.clone())
+        }
+    } else {
+        None
+    };
+
+    // ── Batch INSERT function ──
+    if has_returning {
+        let row_type = effective_row.as_ref().unwrap();
+        out.push_str(&format!(
+            "pub async fn {}(\n    client: &(impl nextsql_backend_rust_runtime::QueryExecutor + ?Sized),\n    params: &[{}],\n) -> Result<Vec<{}>, Box<dyn std::error::Error + Send + Sync>> {{\n",
+            fn_name, insertable_struct, row_type,
+        ));
+    } else {
+        out.push_str(&format!(
+            "pub async fn {}(\n    client: &(impl nextsql_backend_rust_runtime::QueryExecutor + ?Sized),\n    params: &[{}],\n) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {{\n",
+            fn_name, insertable_struct,
+        ));
+    }
+
+    // Early return for empty slice
+    if has_returning {
+        out.push_str("    if params.is_empty() {\n        return Ok(Vec::new());\n    }\n");
+    } else {
+        out.push_str("    if params.is_empty() {\n        return Ok(0);\n    }\n");
+    }
+
+    // Column names array
+    out.push_str("    let columns: &[&str] = &[");
+    let col_names: Vec<String> = insertable_columns.iter().map(|c| format!("\"{}\"", c.name)).collect();
+    out.push_str(&col_names.join(", "));
+    out.push_str("];\n");
+
+    // Number of columns
+    out.push_str(&format!("    let num_cols = {}usize;\n", insertable_columns.len()));
+
+    // Build bind params and value groups
+    out.push_str("    let mut bind_params: Vec<&dyn nextsql_backend_rust_runtime::ToSqlParam> = Vec::new();\n");
+    out.push_str("    let mut value_groups: Vec<String> = Vec::new();\n");
+    out.push_str("    for (i, item) in params.iter().enumerate() {\n");
+    out.push_str("        let offset = i * num_cols;\n");
+    out.push_str("        let placeholders: Vec<String> = (1..=num_cols)\n");
+    out.push_str("            .map(|j| format!(\"${}\", offset + j))\n");
+    out.push_str("            .collect();\n");
+    out.push_str("        value_groups.push(format!(\"({})\", placeholders.join(\", \")));\n");
+
+    // Push each column value
+    for col in &insertable_columns {
+        let col_snake = to_snake_case(&col.name);
+        let is_optional = col.nullable || col.has_default;
+        if is_optional {
+            out.push_str(&format!("        bind_params.push(&item.{});\n", col_snake));
+        } else {
+            out.push_str(&format!("        bind_params.push(&item.{});\n", col_snake));
+        }
+    }
+
+    out.push_str("    }\n");
+
+    // Build returning clause
+    let returning_sql = if let Some(ref returning) = insert.returning {
+        let cols: Vec<String> = returning.iter().map(|c| format_column_sql(c)).collect();
+        Some(cols.join(", "))
+    } else {
+        None
+    };
+
+    // Build SQL
+    if let Some(ref ret_sql) = returning_sql {
+        out.push_str(&format!(
+            "    let sql = format!(\"INSERT INTO {} ({{}}) VALUES {{}} RETURNING {}\", columns.join(\", \"), value_groups.join(\", \"));\n",
+            insertable_table_name, ret_sql,
+        ));
+    } else {
+        out.push_str(&format!(
+            "    let sql = format!(\"INSERT INTO {} ({{}}) VALUES {{}}\", columns.join(\", \"), value_groups.join(\", \"));\n",
             insertable_table_name,
         ));
     }
