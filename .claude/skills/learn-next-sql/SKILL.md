@@ -21,20 +21,38 @@ query findUsers($minAge: i32, $limit: i32?) {
 
 ### Clauses (chained with `.`)
 
-- `from(table)` - FROM clause (required). Supports explicit joins via method calls on the table.
+**IMPORTANT: Clause ordering is strict and enforced by the grammar.** Clauses must appear in the following order. Violating this order causes a compile error.
+
+**Phase 1: Source & Filtering** (after `from()`, before `.select()`)
+- `from(table)` - FROM clause (required, always first). Supports explicit joins via method calls on the table.
 - `.where(condition)` - WHERE filter.
-- `.select(expr, ...)` - SELECT columns. Supports `alias: expr` for aliased columns and `table.*` for all columns.
-- `.distinct()` - SELECT DISTINCT.
 - `.groupBy(expr, ...)` - GROUP BY.
-- `.having(condition)` - HAVING (used after groupBy).
 - `.aggregate(alias: expr, ...)` - Named aggregation columns.
+- `.distinct()` - SELECT DISTINCT.
+- `.having(condition)` - HAVING (used after groupBy).
+- `.when(condition, clause)` - Conditional clause application (dynamic queries).
+
+**Phase 2: Projection** (required, comes after filtering clauses)
+- `.select(expr, ...)` - SELECT columns. Supports `alias: expr` for aliased columns and `table.*` for all columns.
+
+**Phase 3: Ordering & Pagination** (after `.select()`)
 - `.orderBy(col.asc(), col.desc())` - ORDER BY with direction methods.
 - `.limit(n)` - LIMIT.
 - `.offset(n)` - OFFSET.
-- `.when(condition, clause)` - Conditional clause application (dynamic queries).
+- `.forUpdate()` - SELECT FOR UPDATE.
+
+**Phase 4: Set Operations** (after everything else)
 - `.union(from(...).select(...))` - UNION.
 - `.unionAll(from(...).select(...))` - UNION ALL.
-- `.forUpdate()` - SELECT FOR UPDATE.
+
+Example of correct ordering:
+```nsql
+from(users)
+.where(users.age >= 18)      // Phase 1: filtering
+.select(users.id, users.name) // Phase 2: projection
+.orderBy(users.name.asc())    // Phase 3: ordering (MUST come after .select())
+.limit(10)                     // Phase 3: pagination
+```
 
 ### Explicit JOINs
 
