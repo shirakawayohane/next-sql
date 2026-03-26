@@ -603,10 +603,10 @@ fn resolve_schema(
                 if let Some(ref db_url) = config.database_url {
                     if !db_url.is_empty() {
                         let cp = cache_path.clone();
-                        match tokio::task::block_in_place(|| {
+                        match (|| -> Result<_, Box<dyn std::error::Error>> {
                             let mut client = connect_database(db_url)?;
                             resolve_schema_with_cache(&mut client, &cp)
-                        }) {
+                        })() {
                             Ok(schema) => {
                                 return Ok(schema);
                             }
@@ -650,7 +650,7 @@ fn resolve_schema(
 }
 
 /// Compare DB fingerprint against cache. If unchanged, use cache; otherwise full-load and update.
-/// Must be called within tokio::task::block_in_place.
+/// Called from synchronous context to resolve schema from database.
 fn resolve_schema_with_cache(
     client: &mut postgres::Client,
     cache_path: &Option<PathBuf>,
