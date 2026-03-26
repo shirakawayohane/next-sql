@@ -1,4 +1,0 @@
-query test() {
-  from(users)
-  .select(users.*)
-}

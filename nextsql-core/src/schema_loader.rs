@@ -52,7 +52,6 @@ impl SchemaLoader {
         for row in rows {
             let table_name: String = row.get(0);
             let column_name: String = row.get(1);
-            let _type_name: String = row.get(2);
             let is_nullable: bool = row.get(3);
             let column_default: Option<String> = row.get(4);
             let is_primary_key: bool = row.get(5);

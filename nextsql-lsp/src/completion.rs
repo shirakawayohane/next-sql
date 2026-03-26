@@ -29,15 +29,6 @@ pub struct CompletionProvider<'a> {
 }
 
 impl<'a> CompletionProvider<'a> {
-    #[allow(dead_code)]
-    pub fn new(text: &'a str) -> Self {
-        Self {
-            text,
-            schema_cache: None,
-            file_uri: None,
-        }
-    }
-
     pub fn with_schema_cache(
         text: &'a str,
         schema_cache: Arc<SchemaCache>,
@@ -336,6 +327,17 @@ impl<'a> ModelCompletionProvider for CompletionProvider<'a> {
     
     fn get_file_uri(&self) -> Option<&str> {
         self.file_uri.as_deref()
+    }
+}
+
+#[cfg(test)]
+impl<'a> CompletionProvider<'a> {
+    pub fn new(text: &'a str) -> Self {
+        Self {
+            text,
+            schema_cache: None,
+            file_uri: None,
+        }
     }
 }
 
