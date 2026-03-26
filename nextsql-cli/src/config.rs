@@ -4,11 +4,11 @@ use std::fs;
 use std::path::Path;
 
 pub trait NextSqlConfigExt {
-    fn init_project<P: AsRef<Path>>(path: P) -> Result<(), Box<dyn std::error::Error>>;
+    fn init_project<P: AsRef<Path>>(path: P, install_skill: bool) -> Result<(), Box<dyn std::error::Error>>;
 }
 
 impl NextSqlConfigExt for NextSqlConfig {
-    fn init_project<P: AsRef<Path>>(path: P) -> Result<(), Box<dyn std::error::Error>> {
+    fn init_project<P: AsRef<Path>>(path: P, install_skill: bool) -> Result<(), Box<dyn std::error::Error>> {
         // ディレクトリが存在しない場合は作成
         if !path.as_ref().exists() {
             std::fs::create_dir_all(&path)?;
@@ -78,9 +78,11 @@ target_directory = "."
         println!("Initialized NextSQL project at {}", path.as_ref().display());
 
         // .claude ディレクトリを探して、見つかればスキルを配置
-        let absolute_path = fs::canonicalize(path.as_ref())?;
-        if let Some(claude_dir) = find_claude_dir(&absolute_path) {
-            install_skill(&claude_dir)?;
+        if install_skill {
+            let absolute_path = fs::canonicalize(path.as_ref())?;
+            if let Some(claude_dir) = find_claude_dir(&absolute_path) {
+                install_skill_files(&claude_dir)?;
+            }
         }
 
         Ok(())
@@ -108,12 +110,18 @@ fn find_claude_dir(start: &Path) -> Option<std::path::PathBuf> {
     None
 }
 
-fn install_skill(claude_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
+fn install_skill_files(claude_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
     let skill_dir = claude_dir.join("skills/learn-next-sql");
+    let skill_path = skill_dir.join("SKILL.md");
+
+    println!(
+        "Note: Installing Claude Code skill for NextSQL at {}",
+        skill_path.display()
+    );
+
     fs::create_dir_all(&skill_dir)?;
 
     let skill_content = include_str!(concat!(env!("OUT_DIR"), "/skill.md"));
-    let skill_path = skill_dir.join("SKILL.md");
     fs::write(&skill_path, skill_content)?;
 
     println!("Installed Claude Code skill at {}", skill_path.display());

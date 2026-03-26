@@ -27,6 +27,9 @@ enum Commands {
     Init {
         /// Project directory path (default: current directory)
         dir: Option<PathBuf>,
+        /// Skip automatic Claude Code skill installation
+        #[arg(long)]
+        no_skill: bool,
     },
     /// Migration commands
     Migration {
@@ -186,8 +189,8 @@ async fn main() {
     };
 
     match cli.command {
-        Commands::Init { dir } => {
-            if let Err(e) = handle_init_command(dir) {
+        Commands::Init { dir, no_skill } => {
+            if let Err(e) = handle_init_command(dir, no_skill) {
                 eprintln!("Error: {}", e);
                 std::process::exit(1);
             }
@@ -237,9 +240,9 @@ async fn main() {
     }
 }
 
-fn handle_init_command(dir: Option<PathBuf>) -> Result<(), Box<dyn std::error::Error>> {
+fn handle_init_command(dir: Option<PathBuf>, no_skill: bool) -> Result<(), Box<dyn std::error::Error>> {
     let target_dir = dir.unwrap_or_else(|| PathBuf::from("."));
-    NextSqlConfig::init_project(target_dir)
+    NextSqlConfig::init_project(target_dir, !no_skill)
 }
 
 fn handle_validate_config_command(config_path: PathBuf) -> Result<(), Box<dyn std::error::Error>> {
